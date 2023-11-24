@@ -13,8 +13,7 @@ def center2pelvis(keypoints_2d, pelvis_i):
 def dist2pelvis(keypoints_2d_in_view, pelvis_i):
     return torch.mean(torch.cat([
         torch.norm(
-            keypoints_2d_in_view[i] -\
-            keypoints_2d_in_view[pelvis_i]
+            keypoints_2d_in_view[i] - keypoints_2d_in_view[pelvis_i]
         ).unsqueeze(0)
         for i in range(keypoints_2d_in_view.shape[0])
         if i != pelvis_i

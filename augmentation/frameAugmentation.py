@@ -10,14 +10,14 @@ ia.seed(1)
 
 
 # Add blur to simulate out of focus
-def defocus(self, frame):
+def defocus(frame):
     aug = iaa.imgcorruptlike.DefocusBlur(severity=1)
 
     return aug(image=frame)
 
 
 # Add underexposure
-def underexposure(self, frame):
+def underexposure(frame):
     aug = iaa.GammaContrast(0.5)
 
     return aug(image=frame)
@@ -31,14 +31,14 @@ def overexposure(self, frame):
 
 
 # Add motion blur
-def motion_blur(self, frame):
+def motion_blur(frame):
     aug = iaa.imgcorruptlike.MotionBlur(severity=1)
 
     return aug(image=frame)
 
 
 # Create moving occlusion of 10-20% of the image size and fill it with gaussian noise.
-def occlusion(self, frame):
+def occlusion(frame):
     aug = iaa.Cutout(size=(0.1, 0.2), fill_mode="gaussian", fill_per_channel=True)
 
     return aug(image=frame)

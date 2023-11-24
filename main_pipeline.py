@@ -1,8 +1,9 @@
 import wandb
 import numpy as np
-import augmentation.calibrationAugmentation as caliaug
-import augmentation.frameAugmentation as frameaug
-import skeletonMorphing.applySkeletonMorphing as skeletonmorph
+import cv2
+import augmentation.calibrationAugmentation as caliAug
+import augmentation.frameAugmentation as frameAug
+import skeletonMorphing.applySkeletonMorphing as skeletonMorph
 
 
 class Framework:
@@ -41,7 +42,7 @@ class Framework:
                     'values': [True, False]
                 },
                 'background': {
-                    'values': ['home', 'hospital', 'outdoor', 'people']
+                    'values': ['none', 'home', 'hospital', 'outdoor', 'people']
                 },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
@@ -77,40 +78,79 @@ class Framework:
         # Start sweep. Might should be at the end... not sure yet
         wandb.agent(self.sweep_id, function=Framework.main())
 
+    def augment_frames(self, frames):
+        frames_aug = []
+        for frame in frames:
+            if self.sweep_config['background'] != 'none':
+                frame = self.augmenter.BackgroundChanger(frame, self.sweep_config['background'])
+            if self.sweep_config['motion_blur']:
+                frame = frameAug.motion_blur(frame)
+            if self.sweep_config['occlusion']:
+                frame = frameAug.occlusion(frame)
+            if self.sweep_config['defocus']:
+                frame = frameAug.defocus(frame)
+            if self.sweep_config['underexposure']:
+                frame = frameAug.underexposure(frame)
 
+            frames_aug.append(frame)
 
-
-
+        return frames_aug
 
     def load_data(self):
-        mov_cat = self.sweep_config['movement']
-        cam = self.sweep_config['cameras']
+        mov_cats = self.sweep_config['movement']
+        cams = self.sweep_config['cameras']
 
-        if mov_cat == 'upper':
+        if mov_cats == 'upper':
             movement_nr = [1, 2, 3, 4];
-        elif mov_cat == 'lower':
+        elif mov_cats == 'lower':
             movement_nr = [5, 6, 7, 8];
-        elif mov_cat == 'complex':
+        elif mov_cats == 'complex':
             movement_nr = [9, 10, 11, 12, 13];
-        elif mov_cat == 'sitting':
+        elif mov_cats == 'sitting':
             movement_nr = [14, 15, 16, 17];
 
-    def augment_frames(self,):
+        # Loop for each chosen movement type
+        for mov_cat in mov_cats:
+            try:
+
+            except:
+                continue
+            # Loop for each iteration
+                for iter in iters:
+                # Loop for each camera
+                    for cam in cams:
+
+        caps = []
+
+        cap = cv2.VideoCapture(input_video_path)
 
 
-    def preprocess_ground_truth(self,):
+        # Desynchronize video streams
+        if self.sweep_config['desynchronizer']:
+            caps = self.cam_desynchronizer.desynchronize(caps)
+
+        caps.append(cap)
+
+        return caps, keypoints
+
+
+
+
+
+    def preprocess_ground_truth(self):
+
 
 
     ## Postprocess keypoints
     # Post processing the predicted keypoints using standard methods.
-    def postprocess_prediction():
+    def postprocess_prediction(self, keypoints):
 
 
 
 
     ## Calculate and log metrics
     # Calculate relevant metrics and log them to wandb.
-    def calculate_log_metrics():
+    def calculate_log_metrics(self):
         # Log whole body metrics
         wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "velocity_error_all": velocity_error,
                    "angular_error_all": angular_error, "rom_all": rom, "cmc_all": cmc})
@@ -149,7 +189,14 @@ class Framework:
 
     # Run inference on the chosen model
     def main(self):
-    run = self.wandb.init()
+        # Initialize video augmentors
+        if self.sweep_config['background'] != 'none':
+            self.augmenter = frameAug.BackgroundChanger()
+
+        if self.sweep_config['desynchronize']:
+            self.cam_desynchronizer = frameAug.CameraDesynchronizer()
+
+        run = self.wandb.init()
     # Open model based on name
 
     # Load video files
