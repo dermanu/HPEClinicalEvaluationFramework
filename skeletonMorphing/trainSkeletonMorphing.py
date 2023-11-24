@@ -1,6 +1,6 @@
 """
 This script trainSkeletonMorphing trains the model modelSkeletonMorphing based on the ground throuth of two different
-datasets.
+dataset.
 The morphing network should be trained one subject of each dataset. Subject one then has to be excluded for all other
 experiments to not include ground truth data.
 It is based on the work of Bastian Wandt (https://github.com/bastianwandt/CanonPose/tree/main and

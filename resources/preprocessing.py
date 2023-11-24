@@ -21,7 +21,7 @@ def dist2pelvis(keypoints_2d_in_view, pelvis_i):
 
 
 def normalize_keypoints(keypoints_2d, pelvis_center_kps, normalization, pelvis_i):
-    """ "divided by its Frobenius norm in the preprocessing" """
+    """ "divided by its Frobenius norm in the dataset_preprocessing" """
 
     batch_size, n_views = keypoints_2d.shape[0], keypoints_2d.shape[1]
 
@@ -136,7 +136,7 @@ def preprocess_extrinsics(self, image, shot, camera_idx, retval_camera):
 
 
 def skeleton_morphing(keypoints_2d_COCO):
-    """Morphing between two skeletons of different datasets and therefore different joint postions"""
+    """Morphing between two skeletons of different dataset and therefore different joint postions"""
     model_skel_morph = torch.load('model_skeleton_morph_S1_gh.pt')
     model_skel_morph.eval()
     keypoints_2d_HM36M = model_skel_morph(keypoints_2d_COCO)
