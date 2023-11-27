@@ -6,7 +6,7 @@ import cv2
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
 from utils import metrics
-from models import mediapipeMono
+from models import mediapipeMono, alphaPoseMono
 
 
 class Framework:
@@ -35,7 +35,7 @@ class Framework:
             "sitting": [14, 15, 16, 17]
         }
 
-        # Defines body segments NOT READY
+        # Defines body segments
         self.body_segments = {
             "left_lower_arm": [16, 14],
             "left_upper_arm": [14, 12],
@@ -199,55 +199,84 @@ class Framework:
         # Log number (n) of frames metrics are based on:
         wandb.log({"n": len(pred_keypoints)})
 
+    def plot_n_log(self, gt_keypoints, pred_keypoints):
+
 
     def preprocess_ground_truth(self, csv_path):
-        # Postprocess keypoints
-        # Post processing the predicted keypoints using standard methods.
+        """
+        Pre-process the ground truth keypoints by first loading them from the csv file and transform them to be comparable
+        with the prediction
+        """
+
         gt_keypoints = []  # Placeholder
+
         return gt_keypoints
 
+    def postprocess_prediction(self, pred_keypoints, smoothing="butterworth", interpolation="akima"):
+        """
+        Post-process the predicted keypoints according to standard methods for real-time applications.
+        1) Interpolation of missing values
+        2) Smoothing of the data stream
+        """
 
-    def postprocess_prediction(selpred_keypoints, smoothing="butterworth", interpolation="akima"):
-        # interpolation
-        # smoothing
+
         return pred_keypoints
-
 
     def main(self):
         """
         Run inference on the chosen model with sweep parameters and log results to wandb project.
         """
 
-        # If multioccular model is used load camera parameter matrix and add noise if specified so.
-        if self.model_type == "multi":
-            p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'], self.sweep_config['decalibration'])
-
         # Load video and csv file paths
-        video_path, csv_path = Framework.load_data_paths()
-        gt_keypoints = preprocess_ground_truth(csv_path)
+        video_paths, csv_paths = Framework.load_data_paths()
 
-        # Open model based on name and run inference
-        if self.model_name == "mediapipe":
-            pred_keypoints, inference_times = mediapipeMono.inference_video(video_path)
-            pred_keypoints = postprocess_prediction(pred_keypoints)
-            self.calculate_log_metrics(gt_keypoints, pred_keypoints, inference_times)
-        # Add more models here
+        # Generate cv2 video API and load respective ground truth keypoints
+        caps = []
+        gt_keypoints_all = []
+        pred_keypoints_all = []
+        inference_times_all = []
 
-        # Load video files
+        # Iterate through all videos specified
+        for movement_iter in video_paths:
+            # Get all specified cameras of the specified movement iteration and create a cv2 capture stream
+            for cam in movement_iter:
+                cap = cv2.VideoCapture(cam)
+                caps.append(cap)
+                # Get ground truth keypoints
+                gt_keypoints = self.preprocess_ground_truth(csv_paths)
 
-        #
 
-        # Run inference
+            # Open model based on name and run inference
+            # Monooccular models
+            if self.model_type == "mono":
+                if self.model_name == "mediapipe":
+                    pred_keypoints, inference_times = mediapipeMono.inference_video(caps)
+                if self.model_name == "alphapose":
+                        pred_keypoints, inference_times = alphaPoseMono.inference_video(caps)
 
-        # Desynchronize video streams
-        if self.sweep_config['desynchronizer']:
-            caps = self.cam_desynchronizer.desynchronize(caps)
+            # Multioccular models
+            elif self.model_type == "multi":
+                # Desynchronize video streams
+                if self.sweep_config['desynchronizer']:
+                    caps = self.cam_desynchronizer.desynchronize(caps)
+                # Load camera parameter matrix and add noise if specified so
+                p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'], self.sweep_config['decalibration'])
 
-        caps.append(cap)
+                if self.model_name == "canonpose":
+                    pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
 
-        return caps, keypoints
+            # Do some post-processing on the predicted keypoints
+            pred_keypoints = self.postprocess_prediction(pred_keypoints)
 
-    # Hand it
+            # Collect pred_keypoints for each movement iteration
+            gt_keypoints_all.append[gt_keypoints]
+            pred_keypoints_all.append[pred_keypoints]
+            inference_times_all.append[inference_times]
+
+        # Calculate the metrics, generate plots and log them to wandb
+        self.calculate_log_metrics(gt_keypoints, pred_keypoints, inference_times)
+        self.plot_n_log(gt_keypoints, pred_keypoints)
+
 
     def run(self):
         """

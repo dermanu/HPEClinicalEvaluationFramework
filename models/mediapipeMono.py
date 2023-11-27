@@ -7,15 +7,12 @@ import time
 
 # Currently runs on GPU as per default.
 
-def inference_video(input_video_path, mp_complexity=2, dimensions=3):
+def inference_video(cap, mp_complexity=2, dimensions=3):
     # Initialize MediaPipe Pose
     mp_pose = mp.solutions.pose
     # Model complexity set to 2 for mono-ocular. Minimum detection and tracking confidence set to 0.5 as default.
     pose = mp_pose.Pose(static_image_mode=False, model_complexity=mp_complexity, min_detection_confidence=0.5,
                         min_tracking_confidence=0.5)
-
-    # Open video file
-    cap = cv2.VideoCapture(input_video_path)
 
     keypoints_data = []
     inference_time = []
