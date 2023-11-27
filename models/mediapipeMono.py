@@ -7,7 +7,7 @@ import time
 
 # Currently runs on GPU as per default.
 
-def process_video_mediapipe(input_video_path, mp_complexity=2, dimensions=3):
+def inference_video(input_video_path, mp_complexity=2, dimensions=3):
     # Initialize MediaPipe Pose
     mp_pose = mp.solutions.pose
     # Model complexity set to 2 for mono-ocular. Minimum detection and tracking confidence set to 0.5 as default.
@@ -58,4 +58,4 @@ def process_video_mediapipe(input_video_path, mp_complexity=2, dimensions=3):
     cap.release()
 
     # Return keypoints data to NumPy array
-    return np.array(keypoints_data), inference_time
+    return np.array(keypoints_data), np.array(inference_time)

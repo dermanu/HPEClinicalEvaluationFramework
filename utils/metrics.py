@@ -3,7 +3,7 @@ from scipy import signal
 from sklearn.metrics import auc, r2_score
 
 
-def calculate_mpjpe(target, prediction):
+def calculate_mpjpe(target: object, prediction: object) -> object:
     """
     Doesn't work in combination with skeletal morphing, as the outputs are not scaled correctly.
     input = (batch_size, num_joints, 3)

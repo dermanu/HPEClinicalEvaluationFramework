@@ -24,7 +24,7 @@ def underexposure(frame):
 
 
 # Add overexposure
-def overexposure(self, frame):
+def overexposure(frame):
     aug = iaa.imgcorruptlike.Brightness(severity=2)
 
     return aug(image=frame)

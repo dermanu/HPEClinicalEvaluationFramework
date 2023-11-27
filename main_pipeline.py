@@ -1,28 +1,288 @@
+import argparse
 import os
 import wandb
 import numpy as np
 import cv2
-from utils import cameraCalibrationAugmentation as caliAug
+from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
 from utils import metrics
+from models import mediapipeMono
 
 
 class Framework:
-    def __init__(self, model_name, model_type, dataset_path):
+    def __init__(self):
+        # Initialize some functions
+        self.augmenter = frameAug.BackgroundChanger()
+        self.cam_desynchronizer = frameAug.CameraDesynchronizer()
+        run = wandb.init()
+
+        # Initialize empty global variables
+        self.dataset_path = None
+        self.sweep_config = None
+        self.model_type = None
+        self.model_name = None
+
+        # Participants of dataset used in pipeline
+        self.participants = ['par5', 'par6', 'par7', 'par8', 'par9', 'par10', 'par11', 'par12', 'par14', 'par15',
+                             'par16', 'par17', 'par18', 'par19', 'par20', 'par21', 'par22', 'par23', 'par24', 'par25',
+                             'par26']
+
+        # Defines movement number in dataset related to different movement categories
+        self.movement_category = {
+            "upper": [1, 2, 3, 4],
+            "lower": [5, 6, 7, 8],
+            "complex": [9, 10, 11, 12, 13],
+            "sitting": [14, 15, 16, 17]
+        }
+
+        # Defines body segments NOT READY
+        self.body_segments = {
+            "left_lower_arm": [16, 14],
+            "left_upper_arm": [14, 12],
+            "right_lower_arm": [15, 13],
+            "right_upper_arm": [13, 11],
+            "torso": [11, 12, 23, 24],
+            "left_upper_leg": [24, 26],
+            "left_lower_leg": [32, 30, 28, 26],
+            "right_upper_leg": [23, 25],
+            "right_lower_leg": [31, 29, 27, 25]}
+
+        # Defines segments around each joint to calculate angles (distal to proximal).
+        self.joint_segments = {
+            "right_elbow": [15, 13, 11],
+            "left_elbow": [16, 14, 12],
+            "right_shoulder_1": [13, 11, 12],
+            "right_shoulder_2": [13, 11, 23],
+            "left_shoulder_1": [14, 12, 11],
+            "left_shoulder_2": [14, 12, 24],
+            "torso": [11, 12, 23, 24],
+            "right_hips_1": [25, 23, 24],
+            "right_hips_2": [25, 23, 11],
+            "left_hips_1": [26, 24, 23],
+            "left_hips_2": [26, 24, 12],
+            "right_knee": [23, 25, 27],
+            "left_knee": [24, 26, 28],
+            "right_ankle": [31, 27, 25],
+            "left_ankle": [32, 28, 26]
+        }
+
+    def augment_frames(self, frames):
+        """
+        Augment video frames before being processed by model, according to sweep settings.
+        :param frames: [frame 0, frame 1, ...]
+        :return: [augmented frame 0, augmented frame 1, ...]
+        """
+
+        # Apply augmentation to each frame of input based on settings in sweep_config
+        frames_aug = []
+        for frame in frames:
+            if self.sweep_config['background'] != 'none':
+                frame = self.augmenter.change_background(frame, self.sweep_config['background'])
+            if self.sweep_config['motion_blur']:
+                frame = frameAug.motion_blur(frame)
+            if self.sweep_config['occlusion']:
+                frame = frameAug.occlusion(frame)
+            if self.sweep_config['defocus']:
+                frame = frameAug.defocus(frame)
+            if self.sweep_config['underexposure']:
+                frame = frameAug.underexposure(frame)
+
+            frames_aug.append(frame)
+
+        return frames_aug
+
+    @property
+    def load_data_paths(self):
+        """
+        Loads data paths of the Vizlab dataset. Finds paths of the video and respective csv movement files.
+        :return:
+        video_paths_all = [[cam0, cam1, cam2, ...], [cam1, cam2, cam3, ...], ...]
+        csv_paths_all = [[cam0, cam1, cam2, ...], [cam1, cam2, cam3, ...], ...]
+        """
+
+        # Get relevant parameters from sweep configuration
+        movement_numbers = self.movement_category[self.sweep_config['movement']]
+        participants = self.sweep_config['dataset']
+        cams = self.sweep_config['cameras']
+        string_cams = list(map(str, cams))
+        iterations = np.arange(1, 11)
+
+        # Loop through all the video and csv files and extract the for the sweep relevant ones
+        video_paths_all = []
+        csv_paths_all = []
+
+        for participant in participants:  # Loop through participants
+            folder_path = os.path.join(self.dataset_path, participant)
+            if os.path.isdir(folder_path):  # Check if it's a directory
+                for movement_number in movement_numbers:  # Loop for each chosen movement type
+                    for iteration in iterations:  # Loop for each iteration
+                        video_paths = []  # Reset single iteration arrays
+                        csv_paths = []
+                        for cam in cams:  # Loop for each camera
+                            video_file_name = f"{participant}_Mov{movement_number}_Iter{iteration}_Cam{cam}.avi"
+                            csv_file_name = f"{participant}_Mov{movement_number}_Iter{iteration}_Cam{cam}.csv"
+                            video_file_name = os.path.join(folder_path, video_file_name)
+                            csv_file_name = os.path.join(folder_path, csv_file_name)
+                            # Check if the file names exist
+                            if os.path.isfile(video_file_name):
+                                video_paths.append(video_file_name)
+                            if os.path.isfile(csv_file_name):
+                                csv_paths.append(csv_file_name)
+
+                        # Save all paths of all cameras for each movement iteration. Check if all required camera
+                        # angles are present
+                        cams_video = [filename.split('_')[-1][3:-4] for filename in video_paths]
+                        cams_csv = [filename.split('_')[-1][3:-4] for filename in csv_paths]
+
+                        if set(string_cams).issubset(cams_video):
+                            video_paths_all.append(video_paths)
+                        else:
+                            continue
+
+                        if set(string_cams).issubset(cams_csv):
+                            csv_paths_all.append(csv_paths)
+                        else:
+                            continue
+
+        return video_paths_all, csv_paths_all
+
+    def calculate_log_metrics(self, gt_keypoints, pred_keypoints, inference_times):
+        """
+        Calculate metrics for each sweep and logs them on wandb. Calculates it for the whole body and body segments.
+        :param gt_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
+        :param pred_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
+        :param inference_times: [inference_time0, inference_time1, inference_time2, ]
+        :return:
+        """
+
+        # First we calculate the metrics for all extracted keypoints
+        mpjpe = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
+        pmpjpe = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
+        velocity_error = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
+        acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
+        cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
+        angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
+        rom = metrics.calculate_rom(gt_keypoints, pred_keypoints, self.joint_segments)
+        cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
+
+        # Log whole body metrics
+        wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "velocity_error_all": velocity_error,
+                   "acceleration_error_all": acceleration_error, "cps": cps, "angular_error_all": angular_error,
+                   "rom_all": rom, "cmc_all": cmc})
+
+        # Log metrics for different body segments
+        for segment in self.body_segments:
+            keypoints = self.body_segments[segment]
+            mpjpe = metrics.calculate_mpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            pmpjpe = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            velocity_error = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints)
+            acceleration_error = metrics.mean_acceleration_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            cmc = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
+
+            wandb.log({"mpjpe_" + segment: mpjpe, "pmpjpe_" + segment: pmpjpe,
+                       "velocity_error_" + segment: velocity_error,
+                       "acceleration_error_" + segment: acceleration_error, "cmc_" + segment: cmc})
+
+        # Calculate for each joint separately
+        for joint_name in self.joint_segments:
+            joint = self.joint_segments[joint_name]
+            angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, joint)
+            rom = metrics.calculate_rom(gt_keypoints, pred_keypoints, joint)
+
+            wandb.log({"angular_error_" + joint_name: angular_error, "rom_" + joint_name: rom})
+
+        # Log inference time
+        inference_time_mean = np.mean(inference_times)
+        inference_time_std = np.std(inference_times)
+        wandb.log({"inference_time_mean": inference_time_mean, "inference_time_std": inference_time_std})
+
+        # Log number (n) of frames metrics are based on:
+        wandb.log({"n": len(pred_keypoints)})
+
+
+    def preprocess_ground_truth(self, csv_path):
+        # Postprocess keypoints
+        # Post processing the predicted keypoints using standard methods.
+        gt_keypoints = []  # Placeholder
+        return gt_keypoints
+
+
+    def postprocess_prediction(selpred_keypoints, smoothing="butterworth", interpolation="akima"):
+        # interpolation
+        # smoothing
+        return pred_keypoints
+
+
+    def main(self):
+        """
+        Run inference on the chosen model with sweep parameters and log results to wandb project.
+        """
+
+        # If multioccular model is used load camera parameter matrix and add noise if specified so.
+        if self.model_type == "multi":
+            p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'], self.sweep_config['decalibration'])
+
+        # Load video and csv file paths
+        video_path, csv_path = Framework.load_data_paths()
+        gt_keypoints = preprocess_ground_truth(csv_path)
+
+        # Open model based on name and run inference
+        if self.model_name == "mediapipe":
+            pred_keypoints, inference_times = mediapipeMono.inference_video(video_path)
+            pred_keypoints = postprocess_prediction(pred_keypoints)
+            self.calculate_log_metrics(gt_keypoints, pred_keypoints, inference_times)
+        # Add more models here
+
+        # Load video files
+
+        #
+
+        # Run inference
+
+        # Desynchronize video streams
+        if self.sweep_config['desynchronizer']:
+            caps = self.cam_desynchronizer.desynchronize(caps)
+
+        caps.append(cap)
+
+        return caps, keypoints
+
+    # Hand it
+
+    def run(self):
+        """
+        Get settings from the parser and initiate the sweep with all parameters
+        :return:
+        """
+
+        # Get inputs from command line
+        parser = argparse.ArgumentParser(description="Pipeline to evaluate real-time 3D pose estimation models in"
+                                                     "a clinical context.")
+        # Add command-line arguments
+        parser.add_argument('-model', '--string1', help='Model name: mediapipe, alphapose, ...')
+        parser.add_argument('-cameras', '--string2', help='Model type: mono or multi')
+        parser.add_argument('-dataset', '--directory', help='Path to dataset')
+
+        # Parse command-line arguments
+        args = parser.parse_args()
+
+        # Access the parsed arguments
+        self.model_name = args.string1
+        self.model_type = args.string2
+        self.dataset_path = args.directory
+
         # Sanity check of inputs
-        if model_type not in ['multi', 'mono']:
+        if self.model_type not in ['multi', 'mono']:
             raise ValueError('Choose a valid model type (multi or mono)')
 
-        if model_type == 'mono':
-            if model_name not in ['mediapipe', 'alphapose', 'unknown']:
+        if self.model_type == 'mono':
+            if self.model_name not in ['mediapipe', 'alphapose', 'unknown']:
                 raise ValueError('Choose a valid monooccular model, or change the model type to multi')
-        elif model_type == 'multi':
-                raise ValueError('Choose a valid multioccular model, or change the model type to mono')
+        elif self.model_type == 'multi':
+            raise ValueError('Choose a valid multioccular model, or change the model type to mono')
 
-        if dataset_path is None:
+        if self.dataset_path is None:
             raise ValueError('Dataset path is missing')
-
-        self.dataset_path = dataset_path
 
         participants = ['par5', 'par6', 'par7', 'par8', 'par9', 'par10', 'par11', 'par12', 'par14', 'par15',
                         'par16', 'par17', 'par18', 'par19', 'par20', 'par21', 'par22', 'par23', 'par24', 'par25',
@@ -30,22 +290,22 @@ class Framework:
 
         # Set sweep config to grid search, which iterates over every possible combination
         self.sweep_config = {
-            'name': 'sweep_'+model_type+'_'+model_name,
+            'name': 'sweep_' + self.model_type + '_' + self.model_name,
             'dataset': participants,
             'method': 'grid'}
 
         # Set parameters and values for the sweep
         parameters_dict = {
-            'parameters':{
+            'parameters': {
                 'defocus': {
                     'values': [True, False]
-                    },
+                },
                 'underexposure': {
                     'values': [True, False]
-                    },
+                },
                 'overexposure': {
-                      'values': [True, False]
-                    },
+                    'values': [True, False]
+                },
                 'motion_blur': {
                     'values': [True, False]
                 },
@@ -65,202 +325,33 @@ class Framework:
         }
 
         # If there are multiple cameras updates sweep parameters:
-        if model_type == 'multi':
+        if self.model_type == 'multi':
             # Sweep parameters
             multioccular_parameters = {
-                    'desynchronize': {
-                        'values': [True, False]
-                    },
-                    'decalibration': {
-                        'values': [True, False]
-                    },
-                    'cameras': {
-                      'values': [[4, 0], [3, 2], [5, 1], [4, 2], [0, 4, 3], [0, 2, 3], [5, 4, 1], [0, 4, 3, 2], [0, 5, 4, 3, 2],
-                                 [0, 5, 4, 1, 3, 2]]
-                    }
+                'desynchronize': {
+                    'values': [True, False]
+                },
+                'decalibration': {
+                    'values': [True, False]
+                },
+                'cameras': {
+                    'values': [[4, 0], [3, 2], [5, 1], [4, 2], [0, 4, 3], [0, 2, 3], [5, 4, 1], [0, 4, 3, 2],
+                               [0, 5, 4, 3, 2],
+                               [0, 5, 4, 1, 3, 2]]
+                }
             }
             parameters_dict['parameters'].update(multioccular_parameters)
 
         # Combine the sweep configuration and sweep parameters
-        self.sweep_config.update(parameters_dict)
 
         # Initialize the sweep run
-        self.sweep_id = wandb.sweep(sweep=self.sweep_config,
-                         project='HPE_framework',
-                         description='Clinical Evaluation of different real-time 3D HPE models')
+        sweep_id = wandb.sweep(sweep=self.sweep_config,
+                               project='HPE_framework',
+                               description='Clinical Evaluation of different real-time 3D HPE models')
 
-        # Start sweep. Might should be at the end... not sure yet
-        wandb.agent(self.sweep_id, function=Framework.main())
+        # Start sweep
+        wandb.agent(sweep_id, function=self.main)
 
-    def augment_frames(self, frames):
-        frames_aug = []
-        for frame in frames:
-            if self.sweep_config['background'] != 'none':
-                frame = self.augmenter.BackgroundChanger(frame, self.sweep_config['background'])
-            if self.sweep_config['motion_blur']:
-                frame = frameAug.motion_blur(frame)
-            if self.sweep_config['occlusion']:
-                frame = frameAug.occlusion(frame)
-            if self.sweep_config['defocus']:
-                frame = frameAug.defocus(frame)
-            if self.sweep_config['underexposure']:
-                frame = frameAug.underexposure(frame)
-
-            frames_aug.append(frame)
-
-        return frames_aug
-
-    def load_data_paths(self):
-        participants = self.config.sweep_config['dataset']
-        mov_cats = self.sweep_config['movement']
-        cams = self.sweep_config['cameras']
-        string_cams = list(map(str, cams))
-        iterations = np.arange(1, 11)
-
-        # Translate categories into the respective dataset numbers
-        if mov_cats == 'upper':
-            movement_nr = [1, 2, 3, 4]
-        elif mov_cats == 'lower':
-            movement_nr = [5, 6, 7, 8]
-        elif mov_cats == 'complex':
-            movement_nr = [9, 10, 11, 12, 13]
-        elif mov_cats == 'sitting':
-            movement_nr = [14, 15, 16, 17]
-
-        # Loop through all the video and csv files and extract the for the sweep relevant ones
-        video_paths_all = []
-        csv_paths_all = []
-
-        for participant in participants: # Loop through participants
-            folder_path = os.path.join(self.dataset_path, participant)
-            if os.path.isdir(folder_path): # Check if it's a directory
-                    for mov_cat in mov_cats:  # Loop for each chosen movement type
-                        for iteration in iterations: # Loop for each iteration
-                            video_paths = [] # Reset singel iteration arrays
-                            csv_paths = []
-                            for cam in cams:  # Loop for each camera
-                                video_file_name = f"{participant}_Mov{mov_cat}_Iter{iteration}_Cam{cam}.avi"
-                                csv_file_name = f"{participant}_Mov{mov_cat}_Iter{iteration}_Cam{cam}.csv"
-                                video_file_name = os.path.join(folder_path, video_file_name)
-                                csv_file_name = os.path.join(folder_path, csv_file_name)
-                                # Check if the file names exist
-                                if os.path.isfile(video_file_name):
-                                    video_paths.append(video_file_name)
-                                if os.path.isfile(csv_file_name):
-                                    csv_paths.append(csv_file_name)
-
-                            # Save all paths of all cameras for each movement iteration. Check if all required camera
-                            # angles are present
-                            cams_video = [filename.split('_')[-1][3:-4] for filename in video_paths]
-                            cams_csv = [filename.split('_')[-1][3:-4] for filename in csv_paths]
-
-                            if set(string_cams).issubset(cams_video):
-                                video_paths_all.append(video_paths)
-                            else:
-                                continue
-
-                            if set(string_cams).issubset(cams_csv):
-                                csv_paths_all.append(csv_paths)
-                            else:
-                                continue
-
-        return video_paths_all, csv_paths_all
-
-
-    # Calculate relevant metrics and log them to wandb.
-    def calculate_log_metrics(self, gt_keypoints, pred_keypoints):
-        # First we calculate the metrics for all extracted keypoints
-        mpjpe = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
-        pmpjpe = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
-        velocity_error = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
-        acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
-        cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
-        angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints)
-        rom = metrics.calculate_rom(gt_keypoints, pred_keypoints)
-        cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
-
-        # Log whole body metrics
-        self.wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "velocity_error_all": velocity_error,
-                        "acceleration_error_all": acceleration_error, "cps": cps, "angular_error_all": angular_error,
-                        "rom_all": rom, "cmc_all": cmc})
-
-        # Log metrics for different body
-        segment_names = {
-            "left_lower_arm": [],
-            "left_upper_arm": [],
-            "right_lower_arm": [],
-            "right_upper_arm": [],
-            "torso": [],
-            "left_upper_leg": [],
-            "left_lower_leg": [],
-            "right_upper_leg": [],
-            "right_lower_leg": []}
-
-        for segment in self.segments:
-            points = segment
-            mpjpe = metrics.calculate_mpjpe(gt_keypoints[points], pred_keypoints[points])
-            pmpjpe = metrics.calculate_pmpjpe(gt_keypoints[points], pred_keypoints[points])
-            velocity_error = metrics.mean_velocity_error(gt_keypoints[points], pred_keypoints)
-            acceleration_error = metrics.mean_acceleration_error(gt_keypoints[points], pred_keypoints[points])
-            cps = metrics.compute_CPS(gt_keypoints[points], pred_keypoints[points])
-            angular_error = metrics.calculate_mpsae(gt_keypoints[points], pred_keypoints[points])
-            rom = metrics.calculate_rom(gt_keypoints[points], pred_keypoints[points])
-            cmc = metrics.calculate_cmc(gt_keypoints[points], pred_keypoints[points])
-
-            self.wandb.log({"mpjpe_"+segment: mpjpe, "pmpjpe_"+segment: pmpjpe,
-                            "velocity_error_"+segment: velocity_error,
-                            "acceleration_error_"+segment: acceleration_error,
-                            "angular_error_"+segment: angular_error, "rom_"+segment: rom, "cmc_"+segment: cmc})
-
-        # Log inference time
-        inference_time_mean = np.mean(inferences_time)
-        inference_time_std = np.std(inferences_time)
-        self.wandb.log({"inference_time_mean": inference_time_mean, "inference_time_std": inference_time_std})
-
-
-
-
-
-        def preprocess_ground_truth(self):
-
-        ## Postprocess keypoints
-        # Post processing the predicted keypoints using standard methods.
-        def postprocess_prediction(self, keypoints):
-
-
-
-
-    # Run inference on the chosen model
-    def main(self):
-        # Initialize video augmenters
-        if self.sweep_config['background'] != 'none':
-            self.augmenter = frameAug.BackgroundChanger()
-
-        if self.sweep_config['desynchronize']:
-            self.cam_desynchronizer = frameAug.CameraDesynchronizer()
-
-        if self.sweep_config['decalibration']:
-            caliAug.calibration_noise([self.R, self.t])
-
-
-        run = self.wandb.init()
-    # Open model based on name
-
-    # Load video files
-
-    #
-
-    # Run inference
-        caps = []
-
-        cap = cv2.VideoCapture(input_video_path)
-
-
-        # Desynchronize video streams
-        if self.sweep_config['desynchronizer']:
-            caps = self.cam_desynchronizer.desynchronize(caps)
-
-        caps.append(cap)
-
-        return caps, keypoints
-    # Hand it
+    if __name__ == "__main__":
+        framework_instance = Framework()
+        framework_instance.run()

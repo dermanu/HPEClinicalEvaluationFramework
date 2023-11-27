@@ -63,7 +63,7 @@ def process_video_yolov7(input_video_path):
         frame_number += 1
 
     # Save keypoints data to NumPy array
-    return np.array(keypoints_data), inference_time
+    return np.array(keypoints_data), np.array(inference_time)
 
     # Release resources
     cap.release()

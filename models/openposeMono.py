@@ -63,7 +63,7 @@ def process_video_openpose(input_video_path, output_npy_path):
         keypoints_data.append(keypoints_frame)
 
     # Save keypoints data to NumPy array
-    return np.array(keypoints_data), inference_time
+    return np.array(keypoints_data), np.array(inference_time)
 
     # Release resources
     cap.release()
