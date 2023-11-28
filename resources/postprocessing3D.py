@@ -7,7 +7,6 @@ from scipy import optimize
 import scipy
 from numba import jit
 import time
-import tensorflow as tf
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 
@@ -217,15 +216,14 @@ class CameraGroup:
             p3ds_new2 = np.apply_along_axis(upsample_data, 0, p3ds_new2, times=4)
             t2up = time.time()
             if verbose:
-                print('Upsampling took {:.2f} ms per frame'.format((t2up - t1up)*1000))
+                print('Upsampling took {:.2f} ms per frame'.format((t2up - t1up) * 1000))
             upsamling_time = t2up - t1up / p3ds.shape[0]
         else:
             upsamling_time = 0
 
         if verbose:
-            print('Optimization took {:.2f} ms per frame.'.format(((t2 - t1) / p3ds.shape[0])*1000))
+            print('Optimization took {:.2f} ms per frame.'.format(((t2 - t1) / p3ds.shape[0]) * 1000))
         total_opti_time = (t2 - t1) / p3ds.shape[0]
-
 
         return p3ds_new2, [upsamling_time, total_opti_time]
 

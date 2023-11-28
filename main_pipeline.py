@@ -3,6 +3,7 @@ import os
 import wandb
 import numpy as np
 import cv2
+import torch
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
 from utils import metrics
@@ -12,9 +13,9 @@ from models import mediapipeMono, alphaPoseMono
 class Framework:
     def __init__(self):
         # Initialize some functions
-        self.augmenter = frameAug.BackgroundChanger()
+        self.model_skel_morph = None
         self.cam_desynchronizer = frameAug.CameraDesynchronizer()
-        run = wandb.init()
+        self.run = wandb.init()
 
         # Initialize empty global variables
         self.dataset_path = None
@@ -66,30 +67,6 @@ class Framework:
             "left_ankle": [32, 28, 26]
         }
 
-    def augment_frames(self, frames):
-        """
-        Augment video frames before being processed by model, according to sweep settings.
-        :param frames: [frame 0, frame 1, ...]
-        :return: [augmented frame 0, augmented frame 1, ...]
-        """
-
-        # Apply augmentation to each frame of input based on settings in sweep_config
-        frames_aug = []
-        for frame in frames:
-            if self.sweep_config['background'] != 'none':
-                frame = self.augmenter.change_background(frame, self.sweep_config['background'])
-            if self.sweep_config['motion_blur']:
-                frame = frameAug.motion_blur(frame)
-            if self.sweep_config['occlusion']:
-                frame = frameAug.occlusion(frame)
-            if self.sweep_config['defocus']:
-                frame = frameAug.defocus(frame)
-            if self.sweep_config['underexposure']:
-                frame = frameAug.underexposure(frame)
-
-            frames_aug.append(frame)
-
-        return frames_aug
 
     @property
     def load_data_paths(self):
@@ -158,6 +135,7 @@ class Framework:
         # First we calculate the metrics for all extracted keypoints
         mpjpe = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
         pmpjpe = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
+        pck = metrics.calculate_pck(gt_keypoints, pred_keypoints)
         velocity_error = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
         acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
         cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
@@ -166,7 +144,7 @@ class Framework:
         cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
 
         # Log whole body metrics
-        wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "velocity_error_all": velocity_error,
+        wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "pck": pck, "velocity_error_all": velocity_error,
                    "acceleration_error_all": acceleration_error, "cps": cps, "angular_error_all": angular_error,
                    "rom_all": rom, "cmc_all": cmc})
 
@@ -175,11 +153,12 @@ class Framework:
             keypoints = self.body_segments[segment]
             mpjpe = metrics.calculate_mpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
             pmpjpe = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            pck = metrics.calculate_pck(gt_keypoints[keypoints], pred_keypoints[keypoints])
             velocity_error = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints)
             acceleration_error = metrics.mean_acceleration_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
             cmc = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
 
-            wandb.log({"mpjpe_" + segment: mpjpe, "pmpjpe_" + segment: pmpjpe,
+            wandb.log({"mpjpe_" + segment: mpjpe, "pmpjpe_" + segment: pmpjpe, "pck": pck,
                        "velocity_error_" + segment: velocity_error,
                        "acceleration_error_" + segment: acceleration_error, "cmc_" + segment: cmc})
 
@@ -202,11 +181,23 @@ class Framework:
     def plot_n_log(self, gt_keypoints, pred_keypoints):
 
 
+    def log_frame_example(self, frame):
+        image = wandb.Image(frame, caption=f"Frame example of current evaluation")
+        wandb.log({"Example_Frame": image})
+
+
     def preprocess_ground_truth(self, csv_path):
         """
         Pre-process the ground truth keypoints by first loading them from the csv file and transform them to be comparable
         with the prediction
         """
+        # Read ground truth
+
+
+        gt_keypoints = []  # Placeholder
+
+        # Morph ground truth
+        gt_keypoints = model_skel_morph(gt_keypoints)
 
         gt_keypoints = []  # Placeholder
 
@@ -219,8 +210,11 @@ class Framework:
         2) Smoothing of the data stream
         """
 
-
         return pred_keypoints
+
+    def log_frame_example(self, frame):
+        image = wandb.Image(frame, caption=f"Frame example of current evaluation")
+        wandb.log({"Example_Frame": image})
 
     def main(self):
         """
@@ -250,9 +244,9 @@ class Framework:
             # Monooccular models
             if self.model_type == "mono":
                 if self.model_name == "mediapipe":
-                    pred_keypoints, inference_times = mediapipeMono.inference_video(caps)
+                    pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, self.sweep_config)
                 if self.model_name == "alphapose":
-                        pred_keypoints, inference_times = alphaPoseMono.inference_video(caps)
+                    pred_keypoints, inference_times, frame = alphaPoseMono.inference_video(caps, self)
 
             # Multioccular models
             elif self.model_type == "multi":
@@ -276,6 +270,7 @@ class Framework:
         # Calculate the metrics, generate plots and log them to wandb
         self.calculate_log_metrics(gt_keypoints, pred_keypoints, inference_times)
         self.plot_n_log(gt_keypoints, pred_keypoints)
+        self.log_frame_example(frame)
 
 
     def run(self):
@@ -308,19 +303,24 @@ class Framework:
             if self.model_name not in ['mediapipe', 'alphapose', 'unknown']:
                 raise ValueError('Choose a valid monooccular model, or change the model type to multi')
         elif self.model_type == 'multi':
-            raise ValueError('Choose a valid multioccular model, or change the model type to mono')
+            if self.model_name not in ['cdrnet', 'canonpose']:
+                raise ValueError('Choose a valid multioccular model, or change the model type to mono')
 
         if self.dataset_path is None:
             raise ValueError('Dataset path is missing')
 
-        participants = ['par5', 'par6', 'par7', 'par8', 'par9', 'par10', 'par11', 'par12', 'par14', 'par15',
-                        'par16', 'par17', 'par18', 'par19', 'par20', 'par21', 'par22', 'par23', 'par24', 'par25',
-                        'par26']
+        # Initialize morphing network based on HPE model chosen
+        morph_model_path = "skeletonMorphing/models/model_skeleton_morph_" + str(self.model_name) + ".pt"
+        if os.path.isfile(morph_model_path):
+            self.model_skel_morph = torch.load(morph_model_path)
+            self.model_skel_morph.eval()
+        else:
+            raise ValueError('Morphing model is missing')
 
         # Set sweep config to grid search, which iterates over every possible combination
         self.sweep_config = {
             'name': 'sweep_' + self.model_type + '_' + self.model_name,
-            'dataset': participants,
+            'dataset': self.participants,
             'method': 'grid'}
 
         # Set parameters and values for the sweep
@@ -370,8 +370,6 @@ class Framework:
                 }
             }
             parameters_dict['parameters'].update(multioccular_parameters)
-
-        # Combine the sweep configuration and sweep parameters
 
         # Initialize the sweep run
         sweep_id = wandb.sweep(sweep=self.sweep_config,

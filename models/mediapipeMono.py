@@ -3,11 +3,13 @@ import mediapipe as mp
 import os
 import numpy as np
 import time
+from utils.frameAugmentation import FrameAugmentor
 
 
 # Currently runs on GPU as per default.
-
-def inference_video(cap, mp_complexity=2, dimensions=3):
+def inference_video(cap, sweep_config, mp_complexity=2, dimensions=3):
+    # Initialize frame augmentor
+    frameaug = FrameAugmentor()
     # Initialize MediaPipe Pose
     mp_pose = mp.solutions.pose
     # Model complexity set to 2 for mono-ocular. Minimum detection and tracking confidence set to 0.5 as default.
@@ -23,6 +25,9 @@ def inference_video(cap, mp_complexity=2, dimensions=3):
         ret, frame = cap.read()
         if not ret:
             break
+
+        # Augment frame
+        frame = frameaug.augment_frames(frame, sweep_config)
 
         # Record start time
         start_time = time.time()
@@ -54,5 +59,5 @@ def inference_video(cap, mp_complexity=2, dimensions=3):
     # Release resources
     cap.release()
 
-    # Return keypoints data to NumPy array
-    return np.array(keypoints_data), np.array(inference_time)
+    # Return keypoints data to NumPy array, save last frame for logging
+    return np.array(keypoints_data), np.array(inference_time), frame

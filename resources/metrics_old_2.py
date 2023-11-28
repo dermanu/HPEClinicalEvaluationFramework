@@ -103,7 +103,7 @@ def calculate_pcp(target, prediction, keypoints_target, keypoints_prediction, pa
     """ Calculate percentage of correct part (PCP) """
 
 
-def calculate_pck(target, prediction, threshold=150, joints_to_use = [1, 2, 3, 4, 5, 6, 8, 10, 11]):
+def calculate_pck(target, prediction, threshold=150, joints_to_use=[1, 2, 3, 4, 5, 6, 8, 10, 11]):
     """ Calculate percentage of correct keypoints (PCK) in [%]"""
     assert len(prediction.shape) == len(target.shape)
 

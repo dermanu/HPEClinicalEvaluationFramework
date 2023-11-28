@@ -35,28 +35,29 @@ def calculate_pmpjpe(target, prediction):
     Y0 /= normY
 
     H = np.matmul(X0.transpose(0, 2, 1), Y0)
+
     try:
         U, _, V = np.linalg.svd(H)
     except:
         return np.nan, np.nan
 
-    U, s, Vt = np.linalg.svd(H)
-    V = Vt.transpose(0, 2, 1)
-    R = np.matmul(V, U.transpose(0, 2, 1))
+    u, s, v_t = np.linalg.svd(H)
+    v = v_t.transpose(0, 2, 1)
+    r = np.matmul(v, u.transpose(0, 2, 1))
 
     # Avoid improper rotations (reflections), i.e. rotations with det(R) = -1
-    sign_detR = np.sign(np.expand_dims(np.linalg.det(R), axis=1))
-    V[:, :, -1] *= sign_detR
-    s[:, -1] *= sign_detR.flatten()
-    R = np.matmul(V, U.transpose(0, 2, 1))  # Rotation
+    sign_det_r = np.sign(np.expand_dims(np.linalg.det(r), axis=1))
+    v[:, :, -1] *= sign_det_r
+    s[:, -1] *= sign_det_r.flatten()
+    r = np.matmul(v, u.transpose(0, 2, 1))  # Rotation
 
     tr = np.expand_dims(np.sum(s, axis=1, keepdims=True), axis=2)
 
     a = tr * normX / normY  # Scale
-    t = muX - a * np.matmul(muY, R)  # Translation
+    t = muX - a * np.matmul(muY, r)  # Translation
 
     # Perform rigid transformation on the input
-    predicted_aligned = a * np.matmul(prediction, R) + t
+    predicted_aligned = a * np.matmul(prediction, r) + t
 
     # Return MPJPE
     mean = np.mean(np.linalg.norm(predicted_aligned - target, axis=len(target.shape) - 1))
@@ -240,6 +241,17 @@ def calculate_rom(target, prediction, segments):
     signed_ROM = np.sum(prediction_ROM - target_ROM / len(target_ROM), axis=0)
 
     return signed_ROM, signed_max, signed_min, ROM, max, min
+
+
+def calculate_pck(target, prediction, threshold=150, joints_to_use = [1, 2, 3, 4, 5, 6, 8, 10, 11]):
+    """ Calculate percentage of correct keypoints (PCK) in [%]"""
+    assert len(prediction.shape) == len(target.shape)
+
+    # see https://arxiv.org/pdf/1611.09813.pdf
+    distances = np.sqrt(np.sum((target[:, joints_to_use, :]
+                                - prediction[:, joints_to_use, :]) ** 2, axis=1))
+    pck = np.count_nonzero(distances < threshold, axis=1) / len(joints_to_use)
+    return pck
 
 
 def wrap_to_pi(x):
