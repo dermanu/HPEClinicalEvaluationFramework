@@ -6,8 +6,18 @@ import cv2
 import torch
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
-from utils import metrics
+from utils import metrics, postprocessing
 from models import mediapipeMono, alphaPoseMono
+
+
+def log_frame_example(frames):
+    """
+    Log the last frame of one camera angle to visualize applied frame augmentations
+    :param frames: augmented frames, e.g. [cam0, cam1, cam2, ...]
+    :return:
+    """
+    image = wandb.Image(frames[0], caption=f"Frame example of current evaluation")
+    wandb.log({"Example_Frame": image})
 
 
 class Framework:
@@ -67,6 +77,8 @@ class Framework:
             "left_ankle": [32, 28, 26]
         }
 
+        self.interpolation_fun = "akima"
+        self.smoothing_fun = "butterworth"
 
     @property
     def load_data_paths(self):
@@ -179,12 +191,10 @@ class Framework:
         wandb.log({"n": len(pred_keypoints)})
 
     def plot_n_log(self, gt_keypoints, pred_keypoints):
+        # Plot predicted and ground truth keypoints overlay
 
-
-    def log_frame_example(self, frame):
-        image = wandb.Image(frame, caption=f"Frame example of current evaluation")
-        wandb.log({"Example_Frame": image})
-
+        # Log the plot to wand
+        pass
 
     def preprocess_ground_truth(self, csv_path):
         """
@@ -192,29 +202,25 @@ class Framework:
         with the prediction
         """
         # Read ground truth
-
-
         gt_keypoints = []  # Placeholder
+
+        # Any other transformations? Rotation and translation to overlay with image frame? Check HM36 code
 
         # Morph ground truth
-        gt_keypoints = model_skel_morph(gt_keypoints)
-
-        gt_keypoints = []  # Placeholder
+        gt_keypoints = self.model_skel_morph(gt_keypoints)
 
         return gt_keypoints
 
-    def postprocess_prediction(self, pred_keypoints, smoothing="butterworth", interpolation="akima"):
+    def postprocess_prediction(self, pred_keypoints):
         """
         Post-process the predicted keypoints according to standard methods for real-time applications.
         1) Interpolation of missing values
         2) Smoothing of the data stream
         """
+        pred_keypoints_processing = postprocessing.postprocess_points(pred_keypoints,
+                                                                      self.interpolation_fun, self.smoothing_fun)
 
-        return pred_keypoints
-
-    def log_frame_example(self, frame):
-        image = wandb.Image(frame, caption=f"Frame example of current evaluation")
-        wandb.log({"Example_Frame": image})
+        return pred_keypoints_processing
 
     def main(self):
         """
@@ -239,7 +245,6 @@ class Framework:
                 # Get ground truth keypoints
                 gt_keypoints = self.preprocess_ground_truth(csv_paths)
 
-
             # Open model based on name and run inference
             # Monooccular models
             if self.model_type == "mono":
@@ -254,7 +259,8 @@ class Framework:
                 if self.sweep_config['desynchronizer']:
                     caps = self.cam_desynchronizer.desynchronize(caps)
                 # Load camera parameter matrix and add noise if specified so
-                p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'], self.sweep_config['decalibration'])
+                p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'],
+                                                         self.sweep_config['decalibration'])
 
                 if self.model_name == "canonpose":
                     pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
@@ -270,8 +276,7 @@ class Framework:
         # Calculate the metrics, generate plots and log them to wandb
         self.calculate_log_metrics(gt_keypoints, pred_keypoints, inference_times)
         self.plot_n_log(gt_keypoints, pred_keypoints)
-        self.log_frame_example(frame)
-
+        log_frame_example(frame)
 
     def run(self):
         """
