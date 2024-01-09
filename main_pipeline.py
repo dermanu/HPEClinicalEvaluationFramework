@@ -66,7 +66,7 @@ class Framework:
             "right_shoulder_2": [13, 11, 23],
             "left_shoulder_1": [14, 12, 11],
             "left_shoulder_2": [14, 12, 24],
-            "torso": [11, 12, 23, 24],
+            # "torso": [11, 12, 23, 24],
             "right_hips_1": [25, 23, 24],
             "right_hips_2": [25, 23, 11],
             "left_hips_1": [26, 24, 23],
@@ -78,7 +78,7 @@ class Framework:
         }
 
         self.interpolation_fun = "akima"
-        self.smoothing_fun = "butterworth"
+        self.smoothing_fun = "median"
 
     @property
     def load_data_paths(self):
@@ -152,13 +152,12 @@ class Framework:
         acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
         cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
         angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
-        rom = metrics.calculate_rom(gt_keypoints, pred_keypoints, self.joint_segments)
         cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
 
         # Log whole body metrics
         wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "pck": pck, "velocity_error_all": velocity_error,
                    "acceleration_error_all": acceleration_error, "cps": cps, "angular_error_all": angular_error,
-                   "rom_all": rom, "cmc_all": cmc})
+                   "cmc_all": cmc})
 
         # Log metrics for different body segments
         for segment in self.body_segments:
@@ -178,9 +177,8 @@ class Framework:
         for joint_name in self.joint_segments:
             joint = self.joint_segments[joint_name]
             angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, joint)
-            rom = metrics.calculate_rom(gt_keypoints, pred_keypoints, joint)
 
-            wandb.log({"angular_error_" + joint_name: angular_error, "rom_" + joint_name: rom})
+            wandb.log({"angular_error_" + joint_name: angular_error})
 
         # Log inference time
         inference_time_mean = np.mean(inference_times)
@@ -337,9 +335,6 @@ class Framework:
                 'underexposure': {
                     'values': [True, False]
                 },
-                'overexposure': {
-                    'values': [True, False]
-                },
                 'motion_blur': {
                     'values': [True, False]
                 },
@@ -347,7 +342,7 @@ class Framework:
                     'values': [True, False]
                 },
                 'background': {
-                    'values': ['none', 'home', 'hospital', 'outdoor', 'people']
+                    'values': ['none', 'home']
                 },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
