@@ -329,8 +329,20 @@ class Framework:
         # Set parameters and values for the sweep
         parameters_dict = {
             'parameters': {
-                'augmentation': {
-                    'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background']
+                'defocus': {
+                    'values': [True, False]
+                },
+                'underexposure': {
+                    'values': [True, False]
+                },
+                'motion_blur': {
+                    'values': [True, False]
+                },
+                'occlusion': {
+                    'values': [True, False]
+                },
+                'background': {
+                    'values': ['none', 'home']
                 },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
@@ -345,16 +357,16 @@ class Framework:
         if self.model_type == 'multi':
             # Sweep parameters
             multioccular_parameters = {
-                'parameters': {
-                    'augmentation': {
-                        'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background',
-                                   'desynchronize', 'decalibration']
-                    },
-                    'cameras': {
-                        'values': [[4, 0], [3, 2], [5, 1], [4, 2], [0, 4, 3], [0, 2, 3], [5, 4, 1], [0, 4, 3, 2],
-                                  [0, 5, 4, 3, 2],
-                                  [0, 5, 4, 1, 3, 2]]
-                    }
+                'desynchronize': {
+                    'values': [True, False]
+                },
+                'decalibration': {
+                    'values': [True, False]
+                },
+                'cameras': {
+                    'values': [[4, 0], [3, 2], [5, 1], [4, 2], [0, 4, 3], [0, 2, 3], [5, 4, 1], [0, 4, 3, 2],
+                               [0, 5, 4, 3, 2],
+                               [0, 5, 4, 1, 3, 2]]
                 }
             }
             parameters_dict['parameters'].update(multioccular_parameters)

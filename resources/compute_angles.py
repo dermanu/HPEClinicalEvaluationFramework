@@ -9,6 +9,9 @@ from scipy.spatial.transform import Rotation
 
 from .common import make_process_fun, get_data_length, natural_keys
 
+##################################################################
+## CHECK: https://github.com/CocoaPebble/mediapipe_pose_compare ##
+##################################################################
 
 # project v onto u
 def proj(u, v):

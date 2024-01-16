@@ -48,22 +48,7 @@ class FrameAugmentor:
         # Initiate BackgroundChanger
         self.change_bg = alter_bg(model_type="pb")
         self.change_bg.load_pascalvoc_model("xception_pascalvoc.pb")
-
-    def change_background(self, frame, background):
-        if background == 'home':
-            aug_frame = self.change_bg.change_frame_bg(frame, 'home.jpg', detect="person")
-        elif background == 'hospital':
-            aug_frame = self.change_bg.change_frame_bg(frame, 'hospital.jpg', detect="person")
-        elif background == 'outdoor':
-            aug_frame = self.change_bg.change_frame_bg(frame, 'outdoor.jpg', detect="person")
-        elif background == 'outdoor':
-            aug_frame = self.change_bg.change_frame_bg(frame, 'people.jpg', detect="person")
-        elif background == 'none':
-            aug_frame = frame
-        else:
-            raise ValueError("Choose a valid background sweep parameter")
-
-        return aug_frame
+        aug_frame = self.change_bg.change_frame_bg(frame, 'home.jpg', detect="person")
 
     def augment_frames(self, frames, sweep_config):
         """
@@ -75,18 +60,17 @@ class FrameAugmentor:
 
         # Apply augmentation to each frame of input based on settings in sweep_config
         frames_aug = []
+        augmentation_type = sweep_config['augmentation']
         for frame in frames:
-            if sweep_config['background'] != 'none':
-                frame = self.change_background(frame, sweep_config['background'])
-            if sweep_config['motion_blur']:
+            if augmentation_type == 'background':
+                frame = self.change_bg.change_frame_bg(frame, 'background.jpg', detect="person")
+            if augmentation_type == 'motion_blur':
                 frame = motion_blur(frame)
-            if sweep_config['occlusion']:
+            if augmentation_type == 'occlusion':
                 frame = occlusion(frame)
-            if sweep_config['defocus']:
+            if augmentation_type == 'defocus':
                 frame = defocus(frame)
-            if sweep_config['underexposure']:
-                frame = underexposure(frame)
-            if sweep_config['overexposure']:
+            if augmentation_type == 'underexposure':
                 frame = underexposure(frame)
 
             frames_aug.append(frame)

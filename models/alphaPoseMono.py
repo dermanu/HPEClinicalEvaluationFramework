@@ -31,7 +31,7 @@ def process_video_alphaPose(input_video_path, cfg_path, checkpoint_path):
     data_len = det_loader.length
     im_names_desc = tqdm(range(data_len), dynamic_ncols=True)
 
-    batchSize = args.posebatch
+    batchSize = args.posebatchpyt
     try:
         for i in im_names_desc:
             with torch.no_grad():
