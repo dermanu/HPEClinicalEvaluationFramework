@@ -46,13 +46,13 @@ def read_csv_files(folder_path, save_path):
                             additional_df['Frame'] = additional_data['Frame#'] + df['Frame'].max()
                             additional_df['Time'] = additional_data['Time'] + df['Time'].max()
 
-                        for header in header_names:
-                                additional_df[header + '_X'] = [sublist[0] for sublist in additional_data[header]]
-                                additional_df[header + '_Y'] = [sublist[1] for sublist in additional_data[header]]
-                                additional_df[header + '_Z'] = [sublist[2] for sublist in additional_data[header]]
+                            for header in header_names:
+                                    additional_df[header + '_X'] = [sublist[0] for sublist in additional_data[header]]
+                                    additional_df[header + '_Y'] = [sublist[1] for sublist in additional_data[header]]
+                                    additional_df[header + '_Z'] = [sublist[2] for sublist in additional_data[header]]
 
-                        # Concatenate additional data to the main DataFrame
-                        df = pd.concat([df, additional_df], ignore_index=True)
+                            # Concatenate additional data to the main DataFrame
+                            df = pd.concat([df, additional_df], ignore_index=True)
 
                     # Create the corresponding subfolder structure in the new folder
                     relative_path = os.path.relpath(input_file_path, folder_path)
