@@ -31,8 +31,6 @@ def read_csv_files(folder_path, save_path):
                     df = df.iloc[:, :-1]
                     df.reset_index(drop=True, inplace=True)
 
-                    print(df)
-
                     # Create the corresponding subfolder structure in the new folder
                     relative_path = os.path.relpath(input_file_path, folder_path)
                     new_subfolder = os.path.join(save_path, os.path.dirname(relative_path))
@@ -42,12 +40,14 @@ def read_csv_files(folder_path, save_path):
 
                     # Create the full path for the output file
                     output_file_path = os.path.join(new_subfolder, file)
+                    output_file_path = os.path.splitext(output_file_path)[0] + "Extended.csv"
 
                     # Save the processed DataFrame to the new folder
                     df.to_csv(output_file_path, index=False)
+                    print('Data saved successfully at: ' + output_file_path)
 
                 except pd.errors.EmptyDataError:
                     print(f"File {file} in {root} is empty.")
 
 # Replace 'your_folder_path' with the actual path to the root folder containing subfolders
-read_csv_files('/home/emanu/Desktop/MoCap/VICON_DATA_PROC', '/home/emanu/Desktop/MoCap/MoCapData')
+read_csv_files('/home/emanu/Desktop/MoCap/vicon_data', '/home/emanu/Desktop/MoCap/complete_raw/vicon')
