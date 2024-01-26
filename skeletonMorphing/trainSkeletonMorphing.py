@@ -14,7 +14,7 @@ import modelSkeletonMorphing
 from losses import print_losses
 from types import SimpleNamespace
 import torch.nn as nn
-import Datasets.vizlabReader as vizlabReader
+from utils.readDataset import ReadDatasetFiles
 
 
 # Configuration settings using SimpleNamespace
@@ -24,13 +24,20 @@ config.BATCH_SIZE = 32
 config.N_epochs = 100
 
 # Folder containing data
-data_folder = './data/'
+data_folder = '/home/emanu/Desktop/SegmentedData'
+
+# Parameters for training
+par = [4]
+mov = list(range(1, 18))
+cam = list(range(0, 6))
+model_type = 'openpose'
 
 # Data file for training
 config.datafile = data_folder + 'h36m_train_mpi_skeleton_pred.pickle'
 
 # Creating dataset and data loader
-my_dataset = vizlabReader(config.datafile, subjects=[1])
+my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
+
 train_loader = data.DataLoader(my_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=0)
 
 # Initializing the model (Synthesizer) and moving it to GPU
