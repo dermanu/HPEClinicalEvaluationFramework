@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 import models.mediapipeMono as MediaPipe
+import multiprocessing
 
 
 class ReadDatasetFiles(Dataset):
@@ -18,49 +19,6 @@ class ReadDatasetFiles(Dataset):
         # Initialize these lists in the constructor
         self.csv_file_paths = self.read_dataset_path()
         self.datasets = self.create_datasets()
-
-    def create_datasets(self):
-        datasets = []
-
-        for csv_file_path in self.csv_file_paths:
-            dataset = SingleCSVFileDataset(csv_file_path, self.model_type)
-            datasets.append(dataset)
-
-        return datasets
-
-    def __len__(self):
-        total_length = sum(len(dataset) for dataset in self.datasets)
-        return total_length
-
-    def __getitem__(self, idx):
-        dataset_idx = 0
-        while idx >= len(self.datasets[dataset_idx]):
-            idx -= len(self.datasets[dataset_idx])
-            dataset_idx += 1
-
-        return self.datasets[dataset_idx][idx]
-
-class SingleCSVFileDataset(Dataset):
-    def __init__(self, csv_file_path, model_type):
-        self.csv_file_path = csv_file_path
-        self.model_type = model_type
-
-        # Add any additional initialization for your SingleCSVFileDataset
-        self.data = self.load_data()
-
-    def load_data(self):
-        # Load CSV data
-        csv_data = pd.read_csv(self.csv_file_path)
-
-        # Drop irrelevant columns
-        csv_data.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
-
-        # Align the columns (you may need to modify this part based on your needs)
-        csv_data = self.align_keypoints(csv_data)
-        csv_data = np.array(list(csv_data.values()))
-        csv_data = csv_data.transpose((1, 0, 2))
-
-        return csv_data
 
     def read_dataset_path(self):
         """
@@ -95,8 +53,70 @@ class SingleCSVFileDataset(Dataset):
                         movement in file_name for movement in movements):
                     csv_file_paths.append(file_path)
 
-        sample_count = sum(files[-1] for files in csv_file_paths)
-        return csv_file_paths, sample_count
+        print('All csv files paths are read')
+
+        return csv_file_paths
+
+    def create_datasets(self):
+        datasets = []
+        #i = 0
+
+        # Use multiprocessing to parallelize dataset creation
+        with multiprocessing.Pool() as pool:
+            datasets = pool.map(self.create_single_dataset, self.csv_file_paths)
+
+
+        #for csv_file_path in self.csv_file_paths:
+        #    i += 1
+        #    print('Getting dataset nr ' + str(i) + ' of ' + str(len(self.csv_file_paths)) + '...')
+        #    dataset = SingleCSVFileDataset(csv_file_path, self.model_type)
+        #    datasets.append(dataset)
+
+        return datasets
+
+    def create_single_dataset(self, csv_file_path):
+        i = self.csv_file_paths.index(csv_file_path) + 1
+        print('Getting dataset nr ' + str(i) + ' of ' + str(len(self.csv_file_paths)) + '...')
+        dataset = SingleCSVFileDataset(csv_file_path, self.model_type)
+        return dataset
+
+    def __len__(self):
+        total_length = sum(len(dataset) for dataset in self.datasets)
+        return total_length
+
+    def __getitem__(self, idx):
+        # Determine which dataset the index corresponds to
+        dataset_idx = 0
+        while idx >= len(self.datasets[dataset_idx]):
+            idx -= len(self.datasets[dataset_idx])
+            dataset_idx += 1
+
+        # Retrieve the item from the corresponding dataset
+        return self.datasets[dataset_idx][idx]
+
+
+class SingleCSVFileDataset(Dataset):
+    def __init__(self, csv_file_path, model_type):
+        self.csv_file_path = csv_file_path
+        self.model_type = model_type
+
+        # Add any additional initialization for your SingleCSVFileDataset
+        self.csv_data = self.load_csv_data()
+        self.pose_inf, self.confidences_inf = self.load_video_data()
+
+    def load_csv_data(self):
+        # Load CSV data
+        csv_data = pd.read_csv(self.csv_file_path)
+
+        # Drop irrelevant columns
+        csv_data.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
+
+        # Align the columns (you may need to modify this part based on your needs)
+        csv_data = self.align_keypoints(csv_data)
+        csv_data = np.array(list(csv_data.values()))
+        csv_data = csv_data.transpose((1, 0, 2))
+
+        return csv_data
 
     def align_keypoints(self, keypoints_org):
         """
@@ -161,21 +181,10 @@ class SingleCSVFileDataset(Dataset):
 
         return ordered_keypoints_org_subarrays
 
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        # Load CSV data
-        csv_data = pd.read_csv(self.csv_file_paths[idx])
-        # Drop irrelevant columns
-        csv_data.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
-        # Align the columns
-        csv_data = self.align_keypoints(csv_data)
-        csv_data = np.array(list(csv_data.values()))
-        csv_data = csv_data.transpose((1, 0, 2))
-
+    def load_video_data(self):
         # Load video data
-        avi_file_path = self.csv_file_paths[idx].replace('.csv', '.avi')
+        print('Start loading video data' + self.csv_file_path.replace('.csv', '.avi') + '...')
+        avi_file_path = self.csv_file_path.replace('.csv', '.avi')
         cap = cv2.VideoCapture(avi_file_path)
 
         if self.model_type == 'mediapipe':
@@ -183,9 +192,17 @@ class SingleCSVFileDataset(Dataset):
             confidences = pose_keypoints[0][:, self.selected_columns, 0]
             pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
         else:
-            raise ValueError(f"Invalid model_name: {self.model_type }")
+            raise ValueError(f"Invalid model_name: {self.model_type}")
+        print('Finished loading video data' + self.csv_file_path.replace('.csv', '.avi') + '...')
 
-        # Return data for each column as a separate batch
-        return {'pose_gt': csv_data, 'pose_inf': pose_keypoints, 'confidences_inf': confidences}
+        return pose_keypoints, confidences
 
+    def __len__(self):
+        return len(self.csv_data)
 
+    def __getitem__(self, idx):
+        # Combine CSV and video data into a single dictionary
+        combined_data = {'pose_gt': self.csv_data[idx], 'pose_inf': self.pose_inf[idx],
+                         'confidences_inf': self.confidences_inf[idx]}
+
+        return combined_data
