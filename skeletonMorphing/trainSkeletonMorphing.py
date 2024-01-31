@@ -17,6 +17,7 @@ import torch.nn as nn
 from utils.readDataset2 import ReadDatasetFiles
 import wandb
 import numpy as np
+from utils.plot_keypoints import plot_3d_keypoints, plot_3d_keypoints_all
 
 
 # Configuration settings using SimpleNamespace
@@ -25,10 +26,36 @@ config.learning_rate = 0.0001
 config.BATCH_SIZE = 32
 config.N_epochs = 100
 config.log_interval = 100
+config.weight_decay = 1e-5
 last_loss_mean = 100000
+
+# Sweep configuration
+sweep_config = {
+    'method': 'bayes',
+    'metric': {
+        'name': 'loss',
+        'goal': 'minimize'
+    },
+    'parameters': {
+        'learning_rate': {
+            'values': [0.0001, 0.00001]
+        },
+        'BATCH_SIZE': {
+            'values': [8, 16, 32]
+        },
+        'weight_decay': {
+            'values': [1e-4, 1e-5, 1e-6]
+        }
+    },
+    'early_terminate': {
+        'type': 'hyperband',
+        'min_iter': 10
+    }
+}
 
 # WandB – Initialize a new run
 wandb.init(project="skeleton-morphing", config=config)
+
 
 # Folder containing data
 data_folder = '/home/emanu/Desktop/SegmentedData'
@@ -48,7 +75,7 @@ num_cam = 6
 # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
 my_dataset = torch.load('par4_mediapipe_test.pth')
 print('Data loader created')
-train_loader = data.DataLoader(my_dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=4)
+train_loader = data.DataLoader(my_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
 
 # Initializing the model (Synthesizer) and moving it to GPU
 model = modelSkeletonMorphing.Synthesizer().cuda()
@@ -65,7 +92,7 @@ N_epochs = 100
 params = list(model.parameters())  # + list(dec.parameters())
 
 # Setting anomaly detection for autograd
-optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=1e-5)
+optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, 80, 95], gamma=0.1)
 
 # Setting anomaly detection for autograd
@@ -100,27 +127,25 @@ for epoch in range(N_epochs):
 
         losses_mean.append(loss.item())
 
-        if batch_idx % config.log_interval == 0:
-            wandb.log({"loss": np.mean(losses_mean)})
 
-        # Storing losses for printing
-        #for key, value in losses.__dict__.items():
-        #    if key not in losses_mean.__dict__.keys():
-        #        losses_mean.__dict__[key] = []
-
-        #    losses_mean.__dict__[key].append(value.item())
-
-        # Printing losses every 100 iterations
-        #if not batch_idx % 100:
-            #print_losses(epoch, batch_idx, len(my_dataset) / config.BATCH_SIZE, losses_mean.__dict__, print_keys=not (batch_idx % 1000))
-            # Resetting losses_mean for the next set of iterations
-            #losses_mean = SimpleNamespace()
+    wandb.log({"loss": np.mean(losses_mean)})
+    prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
+    ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
+    hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
+    plot_3d_keypoints(prediction, 'mediapipe', 'morphed')
+    plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth')
+    plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth')
+    plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe')
+    wandb.log({"epoch": epoch})
 
     # Saving the model after each epoch
-    print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + 'with loss ' + str(np.mean(losses_mean)))
+    print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
     if np.mean(losses_mean) < last_loss_mean:
         last_loss_mean = np.mean(losses_mean)
         torch.save(model, 'models/model_skeleton_morph_par4_mediapipe.pt')
 
+    losses_mean = []
+
 # Training complete
 print('done')
+

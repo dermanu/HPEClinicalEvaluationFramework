@@ -140,22 +140,22 @@ class SingleCSVFileDataset(Dataset):
 
         if self.model_type == 'mediapipe':
             column_mapping = {
-                'RShoulder': 'RSJC', # 12
-                'LShoulder': 'LSJC', # 11
-                'RElbow': 'REJC', # 14
-                'LElbow': 'LEJC', # 13
-                'RWrist': 'RWJC', # 16
-                'LWrist': 'LWJC', # 15
-                'RHip': 'RHJC', # 24
-                'LHip': 'LHJC', # 23
-                'RKnee': 'RKJC', # 26
-                'LKnee': 'LKJC', # 25
-                'RAnkle': 'RAJC', # 28
-                'LAnkle': 'LAJC', # 27
-                'RHeel': 'RHEE', # 30
-                'LHeel': 'LHEE', # 29
-                'RFootIndex': 'RTOE', # 32
-                'LFootIndex': 'LTOE', # 31
+                'RShoulder': 'RSJC', # 12 - 0
+                'LShoulder': 'LSJC', # 11 - 1
+                'RElbow': 'REJC', # 14 - 2
+                'LElbow': 'LEJC', # 13 - 3
+                'RWrist': 'RWJC', # 16 - 4
+                'LWrist': 'LWJC', # 15 - 5
+                'RHip': 'RHJC', # 24 - 6
+                'LHip': 'LHJC', # 23 - 7
+                'RKnee': 'RKJC', # 26 - 8
+                'LKnee': 'LKJC', # 25  - 9
+                'RAnkle': 'RAJC', # 28 - 10
+                'LAnkle': 'LAJC', # 27 - 11
+                'RHeel': 'RHEE', # 30 - 12
+                'LHeel': 'LHEE', # 29 - 13
+                'RFootIndex': 'RTOE', # 32 - 14
+                'LFootIndex': 'LTOE', # 31 - 15
             }
             self.selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
 

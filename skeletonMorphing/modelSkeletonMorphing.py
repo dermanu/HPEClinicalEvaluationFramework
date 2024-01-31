@@ -20,10 +20,7 @@ class Synthesizer(nn.Module):
         # Residual blocks for pose processing
         self.res_pose1 = ResBlock()
         self.res_pose2 = ResBlock()
-
-        # Residual blocks for camera processing
-        self.res_cam1 = ResBlock()
-        self.res_cam2 = ResBlock()
+        self.res_pose3 = ResBlock()
 
         # Linear layer for morphing pose information back to 48 dimensions
         self.pose_morph = nn.Linear(2304, 48)
@@ -35,6 +32,7 @@ class Synthesizer(nn.Module):
         # Pose processing path
         xp = nn.LeakyReLU()(self.res_pose1(xu))
         xp = nn.LeakyReLU()(self.res_pose2(xp))
+        xp = nn.LeakyReLU()(self.res_pose3(xp))
 
         # Adding morphed pose information back to the input
         x_pose = x + self.pose_morph(xp)
@@ -49,6 +47,7 @@ class ResBlock(nn.Module):
         # Two linear layers for the residual block
         self.l1 = nn.Linear(2304, 2304)
         self.l2 = nn.Linear(2304, 2304)
+        self.l3 = nn.Linear(2304, 2304)
 
     def forward(self, x):
         inp = x
@@ -58,6 +57,9 @@ class ResBlock(nn.Module):
 
         # Leaky ReLU activation for the second linear layer
         x = nn.LeakyReLU()(self.l2(x))
+
+        # Leaky ReLU activation for the third linear layer
+        x = nn.LeakyReLU()(self.l3(x))
 
         # Adding the residual connection
         x += inp
