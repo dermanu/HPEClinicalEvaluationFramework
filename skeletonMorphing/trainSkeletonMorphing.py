@@ -73,7 +73,7 @@ num_cam = 6
 # Creating dataset and data loader
 # my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
 # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-my_dataset = torch.load('par4_mediapipe_test.pth')
+my_dataset = torch.load('morph_dataset/par4_mediapipe_test.pth')
 print('Data loader created')
 train_loader = data.DataLoader(my_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
 

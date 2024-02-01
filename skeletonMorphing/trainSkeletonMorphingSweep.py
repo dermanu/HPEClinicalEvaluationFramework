@@ -12,12 +12,12 @@ from torch.utils import data
 import torch.optim as optim
 import modelSkeletonMorphing
 import time
-from types import SimpleNamespace
 import torch.nn as nn
 from utils.readDataset2 import ReadDatasetFiles
 import wandb
 import numpy as np
 from utils.plot_keypoints import plot_3d_keypoints, plot_3d_keypoints_all
+import tqdm
 
 
 # Sweep configuration
@@ -29,10 +29,10 @@ sweep_config = {
     },
     'parameters': {
         'learning_rate': {
-            'values': [0.0001, 0.00001]
+            'values': [0.001, 0.0001, 0.00001]
         },
         'BATCH_SIZE': {
-            'values': [8, 16, 32]
+            'values': [16, 32, 64]
         },
         'weight_decay': {
             'values': [1e-4, 1e-5, 1e-6]
@@ -61,8 +61,8 @@ sweep_config = {
     },
     'early_terminate': {
         'type': 'hyperband',
-        'min_iter': 20,
-        'eta': 2
+        'min_iter': 3,
+        'eta': 3
     }
 }
 
@@ -70,11 +70,12 @@ sweep_config = {
 # (Optional) Provide a name of the project.
 sweep_id = wandb.sweep(sweep=sweep_config, project="SkeletonMorphingSweep")
 
+
 def data_loader(data_config):
     # Creating dataset and data loader
     # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
     # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-    my_dataset = torch.load('par4_mediapipe_test.pth')
+    my_dataset = torch.load('morph_dataset/par4_mediapipe_test.pth')
     train_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=True, num_workers=8,
                                    pin_memory=True)
 
@@ -84,7 +85,7 @@ def data_loader(data_config):
 def train(model, train_loader, optimizer):
     # Iterate through batches
     losses = 0
-    for step, batch in enumerate(train_loader):
+    for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
         # Access data for each batch
         pose_gt_batch = batch['pose_gt']
         pose_inf_batch = batch['pose_inf']
@@ -110,6 +111,7 @@ def train(model, train_loader, optimizer):
 
         # Log the loss of each batch
         wandb.log({"batch_loss": loss.item(), "batch": step+1})
+        print
 
     return losses / len(train_loader), pred_poses, pose_gt_batch, pose_inf_batch
 
@@ -163,13 +165,14 @@ def main(config=None):
 
             # Save so far best model
             if np.mean(losses) < last_loss:
-                model_path = '/models/morph_' + config.model_type + '_' + sweep_id + '.pth'
+                model_path = 'models/morph_' + config.model_type + '_' + sweep_id + str(epoch+1) + '.pth'
                 torch.save(model.state_dict(), model_path)
                 artifact = wandb.Artifact('model', type='model')
                 artifact.add_file(model_path)
                 wandb.log_artifact(artifact)
                 # Update last loss
                 last_loss = np.mean(losses)
+
 
 # Start sweep job.
 wandb.agent(sweep_id, function=main, count=5)
