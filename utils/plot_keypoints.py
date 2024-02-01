@@ -44,11 +44,11 @@ def plot_3d_keypoints(keypoints, model_name, wandb_name, epoch):
 
     # Log the 3D scatter plot using WandB
     if wandb_name == 'morphed':
-        wandb.log({'morphed': fig, "epoch": epoch+1})
+        wandb.log({'Model Output: Morphed Keypoints': fig, "epoch": epoch+1})
     elif wandb_name == 'ground_truth':
-        wandb.log({'ground_truth': fig, "epoch": epoch+1})
+        wandb.log({'Ground Truth: Vizlab Dataset Keypoints': fig, "epoch": epoch+1})
     elif wandb_name == 'hpe_truth':
-        wandb.log({'hpe_truth': fig, "epoch": epoch+1})
+        wandb.log({'Model Input: HPE Keypoints': fig, "epoch": epoch+1})
     else:
         raise ValueError(f"Invalid wandb_name: {wandb_name}")
 
