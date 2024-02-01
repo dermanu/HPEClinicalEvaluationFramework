@@ -165,13 +165,14 @@ def main(config=None):
 
             # Save so far best model
             if np.mean(losses) < last_loss:
-                model_path = 'models/morph_' + config.model_type + '_' + sweep_id + str(epoch+1) + '.pth'
+                model_path = 'models/morph_' + config.model_type + '_' + sweep_id + '.pth'
                 torch.save(model.state_dict(), model_path)
-                artifact = wandb.Artifact('model', type='model')
-                artifact.add_file(model_path)
-                wandb.log_artifact(artifact)
-                # Update last loss
                 last_loss = np.mean(losses)
+
+            # Save best model to wandb
+            artifact = wandb.Artifact('model', type='model')
+            artifact.add_file(model_path)
+            wandb.log_artifact(artifact)
 
 
 # Start sweep job.
