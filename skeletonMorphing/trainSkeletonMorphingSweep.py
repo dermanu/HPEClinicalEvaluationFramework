@@ -22,30 +22,9 @@ from utils.plot_keypoints import plot_3d_keypoints, plot_3d_keypoints_all
 
 # Sweep configuration
 sweep_config = {
-    'epochs': {
-        'value': 100
-    },
-    'datafolder': {
-        'value': '/home/emanu/Desktop/SegmentedData'
-    },
-    'par': {
-        'value': [4]
-    },
-    'mov': {
-        'value': list(range(1, 18))
-    },
-    'cam': {
-        'value': list(range(0, 6))
-    },
-    'model_type': {
-        'value': 'mediapipe'
-    },
-    'num_cam': {
-        'value': 6
-    },
     'method': 'bayes',
     'metric': {
-        'name': 'loss',
+        'name': 'epoch_loss',
         'goal': 'minimize'
     },
     'parameters': {
@@ -57,12 +36,33 @@ sweep_config = {
         },
         'weight_decay': {
             'values': [1e-4, 1e-5, 1e-6]
+        },
+        'epochs': {
+            'value': 100
+        },
+        'datafolder': {
+            'value': '/home/emanu/Desktop/SegmentedData'
+        },
+        'par': {
+            'value': [4]
+        },
+        'mov': {
+            'value': list(range(1, 18))
+        },
+        'cam': {
+            'value': list(range(0, 6))
+        },
+        'model_type': {
+            'value': 'mediapipe'
+        },
+        'num_cam': {
+            'value': 6
         }
     },
     'early_terminate': {
         'type': 'hyperband',
         'min_iter': 20,
-        'eta': 4
+        'eta': 2
     }
 }
 
@@ -70,12 +70,11 @@ sweep_config = {
 # (Optional) Provide a name of the project.
 sweep_id = wandb.sweep(sweep=sweep_config, project="SkeletonMorphingSweep")
 
-
 def data_loader(data_config):
     # Creating dataset and data loader
     # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
     # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-    my_dataset = ReadDatasetFiles(data_config.datafolder, data_config.par, data_config.mov, data_config.cam, data_config.model_type)
+    my_dataset = torch.load('par4_mediapipe_test.pth')
     train_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=True, num_workers=8,
                                    pin_memory=True)
 
@@ -83,9 +82,9 @@ def data_loader(data_config):
 
 
 def train(model, train_loader, optimizer):
-    losses = []
     # Iterate through batches
-    for batch in train_loader:
+    losses = 0
+    for step, batch in enumerate(train_loader):
         # Access data for each batch
         pose_gt_batch = batch['pose_gt']
         pose_inf_batch = batch['pose_inf']
@@ -99,20 +98,20 @@ def train(model, train_loader, optimizer):
         pred_poses = model(inp_poses)
 
         # Calculating MSE loss
-        loss = nn.MSELoss(pred_poses, output_poses)
+        loss = nn.functional.mse_loss(pred_poses, output_poses)
 
         # Backward pass and optimization step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # Append loss to list of losses
-        losses.append(loss.item())
+        # Append loss
+        losses += (loss.item())
 
         # Log the loss of each batch
-        wandb.log({"batch_loss": loss.item()})
+        wandb.log({"batch_loss": loss.item(), "batch": step+1})
 
-    return losses, pred_poses, pose_gt_batch, pose_inf_batch
+    return losses / len(train_loader), pred_poses, pose_gt_batch, pose_inf_batch
 
 
 def main(config=None):
@@ -124,6 +123,7 @@ def main(config=None):
 
         # Load model
         model = modelSkeletonMorphing.Synthesizer().cuda()
+        # wandb.watch(model, log_freq=1000)
 
         # Parameters for optimization
         params = list(model.parameters())  # + list(dec.parameters())
@@ -137,6 +137,9 @@ def main(config=None):
         # Load dataset
         dataset = data_loader(config)
 
+        # Start loss
+        last_loss = 1000000
+
         # Training loop
         for epoch in range(config.epochs):
             time.sleep(15)
@@ -144,23 +147,31 @@ def main(config=None):
             losses, pred_poses, pose_gt_batch, pose_inf_batch = train(model, dataset, optimizer)
 
             # Logging the loss and epoch
-            wandb.log({"epoch": epoch})
-            wandb.log({"epoch_loss": np.sqrt(np.mean(losses))})
+            wandb.log({"epoch_loss": np.sqrt(np.mean(losses)), "epoch": epoch+1})
 
             # Plotting the keypoints and logging them
             prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
             ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
             hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
-            plot_3d_keypoints(prediction, 'mediapipe', 'morphed')
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth')
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth')
-            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe')
+            plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
+            plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
+            plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
+            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
 
             # Print loss and epoch
-            print('Finished epoch ' + str(epoch) + ' of ' + str(config.epochs) + ' with loss ' + str(np.mean(losses)))
+            print('Finished epoch ' + str(epoch+1) + ' of ' + str(config.epochs) + ' with loss ' + str(np.mean(losses)))
 
+            # Save so far best model
+            if np.mean(losses) < last_loss:
+                model_path = '/models/morph_' + config.model_type + '_' + sweep_id + '.pth'
+                torch.save(model.state_dict(), model_path)
+                artifact = wandb.Artifact('model', type='model')
+                artifact.add_file(model_path)
+                wandb.log_artifact(artifact)
+                # Update last loss
+                last_loss = np.mean(losses)
 
 # Start sweep job.
-wandb.agent(sweep_id, function=main, count=2)
+wandb.agent(sweep_id, function=main, count=5)
 # Training complete
 print('done')

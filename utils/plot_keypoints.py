@@ -2,7 +2,7 @@ import plotly.graph_objects as go
 import wandb
 import numpy as np
 
-def plot_3d_keypoints(keypoints, model_name, wandb_name):
+def plot_3d_keypoints(keypoints, model_name, wandb_name, epoch):
     # Extract X, Y, and Z coordinates from keypoints
     x, y, z = zip(*keypoints)
 
@@ -44,15 +44,15 @@ def plot_3d_keypoints(keypoints, model_name, wandb_name):
 
     # Log the 3D scatter plot using WandB
     if wandb_name == 'morphed':
-        wandb.log({'morphed': fig})
+        wandb.log({'morphed': fig, "epoch": epoch+1})
     elif wandb_name == 'ground_truth':
-        wandb.log({'ground_truth': fig})
+        wandb.log({'ground_truth': fig, "epoch": epoch+1})
     elif wandb_name == 'hpe_truth':
-        wandb.log({'hpe_truth': fig})
+        wandb.log({'hpe_truth': fig, "epoch": epoch+1})
     else:
         raise ValueError(f"Invalid wandb_name: {wandb_name}")
 
-def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_hpe_truth, model_name):
+def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_hpe_truth, model_name, epoch):
     colors = ['red', 'green', 'blue']
     names = ['Morphed KeyPoints', 'Ground Truth KeyPoints', 'HPE Truth KeyPoints']
     # Define connections between related keypoints
@@ -100,4 +100,4 @@ def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_h
     )
 
     # Log the 3D scatter plot using WandB
-    wandb.log({"3D Keypoints Comparison": fig})
+    wandb.log({"3D Keypoints Comparison": fig, "epoch": epoch+1})
