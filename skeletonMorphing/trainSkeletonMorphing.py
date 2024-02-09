@@ -61,7 +61,7 @@ wandb.init(project="skeleton-morphing", config=config)
 data_folder = '/home/emanu/Desktop/SegmentedData'
 
 # Parameters for training
-par = [4]
+par = [5]
 mov = list(range(1, 18))
 cam = list(range(0, 6))
 model_type = 'mediapipe'
@@ -71,11 +71,15 @@ num_cam = 6
 # config.datafile = data_folder + 'h36m_train_mpi_skeleton_pred.pickle'
 
 # Creating dataset and data loader
-# my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
-# torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-my_dataset = torch.load('morph_dataset/par4_mediapipe_test.pth')
-print('Data loader created')
+#print('Creating dataset of participant' + str(par) + '...')
+#my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
+#torch.save(my_dataset, 'par4_mediapipe_test2.pth')
+#print('done')
+my_dataset1 = torch.load('morph_dataset/par4_mediapipe_test.pth')
+my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
 train_loader = data.DataLoader(my_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+print('Data loader created')
 
 # Initializing the model (Synthesizer) and moving it to GPU
 model = modelSkeletonMorphing.Synthesizer().cuda()

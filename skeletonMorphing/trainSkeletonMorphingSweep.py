@@ -29,13 +29,13 @@ sweep_config = {
     },
     'parameters': {
         'learning_rate': {
-            'values': [0.001, 0.0001, 0.00001]
+            'value': 1e-4  # Learning rate: 1e-4
         },
         'BATCH_SIZE': {
-            'values': [16, 32, 64]
+            'value': 32  # Batch size: 32
         },
         'weight_decay': {
-            'values': [1e-4, 1e-5, 1e-6]
+            'values': [1e-5, 1e-6]  # Weight decay: 1e-5
         },
         'epochs': {
             'value': 100
@@ -61,7 +61,7 @@ sweep_config = {
     },
     'early_terminate': {
         'type': 'hyperband',
-        'min_iter': 3,
+        'min_iter': 10,
         'eta': 3
     }
 }
@@ -75,7 +75,9 @@ def data_loader(data_config):
     # Creating dataset and data loader
     # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
     # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-    my_dataset = torch.load('morph_dataset/par4_mediapipe_test.pth')
+    my_dataset1 = torch.load('morph_dataset/par4_mediapipe_test.pth')
+    my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+    my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
     train_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=True, num_workers=8,
                                    pin_memory=True)
 
@@ -111,7 +113,6 @@ def train(model, train_loader, optimizer):
 
         # Log the loss of each batch
         wandb.log({"batch_loss": loss.item(), "batch": step+1})
-        print
 
     return losses / len(train_loader), pred_poses, pose_gt_batch, pose_inf_batch
 
@@ -131,7 +132,8 @@ def main(config=None):
         params = list(model.parameters())  # + list(dec.parameters())
 
         # Setting anomaly detection for autograd
-        optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay)
+        optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay,
+                               amsgrad=True, foreach=True)
 
         # Setting anomaly detection for autograd
         torch.autograd.set_detect_anomaly(True)
@@ -176,6 +178,6 @@ def main(config=None):
 
 
 # Start sweep job.
-wandb.agent(sweep_id, function=main, count=5)
+wandb.agent(sweep_id, function=main, count=2)
 # Training complete
 print('done')

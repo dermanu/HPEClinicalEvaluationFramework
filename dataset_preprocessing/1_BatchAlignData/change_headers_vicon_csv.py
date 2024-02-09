@@ -78,4 +78,4 @@ def read_csv_files(folder_path, save_path):
                     print(f"File {file} in {root} is empty.")
 
 # Replace 'your_folder_path' with the actual path to the root folder containing subfolders
-read_csv_files('/home/emanu/Desktop/MoCap/vicon_data_complete', '/home/emanu/Desktop/MoCap/complete_raw/vicon')
+read_csv_files('/media/emanu/LaCie/3_VICON_OUTPUT', '/home/emanu/Desktop/MoCap/complete_raw/vicon')

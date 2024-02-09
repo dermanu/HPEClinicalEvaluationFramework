@@ -1,9 +1,9 @@
-import argparse
 import os
 import wandb
 import numpy as np
 import cv2
 import torch
+from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
 from utils import metrics, postprocessing
@@ -21,17 +21,18 @@ def log_frame_example(frames):
 
 
 class Framework:
-    def __init__(self):
+    def __init__(self, model_name, model_type, directory):
+        # Access the parsed arguments
+        self.model_name = model_name
+        self.model_type = model_type
+        self.dataset_path = directory
+
         # Initialize some functions
-        self.model_skel_morph = None
+        self.model_skel_morph = self.load_morph_model()
         self.cam_desynchronizer = frameAug.CameraDesynchronizer()
-        self.run = wandb.init()
 
         # Initialize empty global variables
-        self.dataset_path = None
         self.sweep_config = None
-        self.model_type = None
-        self.model_name = None
 
         # Participants of dataset used in pipeline
         self.participants = ['par5', 'par6', 'par7', 'par8', 'par9', 'par10', 'par11', 'par12', 'par14', 'par15',
@@ -80,8 +81,7 @@ class Framework:
         self.interpolation_fun = "akima"
         self.smoothing_fun = "median"
 
-    @property
-    def load_data_paths(self):
+    def load_data_paths(self, config):
         """
         Loads data paths of the Vizlab dataset. Finds paths of the video and respective csv movement files.
         :return:
@@ -90,11 +90,13 @@ class Framework:
         """
 
         # Get relevant parameters from sweep configuration
-        movement_numbers = self.movement_category[self.sweep_config['movement']]
+        movement_numbers = self.movement_category[config['movement']]
         participants = self.sweep_config['dataset']
-        cams = self.sweep_config['cameras']
-        string_cams = list(map(str, cams))
-        iterations = np.arange(1, 11)
+        cams = config['cameras']
+        if isinstance(cams, int):
+            string_cams = [str(cams)]  # Convert the single integer to a list containing its string representation
+        elif isinstance(cams, list):
+            string_cams = list(map(str, cams))
 
         # Loop through all the video and csv files and extract the for the sweep relevant ones
         video_paths_all = []
@@ -104,36 +106,49 @@ class Framework:
             folder_path = os.path.join(self.dataset_path, participant)
             if os.path.isdir(folder_path):  # Check if it's a directory
                 for movement_number in movement_numbers:  # Loop for each chosen movement type
-                    for iteration in iterations:  # Loop for each iteration
-                        video_paths = []  # Reset single iteration arrays
-                        csv_paths = []
-                        for cam in cams:  # Loop for each camera
-                            video_file_name = f"{participant}_Mov{movement_number}_Iter{iteration}_Cam{cam}.avi"
-                            csv_file_name = f"{participant}_Mov{movement_number}_Iter{iteration}_Cam{cam}.csv"
-                            video_file_name = os.path.join(folder_path, video_file_name)
-                            csv_file_name = os.path.join(folder_path, csv_file_name)
-                            # Check if the file names exist
-                            if os.path.isfile(video_file_name):
-                                video_paths.append(video_file_name)
-                            if os.path.isfile(csv_file_name):
-                                csv_paths.append(csv_file_name)
+                    video_paths = []  # Reset single iteration arrays
+                    csv_paths = []
+                    for cam in string_cams:  # Loop for each camera
+                        video_file_name = f"{participant}_Mov{movement_number}_Cam{cam}.avi"
+                        csv_file_name = f"{participant}_Mov{movement_number}_Cam{cam}.csv"
+                        video_file_name = os.path.join(folder_path, video_file_name)
+                        csv_file_name = os.path.join(folder_path, csv_file_name)
+                        # Check if the file names exist
+                        if os.path.isfile(video_file_name):
+                            video_paths.append(video_file_name)
+                        if os.path.isfile(csv_file_name):
+                            csv_paths.append(csv_file_name)
 
-                        # Save all paths of all cameras for each movement iteration. Check if all required camera
-                        # angles are present
-                        cams_video = [filename.split('_')[-1][3:-4] for filename in video_paths]
-                        cams_csv = [filename.split('_')[-1][3:-4] for filename in csv_paths]
+                    # Save all paths of all cameras for each movement iteration. Check if all required camera
+                    # angles are present
+                    cams_video = [filename.split('_')[-1][3:-4] for filename in video_paths]
+                    cams_csv = [filename.split('_')[-1][3:-4] for filename in csv_paths]
 
-                        if set(string_cams).issubset(cams_video):
-                            video_paths_all.append(video_paths)
-                        else:
-                            continue
+                    if set(string_cams).issubset(cams_video):
+                        video_paths_all.append(video_paths)
+                    else:
+                        continue
 
-                        if set(string_cams).issubset(cams_csv):
-                            csv_paths_all.append(csv_paths)
-                        else:
-                            continue
+                    if set(string_cams).issubset(cams_csv):
+                        csv_paths_all.append(csv_paths)
+                    else:
+                        continue
 
         return video_paths_all, csv_paths_all
+
+    def load_morph_model(self):
+        """
+        Load the morphing model for the specified model name
+        """
+        morph_model_path = "skeletonMorphing/models/morph_" + str(self.model_name) + ".pth"
+        model_skel_morph = modelSkeletonMorphing.Synthesizer()
+        if os.path.isfile(morph_model_path):
+            model_skel_morph.load_state_dict(torch.load(morph_model_path))
+            model_skel_morph.eval()
+        else:
+            raise ValueError('Morphing model is missing')
+
+        return model_skel_morph
 
     def calculate_log_metrics(self, gt_keypoints, pred_keypoints, inference_times):
         """
@@ -194,6 +209,16 @@ class Framework:
         # Log the plot to wand
         pass
 
+    def apply_morphing(self, input_pose):
+        """
+        Apply skeleton morphing to the input pose using the loaded model.
+        :param input_pose: Input pose to be morphed.
+        :return: morphed_pose: Pose after applying skeleton morphing.
+        """
+        with torch.no_grad():
+            morphed_pose = self.model(input_pose)
+        return morphed_pose
+
     def preprocess_ground_truth(self, csv_path):
         """
         Pre-process the ground truth keypoints by first loading them from the csv file and transform them to be comparable
@@ -220,85 +245,72 @@ class Framework:
 
         return pred_keypoints_processing
 
-    def main(self):
+    def main(self, config=None):
         """
         Run inference on the chosen model with sweep parameters and log results to wandb project.
         """
+        with wandb.init(config=config):
+            # If called by wandb.agent, as below,
+            # this config will be set by Sweep Controller
+            config = wandb.config
+            # Load video and csv file paths
+            video_paths, csv_paths = self.load_data_paths(config)
 
-        # Load video and csv file paths
-        video_paths, csv_paths = Framework.load_data_paths()
+            # Generate cv2 video API and load respective ground truth keypoints
+            caps = []
+            gt_keypoints_all = []
+            pred_keypoints_all = []
+            inference_times_all = []
 
-        # Generate cv2 video API and load respective ground truth keypoints
-        caps = []
-        gt_keypoints_all = []
-        pred_keypoints_all = []
-        inference_times_all = []
+            # Iterate through all videos specified
+            for movement_iter in video_paths:
+                # Get all specified cameras of the specified movement iteration and create a cv2 capture stream
+                for cam in movement_iter:
+                    cap = cv2.VideoCapture(cam)
+                    caps.append(cap)
+                    # Get ground truth keypoints
+                    gt_keypoints = self.preprocess_ground_truth(csv_paths)
 
-        # Iterate through all videos specified
-        for movement_iter in video_paths:
-            # Get all specified cameras of the specified movement iteration and create a cv2 capture stream
-            for cam in movement_iter:
-                cap = cv2.VideoCapture(cam)
-                caps.append(cap)
-                # Get ground truth keypoints
-                gt_keypoints = self.preprocess_ground_truth(csv_paths)
+                # Open model based on name and run inference
+                # Monocular models
+                if self.model_type == "mono":
+                    if self.model_name == "mediapipe":
+                        pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, self.sweep_config)
+                    if self.model_name == "alphapose":
+                        print("AlphaPose not implemented yet")
+                        # pred_keypoints, inference_times, frame = alphaPoseMono.inference_video(caps, self)
 
-            # Open model based on name and run inference
-            # Monocular models
-            if self.model_type == "mono":
-                if self.model_name == "mediapipe":
-                    pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, self.sweep_config)
-                if self.model_name == "alphapose":
-                    print("AlphaPose not implemented yet")
-                    # pred_keypoints, inference_times, frame = alphaPoseMono.inference_video(caps, self)
+                # Multioccular models
+                elif self.model_type == "multi":
+                    # Desynchronize video streams
+                    if self.sweep_config['desynchronizer']:
+                        caps = self.cam_desynchronizer.desynchronize(caps)
+                    # Load camera parameter matrix and add noise if specified so
+                    p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'],
+                                                             self.sweep_config['decalibration'])
 
-            # Multioccular models
-            elif self.model_type == "multi":
-                # Desynchronize video streams
-                if self.sweep_config['desynchronizer']:
-                    caps = self.cam_desynchronizer.desynchronize(caps)
-                # Load camera parameter matrix and add noise if specified so
-                p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'],
-                                                         self.sweep_config['decalibration'])
+                    if self.model_name == "canonpose":
+                        print("CanonPose not implemented yet")
+                        # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
 
-                if self.model_name == "canonpose":
-                    print("CanonPose not implemented yet")
-                    # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
+                # Do some post-processing on the predicted keypoints
+                pred_keypoints = self.postprocess_prediction(pred_keypoints)
 
-            # Do some post-processing on the predicted keypoints
-            pred_keypoints = self.postprocess_prediction(pred_keypoints)
+                # Collect pred_keypoints for each movement iteration
+                gt_keypoints_all.append[gt_keypoints]
+                pred_keypoints_all.append[pred_keypoints]
+                inference_times_all.append[inference_times]
 
-            # Collect pred_keypoints for each movement iteration
-            gt_keypoints_all.append[gt_keypoints]
-            pred_keypoints_all.append[pred_keypoints]
-            inference_times_all.append[inference_times]
+            # Calculate the metrics, generate plots and log them to wandb
+            self.calculate_log_metrics(gt_keypoints, pred_keypoints, inference_times)
+            self.plot_n_log(gt_keypoints, pred_keypoints)
+            log_frame_example(frame)
 
-        # Calculate the metrics, generate plots and log them to wandb
-        self.calculate_log_metrics(gt_keypoints, pred_keypoints, inference_times)
-        self.plot_n_log(gt_keypoints, pred_keypoints)
-        log_frame_example(frame)
-
-    def run(self):
+    def initiate_wandb_sweep(self):
         """
         Get settings from the parser and initiate the sweep with all parameters
         :return:
         """
-
-        # Get inputs from command line
-        parser = argparse.ArgumentParser(description="Pipeline to evaluate real-time 3D pose estimation models in"
-                                                     "a clinical context.")
-        # Add command-line arguments
-        parser.add_argument('-model', '--string1', help='Model name: mediapipe, alphapose, ...')
-        parser.add_argument('-cameras', '--string2', help='Model type: mono or multi')
-        parser.add_argument('-dataset', '--directory', help='Path to dataset')
-
-        # Parse command-line arguments
-        args = parser.parse_args()
-
-        # Access the parsed arguments
-        self.model_name = args.string1
-        self.model_type = args.string2
-        self.dataset_path = args.directory
 
         # Sanity check of inputs
         if self.model_type not in ['multi', 'mono']:
@@ -314,61 +326,54 @@ class Framework:
         if self.dataset_path is None:
             raise ValueError('Dataset path is missing')
 
-        # Initialize morphing network based on HPE model chosen
-        morph_model_path = "skeletonMorphing/models/model_skeleton_morph_" + str(self.model_name) + ".pt"
-        if os.path.isfile(morph_model_path):
-            self.model_skel_morph = torch.load(morph_model_path)
-            self.model_skel_morph.eval()
-        else:
-            raise ValueError('Morphing model is missing')
-
         # Set sweep config to grid search, which iterates over every possible combination
         self.sweep_config = {
             'name': 'sweep_' + self.model_type + '_' + self.model_name,
             'dataset': self.participants,
-            'method': 'grid'}
-
-        # Set parameters and values for the sweep
-        parameters_dict = {
+            'method': 'grid',
             'parameters': {
-                'augmentation': {
-                    'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background']
-                },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
-                },
-                'cameras': {
-                    'values': [0, 5, 4, 1, 3, 2]
                 }
             }
         }
 
         # If there are multiple cameras updates sweep parameters:
-        if self.model_type == 'multi':
+        if self.model_type == 'mono':
             # Sweep parameters
-            multioccular_parameters = {
-                'parameters': {
-                    'augmentation': {
-                        'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background',
-                                   'desynchronize', 'decalibration']
-                    },
-                    'cameras': {
-                        'values': [[4, 0], [3, 2], [5, 1], [4, 2], [0, 4, 3], [0, 2, 3], [5, 4, 1], [0, 4, 3, 2],
-                                  [0, 5, 4, 3, 2],
-                                  [0, 5, 4, 1, 3, 2]]
-                    }
+            parameters_dict = {
+                'augmentation': {
+                    'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background']
+                },
+                'cameras': {
+                    'values': [0, 5, 4, 1, 3, 2]
                 }
             }
-            parameters_dict['parameters'].update(multioccular_parameters)
+        elif self.model_type == 'multi':
+            # Sweep parameters
+            parameters_dict = {
+                'augmentation': {
+                    'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background',
+                               'desynchronize', 'decalibration']
+                },
+                'cameras': {
+                    'values': [[4, 0], [3, 2], [5, 1], [4, 2], [0, 4, 3], [0, 2, 3], [5, 4, 1], [0, 4, 3, 2],
+                               [0, 5, 4, 3, 2],
+                               [0, 5, 4, 1, 3, 2]]
+                }
+            }
+
+        self.sweep_config['parameters'].update(parameters_dict)
 
         # Initialize the sweep run
         sweep_id = wandb.sweep(sweep=self.sweep_config,
-                               project='HPE_framework',
-                               description='Clinical Evaluation of different real-time 3D HPE models')
+                               project='HPE_framework')
 
         # Start sweep
         wandb.agent(sweep_id, function=self.main)
 
-        if __name__ == "__main__":
-            framework_instance = Framework()
-            framework_instance.run()
+        # Training complete
+        print("Testing complete")
+
+# Run the framework
+Framework(model_name="mediapipe", model_type="mono", directory="/home/emanu/Desktop/SegmentedData").initiate_wandb_sweep()

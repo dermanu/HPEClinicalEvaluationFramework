@@ -32,6 +32,12 @@ def read_csv_files(folder_path, save_path):
                         df[header + '_Y'] = [sublist[1] for sublist in mocap_data[header]]
                         df[header + '_Z'] = [sublist[2] for sublist in mocap_data[header]]
 
+                    # Drop rows LFHD, RFHD, LBHD, RBHD if present
+                    columns_to_drop = ['LFHD_X', 'LFHD_Y', 'LFHD_Z', 'RFHD_X', 'RFHD_Y', 'RFHD_Z', 'LBHD_X', 'LBHD_Y',
+                                       'LBHD_Z', 'RBHD_X', 'RBHD_Y', 'RBHD_Z', 'LFIN_X', 'LFIN_Y', 'LFIN_Z', 'RFIN_X',
+                                       'RFIN_Y', 'RFIN_Z']
+                    df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+
                     # Append data from _2proc.trc, _3proc.trc, _4proc.trc files
                     for i in range(2, 5):
                         additional_file = file.replace("_1proc.trc", f"_{i}proc.trc")
@@ -50,6 +56,9 @@ def read_csv_files(folder_path, save_path):
                                     additional_df[header + '_X'] = [sublist[0] for sublist in additional_data[header]]
                                     additional_df[header + '_Y'] = [sublist[1] for sublist in additional_data[header]]
                                     additional_df[header + '_Z'] = [sublist[2] for sublist in additional_data[header]]
+
+                            # Drop rows LFHD, RFHD, LBHD, RBHD if present in additional data
+                            additional_df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
 
                             # Concatenate additional data to the main DataFrame
                             df = pd.concat([df, additional_df], ignore_index=True)
@@ -80,4 +89,4 @@ def expand_header(header):
 
 
 # Replace 'your_folder_path' with the actual path to the root folder containing subfolders
-read_csv_files('/home/emanu/Desktop/MoCap/vicon_data_complete', '/home/emanu/Desktop/MoCap/complete_raw/vicon')
+read_csv_files('/media/emanu/LaCie/3_VICON_OUTPUT', '/home/emanu/Desktop/MoCap/complete_raw/vicon')
