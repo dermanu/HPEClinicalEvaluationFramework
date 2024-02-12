@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import cv2
-import torch
 import numpy as np
 from torch.utils.data import Dataset
 import models.mediapipeMono as MediaPipe
