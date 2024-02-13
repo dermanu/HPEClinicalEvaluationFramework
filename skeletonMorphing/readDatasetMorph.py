@@ -57,7 +57,7 @@ class ReadDatasetFiles(Dataset):
         return csv_file_paths
 
     def create_datasets(self):
-        datasets = []
+        #datasets = []
         #i = 0
 
         # Use multiprocessing to parallelize dataset creation

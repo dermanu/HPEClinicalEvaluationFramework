@@ -1,9 +1,9 @@
 import os
 import wandb
 import numpy as np
-import cv2
-import pandas as pd
 import torch
+from tqdm import tqdm
+import multiprocessing
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
@@ -15,7 +15,6 @@ def log_frame_example(frames):
     """
     Log the last frame of one camera angle to visualize applied frame augmentations
     :param frames: augmented frames, e.g. [cam0, cam1, cam2, ...]
-    :return:
     """
     image = wandb.Image(frames[0], caption=f"Frame example of current evaluation")
     wandb.log({"Example_Frame": image})
@@ -83,10 +82,10 @@ class Framework:
         self.interpolation_fun = "akima"
         self.smoothing_fun = "median"
 
-
     def load_morph_model(self):
         """
         Load the morphing model for the specified model name
+        :return model_skel_morph: Morphing model for the specified model name
         """
         morph_model_path = "skeletonMorphing/models/morph_" + str(self.model_name) + ".pth"
         model_skel_morph = modelSkeletonMorphing.Synthesizer()
@@ -101,12 +100,15 @@ class Framework:
     def apply_morphing(self, input_pose):
         """
         Apply skeleton morphing to the input pose using the loaded model.
-        :param input_pose: Input pose to be morphed.
+        :param input_pose: Input pose to be morphed as numpy array.
         :return: morphed_pose: Pose after applying skeleton morphing.
         """
+        # Convert input pose to tensor and apply morphing
+        input_pose = torch.from_numpy(input_pose)
+        inp_poses = input_pose.view(-1, input_pose.size(1) * input_pose.size(2)).float()
         with torch.no_grad():
-            morphed_pose = self.model_skel_morph(input_pose)
-        return morphed_pose
+            morphed_pose = self.model_skel_morph(inp_poses)
+        return morphed_pose.view(-1, input_pose.size(1), input_pose.size(2)).cpu().detach().numpy()
 
     def calculate_log_metrics(self, gt_keypoints, pred_keypoints, inference_times):
         """
@@ -114,7 +116,6 @@ class Framework:
         :param gt_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
         :param pred_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
         :param inference_times: [inference_time0, inference_time1, inference_time2, ]
-        :return:
         """
 
         # First we calculate the metrics for all extracted keypoints
@@ -181,20 +182,22 @@ class Framework:
             pred_keypoints_all = []
             inference_times_all = []
 
-            for par in self.participants:
-                for mov in self.movement_category[config['movement']]:
-                    try:
-                        gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, config['cameras'])
-                    except:
-                        print(f"Participant {par} and movement {mov} not found")
-                        continue
+            for par in tqdm(self.participants, ascii=True, desc="Participants"):
+                for mov in tqdm(self.movement_category[config['movement']], ascii=True, desc="Movements"):
+                    #try:
+                    gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, config['cameras'],
+                                                                self.model_name)
+                    #except:
+                    #    print(f"Participant {par} and movement {mov} not found")
+                    #    continue
 
                     # Open model based on name and run inference
                     # Monocular models
                     if self.model_type == "mono":
                         if self.model_name == "mediapipe":
-                            pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
-                            # pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
+                            pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps[0][1], config)
+                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
+                            pred_keypoints = pred_keypoints[:, selected_columns, 1:]
 
                         if self.model_name == "alphapose":
                             print("AlphaPose not implemented yet")
@@ -221,14 +224,16 @@ class Framework:
                     gt_keypoints_morphed = self.apply_morphing(pred_keypoints_processing)
 
                     # Collect pred_keypoints for each movement iteration
-                    gt_keypoints_all.append[gt_keypoints_morphed]
-                    pred_keypoints_all.append[pred_keypoints_processing]
-                    inference_times_all.append[inference_times]
+                    gt_keypoints_all.append(gt_keypoints_morphed)
+                    pred_keypoints_all.append(pred_keypoints_processing)
+                    inference_times_all.append(inference_times)
 
-                    # Calculate the metrics, generate plots and log them to wandb
-                    self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
-                    self.plot_n_log(gt_keypoints, pred_keypoints)
-                    log_frame_example(frame)
+            # Calculate the metrics, generate plots and log them to wandb
+            #with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
+            #pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
+            self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
+            self.plot_n_log(gt_keypoints, pred_keypoints)
+            log_frame_example(frame)
 
     def initiate_wandb_sweep(self):
         """

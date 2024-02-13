@@ -6,50 +6,39 @@ import cv2
 
 def align_keypoints(keypoints_org, model_type):
     """
-            Aligns keypoints in a CSV file based on different alignment identifiers.
+    Aligns keypoints in a DataFrame based on different alignment identifiers.
+    :param keypoints_org (pd.DataFrame or None): Original DataFrame containing the keypoints.
+    :param model_type (str): String identifier for selecting the alignment array based on the respective model.
 
-            Parameters:
-            - keypoints_org (pd.DataFrame or None): Original DataFrame containing the keypoints.
-            - model_name (str): String identifier for selecting the alignment array based on the respective model.
+    :return aligned_keypoints (dict): Dictionary containing aligned keypoints.
+    """
 
-            Returns:
-            - aligned_df (pd.DataFrame or None): Aligned DataFrame if output_path is None, else None.
-            """
-
-    # Define different order arrays based on alignment_identifier
-    keypoints_org_names = ['RBAK', 'LTOE', 'LASI', 'CLAV', 'T10', 'LPSI', 'RWJC', 'RASI', 'RTIB', 'LANK', 'LAJC',
-                           'LKJC', 'RKJC', 'RFRM', 'C7', 'RWRA', 'LEJC', 'LWJC', 'LFRM', 'LWRB', 'LTHI', 'RTHI',
-                           'RSJC', 'RAJC', 'LWRA', 'LSHO', 'RHEE', 'STRN', 'RPSI', 'LELB', 'LUPA', 'RWRB', 'RTOE',
-                           'LKNE', 'RSHO', 'RHJC', 'RANK', 'RKNE', 'LSJC', 'LHEE', 'RELB', 'RUPA', 'REJC', 'LTIB',
-                           'LHJC']
+    mediapipe_mapping = {
+        'RShoulder': 'RSJC',  # 12 - 0
+        'LShoulder': 'LSJC',  # 11 - 1
+        'RElbow': 'REJC',  # 14 - 2
+        'LElbow': 'LEJC',  # 13 - 3
+        'RWrist': 'RWJC',  # 16 - 4
+        'LWrist': 'LWJC',  # 15 - 5
+        'RHip': 'RHJC',  # 24 - 6
+        'LHip': 'LHJC',  # 23 - 7
+        'RKnee': 'RKJC',  # 26 - 8
+        'LKnee': 'LKJC',  # 25  - 9
+        'RAnkle': 'RAJC',  # 28 - 10
+        'LAnkle': 'LAJC',  # 27 - 11
+        'RHeel': 'RHEE',  # 30 - 12
+        'LHeel': 'LHEE',  # 29 - 13
+        'RFootIndex': 'RTOE',  # 32 - 14
+        'LFootIndex': 'LTOE',  # 31 - 15
+    }
 
     if model_type == 'mediapipe':
-        column_mapping = {
-            'RShoulder': 'RSJC',  # 12 - 0
-            'LShoulder': 'LSJC',  # 11 - 1
-            'RElbow': 'REJC',  # 14 - 2
-            'LElbow': 'LEJC',  # 13 - 3
-            'RWrist': 'RWJC',  # 16 - 4
-            'LWrist': 'LWJC',  # 15 - 5
-            'RHip': 'RHJC',  # 24 - 6
-            'LHip': 'LHJC',  # 23 - 7
-            'RKnee': 'RKJC',  # 26 - 8
-            'LKnee': 'LKJC',  # 25  - 9
-            'RAnkle': 'RAJC',  # 28 - 10
-            'LAnkle': 'LAJC',  # 27 - 11
-            'RHeel': 'RHEE',  # 30 - 12
-            'LHeel': 'LHEE',  # 29 - 13
-            'RFootIndex': 'RTOE',  # 32 - 14
-            'LFootIndex': 'LTOE',  # 31 - 15
-        }
-        selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
-
+        column_mapping = mediapipe_mapping
     elif model_type == 'openpose':
-        # More a placeholder than anything else
-        column_mapping = [1, 3, 2]
-        selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
+        print('Not implemented yet')
+        #column_mapping = openpose_mapping
     else:
-        raise ValueError(f"Invalid model_name: {model_type}")
+        raise ValueError(f"Invalid model_type: {model_type}")
 
     # Extract original keypoint names (assuming they follow a pattern)
     keypoints_org_names = set(col.rsplit('_', 1)[0] for col in keypoints_org.columns)
@@ -63,53 +52,69 @@ def align_keypoints(keypoints_org, model_type):
         keypoints_org_subarrays[keypoint] = keypoints_org[keypoint_cols].to_numpy()
 
     # Filter columns based on column_mapping and reorder the DataFrame
-    ordered_keypoints_org_subarrays = dict(
+    ordered_keypoints = dict(
         zip(column_mapping.keys(), [keypoints_org_subarrays[key] for key in column_mapping.values()]))
 
-    return ordered_keypoints_org_subarrays
+    return ordered_keypoints
 
 
-def load_csv(self, csv_file_path):
+def load_csv(csv_file_path, model_type):
     """
-    Load the csv file from the specified path
+    Load keypoints from a CSV file.
+    :param csv_file_path (str): Path to the CSV file.
+    :param model_type (str): String identifier for the model used.
+
+    :return keypoints (np.array): Array containing keypoints.
     """
-    csv_data = pd.read_csv(csv_file_path)
+    # Load the CSV file
+    keypoints_org = pd.read_csv(csv_file_path)
     # Drop irrelevant columns
-    csv_data.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
-
-    # Align the columns (you may need to modify this part based on your needs)
-    csv_data = align_keypoints(csv_data)
-    csv_data = np.array(list(csv_data.values()))
-    csv_data = csv_data.transpose((1, 0, 2))
-    return csv_data
+    keypoints_org.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
+    # Align the columns
+    aligned_keypoints = align_keypoints(keypoints_org, model_type)
+    keypoints = np.array(list(aligned_keypoints.values())).transpose((1, 0, 2))
+    return keypoints
 
 
-def load_data(path, par, mov, cams):
+def load_data(path, par, mov, cams, model_type):
+    """
+    Load data for a participant.
+    :param path (str): Root directory containing participant data.
+    :param par (str): Participant identifier.
+    :param mov (str): Movement identifier.
+    :param cams (int or list): Camera(s) to load data from.
+    :param model_type (str): String identifier for the model used.
+
+    :return gt_keypoints (list): List of tuples containing camera number and keypoints.
+    :return video_caps (list): List of tuples containing camera number and video capture object.
+    """
     participant_folder = os.path.join(path, par)
-    video_caps = []
     gt_keypoints = []
+    video_caps = []
 
     def load_cam(cam):
         cam_str = f'Cam{cam}'
         mov_str = f'Mov{mov}'
         csv_path = os.path.join(participant_folder, f'{par}_{mov_str}_{cam_str}.csv')
         video_path = os.path.join(participant_folder, f'{par}_{mov_str}_{cam_str}.avi')
-        print(f'Loading {csv_path}')
-        points = load_csv(csv_path)
-        cap = cv2.VideoCapture(video_path)
-        return cam, cap, points
 
+        if not os.path.exists(csv_path) or not os.path.exists(video_path):
+            raise FileNotFoundError(f"CSV or video file not found for camera {cam}.")
+
+        keypoints = load_csv(csv_path, model_type)
+        cap = cv2.VideoCapture(video_path)
+        return cam, keypoints, cap
+
+    # Load data for each camera
     if isinstance(cams, list):
         for cam in cams:
-            cam_num, cap, points = load_cam(cam)
+            cam_num, keypoints, cap = load_cam(cam)
+            gt_keypoints.append((cam_num, keypoints))
             video_caps.append((cam_num, cap))
-            gt_keypoints.append((cam_num, points))
-
     elif isinstance(cams, int):
-        cam_num, cap, points = load_cam(cams)
+        cam_num, keypoints, cap = load_cam(cams)
+        gt_keypoints.append((cam_num, keypoints))
         video_caps.append((cam_num, cap))
-        gt_keypoints.append((cam_num, points))
-
     else:
         raise ValueError(f'Invalid type for cams: {type(cams)}')
 

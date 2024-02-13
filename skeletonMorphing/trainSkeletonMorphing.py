@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import torch.nn as nn
 import wandb
 import numpy as np
-from utils.plot_keypoints import plot_3d_keypoints, plot_3d_keypoints_all
+from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 
 
 # Configuration settings using SimpleNamespace

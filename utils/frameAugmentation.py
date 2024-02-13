@@ -47,10 +47,11 @@ class FrameAugmentor:
     def __init__(self):
         # Initiate BackgroundChanger
         self.change_bg = alter_bg(model_type="pb")
-        self.change_bg.load_pascalvoc_model("xception_pascalvoc.pb")
-        aug_frame = self.change_bg.change_frame_bg(frame, 'home.jpg', detect="person")
+        # Load the model. Can be downloaded from
+        # https://github.com/ayoolaolafenwa/PixelLib/releases/download/1.1/xception_pascalvoc.pb
+        self.change_bg.load_pascalvoc_model('utils/xception_pascalvoc.pb')
 
-    def augment_frames(self, frames, sweep_config):
+    def augment_frames(self, frame, sweep_config):
         """
         Augment video frames before being processed by model, according to sweep settings.
         :param sweep_config: Updated sweep config
@@ -59,23 +60,19 @@ class FrameAugmentor:
         """
 
         # Apply augmentation to each frame of input based on settings in sweep_config
-        frames_aug = []
         augmentation_type = sweep_config['augmentation']
-        for frame in frames:
-            if augmentation_type == 'background':
-                frame = self.change_bg.change_frame_bg(frame, 'background.jpg', detect="person")
-            if augmentation_type == 'motion_blur':
-                frame = motion_blur(frame)
-            if augmentation_type == 'occlusion':
-                frame = occlusion(frame)
-            if augmentation_type == 'defocus':
-                frame = defocus(frame)
-            if augmentation_type == 'underexposure':
-                frame = underexposure(frame)
+        if augmentation_type == 'background':
+            frame = self.change_bg.change_frame_bg(frame, 'background.jpg', detect="person")
+        if augmentation_type == 'motion_blur':
+            frame = motion_blur(frame)
+        if augmentation_type == 'occlusion':
+            frame = occlusion(frame)
+        if augmentation_type == 'defocus':
+            frame = defocus(frame)
+        if augmentation_type == 'underexposure':
+            frame = underexposure(frame)
 
-            frames_aug.append(frame)
-
-        return frames_aug
+        return frame
 
 
 class CameraDesynchronizer:

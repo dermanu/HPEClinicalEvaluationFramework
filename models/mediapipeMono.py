@@ -5,11 +5,12 @@ import time
 from utils.frameAugmentation import FrameAugmentor
 
 
-# Currently runs on GPU as per default.
+# Currently runs on CPU as per default.
 def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
     if sweep_config is not None:
         # Initialize frame augmentor
         frameaug = FrameAugmentor()
+
     # Initialize MediaPipe Pose
     mp_pose = mp.solutions.pose
     # Model complexity set to 2 for mono-ocular. Minimum detection and tracking confidence set to 0.5 as default.
