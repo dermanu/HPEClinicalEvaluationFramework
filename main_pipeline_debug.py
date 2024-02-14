@@ -7,9 +7,9 @@ import multiprocessing
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
+from utils.plotKeypoints import plot_3d_keypoints_gt_pred
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
-
 
 def log_frame_example(frames):
     """
@@ -119,40 +119,43 @@ class Framework:
         """
 
         # First we calculate the metrics for all extracted keypoints
+        # The metric for distance is millimeters
         mpjpe = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
-        pmpjpe = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
-        pck = metrics.calculate_pck(gt_keypoints, pred_keypoints)
-        velocity_error = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
-        acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
-        cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
-        angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
-        cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
+        #pmpjpe = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
+        #pck = metrics.calculate_pck(gt_keypoints, pred_keypoints)
+        #velocity_error = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
+        #acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
+        #cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
+        #angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
+        #cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
 
         # Log whole body metrics
-        wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "pck": pck, "velocity_error_all": velocity_error,
-                   "acceleration_error_all": acceleration_error, "cps": cps, "angular_error_all": angular_error,
-                   "cmc_all": cmc})
+        wandb.log({mpjpe_all: mpjpe})
+        #wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "pck": pck, "velocity_error_all": velocity_error,
+        #           "acceleration_error_all": acceleration_error, "cps": cps, "angular_error_all": angular_error,
+        #           "cmc_all": cmc})
 
         # Log metrics for different body segments
         for segment in self.body_segments:
             keypoints = self.body_segments[segment]
             mpjpe = metrics.calculate_mpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            pmpjpe = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            pck = metrics.calculate_pck(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            velocity_error = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints)
-            acceleration_error = metrics.mean_acceleration_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            cmc = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            #pmpjpe = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            #pck = metrics.calculate_pck(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            #velocity_error = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints)
+            #acceleration_error = metrics.mean_acceleration_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            #cmc = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
 
-            wandb.log({"mpjpe_" + segment: mpjpe, "pmpjpe_" + segment: pmpjpe, "pck": pck,
-                       "velocity_error_" + segment: velocity_error,
-                       "acceleration_error_" + segment: acceleration_error, "cmc_" + segment: cmc})
+            wandb.log({"mpjpe_" + segment: mpjpe})
+            #wandb.log({"mpjpe_" + segment: mpjpe, "pmpjpe_" + segment: pmpjpe, "pck": pck,
+            #           "velocity_error_" + segment: velocity_error,
+            #           "acceleration_error_" + segment: acceleration_error, "cmc_" + segment: cmc})
 
         # Calculate for each joint separately
-        for joint_name in self.joint_segments:
-            joint = self.joint_segments[joint_name]
-            angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, joint)
+        #for joint_name in self.joint_segments:
+        #    joint = self.joint_segments[joint_name]
+        #    angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, joint)
 
-            wandb.log({"angular_error_" + joint_name: angular_error})
+        #    wandb.log({"angular_error_" + joint_name: angular_error})
 
         # Log inference time
         inference_time_mean = np.mean(inference_times)
@@ -161,12 +164,6 @@ class Framework:
 
         # Log number (n) of frames metrics are based on:
         wandb.log({"n": len(pred_keypoints)})
-
-    def plot_n_log(self, gt_keypoints, pred_keypoints):
-        # Plot predicted and ground truth keypoints overlay
-
-        # Log the plot to wand
-        pass
 
     def main(self, config=None):
         """
@@ -194,8 +191,12 @@ class Framework:
                     # Open model based on name and run inference
                     # Monocular models
                     if self.model_type == "mono":
+                        # Just load the first (and only) camera
+                        gt_keypoints = gt_keypoints[0][1]
+                        caps = caps[0][1]
+
                         if self.model_name == "mediapipe":
-                            pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps[0][1], config)
+                            pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
                             selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
                             pred_keypoints = pred_keypoints[:, selected_columns, 1:]
 
@@ -221,19 +222,22 @@ class Framework:
                                                                                   self.smoothing_fun)
 
                     # Morph ground truth to format of predicted keypoints
-                    gt_keypoints_morphed = self.apply_morphing(pred_keypoints_processing)
+                    pred_keypoints_morphed = self.apply_morphing(pred_keypoints_processing)
 
                     # Collect pred_keypoints for each movement iteration
-                    gt_keypoints_all.append(gt_keypoints_morphed)
-                    pred_keypoints_all.append(pred_keypoints_processing)
+                    gt_keypoints_all.append(gt_keypoints)
+                    pred_keypoints_all.append(pred_keypoints_morphed)
                     inference_times_all.append(inference_times)
 
             # Calculate the metrics, generate plots and log them to wandb
             #with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
-            #pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
+            #    pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
+            inference_times_all = np.concatenate(inference_times_all)
+            gt_keypoints_all = np.concatenate(gt_keypoints_all, axis=0)
+            pred_keypoints_all = np.concatenate(pred_keypoints_all, axis=0)
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
-            self.plot_n_log(gt_keypoints, pred_keypoints)
-            log_frame_example(frame)
+            #plot_3d_keypoints_gt_pred(gt_keypoints[0], pred_keypoints_morphed[0], 'mediapipe')
+            #log_frame_example(frame)
 
     def initiate_wandb_sweep(self):
         """

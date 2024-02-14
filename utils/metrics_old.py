@@ -5,12 +5,12 @@ from sklearn.metrics import auc, r2_score
 
 def calculate_mpjpe(target: object, prediction: object) -> object:
     """
+    Doesn't work in combination with skeletal morphing, as the outputs are not scaled correctly.
     input = (batch_size, num_joints, 3)
     """
     assert prediction.shape == target.shape
-    mpjpe = np.sqrt(np.sum((prediction - target) ** 2, axis=1))
-    mean = np.mean(mpjpe)
-    std = np.std(mpjpe)
+    mean = np.mean(np.linalg.norm(prediction - target, axis=len(target.shape) - 1))
+    std = np.std(np.linalg.norm(prediction - target, axis=len(target.shape) - 1))
 
     return mean, std
 
@@ -20,12 +20,7 @@ def calculate_pmpjpe(target, prediction):
     Procrustes MJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers.
     """
-    transposed = False
-    if prediction.shape[0] != 3 and prediction.shape[0] != 2:
-        prediction = prediction.T
-        target = target.T
-        transposed = True
-    assert (target.shape[1] == prediction.shape[1])
+    assert prediction.shape == target.shape
 
     muX = np.mean(target, axis=1, keepdims=True)
     muY = np.mean(prediction, axis=1, keepdims=True)
@@ -251,17 +246,15 @@ def calculate_rom(target, prediction, segments):
 
 
 ## NOT WORKING
-def calculate_pck(target, prediction, threshold=50.0, joints_to_use = [1, 2, 3, 4, 5, 6, 8, 10, 11]):
+def calculate_pck(target, prediction, threshold=150, joints_to_use = [1, 2, 3, 4, 5, 6, 8, 10, 11]):
     """ Calculate percentage of correct keypoints (PCK) in [%]"""
     assert len(prediction.shape) == len(target.shape)
 
     # see https://arxiv.org/pdf/1611.09813.pdf
     distances = np.sqrt(np.sum((target[:, joints_to_use, :]
                                 - prediction[:, joints_to_use, :]) ** 2, axis=1))
-
-    pck =  distances <= threshold
-    pck = np.mean(pck, axis=1)
-    return np.mean(pck)*100.
+    pck = np.count_nonzero(distances < threshold, axis=1) / len(joints_to_use)
+    return pck
 
 
 def wrap_to_pi(x):
