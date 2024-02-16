@@ -1,14 +1,30 @@
 import numpy as np
-from scipy import signal
+from scipy import signal, stats
 from sklearn.metrics import auc, r2_score
+
+
+def align_by_pelvis(joints):
+    """
+    Align the input joints by the pelvis joint
+    :param joints: 3D joint positions
+    :return: Aligned 3D joint positions
+    """
+
+    pelvis = joints[:, 0, :]
+    joints = joints - pelvis
+    return joints
 
 
 def calculate_mpjpe(target: object, prediction: object) -> object:
     """
-    input = (batch_size, num_joints, 3)
+    Mean per-joint position error (MPJPE)
+    :param target: Ground truth 3D joint positions
+    :param prediction: Predicted 3D joint positions
+    :return: Mean and standard deviation of the MPJPE
     """
     assert prediction.shape == target.shape
-    mpjpe = np.sqrt(np.sum((prediction - target) ** 2, axis=1))
+
+    mpjpe = np.linalg.norm(prediction - target, axis=2)
     mean = np.mean(mpjpe)
     std = np.std(mpjpe)
 
@@ -19,156 +35,200 @@ def calculate_pmpjpe(target, prediction):
     """
     Procrustes MJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers.
+    :param target: Ground truth 3D joint positions
+    :param prediction: Predicted 3D joint positions
+    :return: Mean and standard deviation of the PMPJPE
     """
-    transposed = False
-    if prediction.shape[0] != 3 and prediction.shape[0] != 2:
-        prediction = prediction.T
-        target = target.T
-        transposed = True
-    assert (target.shape[1] == prediction.shape[1])
+    assert prediction.shape == target.shape
 
-    muX = np.mean(target, axis=1, keepdims=True)
-    muY = np.mean(prediction, axis=1, keepdims=True)
+    pred_hat_all = []
+    for (gt, pred) in (zip(target, prediction)):
+        gt_raw = gt
+        if not (np.sum(np.abs(pred)) == 0):
+            transposed = False
+            if pred.shape[0] != 3 and pred.shape[0] != 2:
+                pred = pred.T
+                gt = gt.T
+                transposed = True
+            assert (gt.shape[1] == pred.shape[1])
 
-    X0 = target - muX
-    Y0 = prediction - muY
+            # 1. Remove mean.
+            muX = np.mean(pred, axis=1, keepdims=True)
+            muY = np.mean(gt, axis=1, keepdims=True)
+            X0 = pred - muX
+            Y0 = gt - muY
 
-    normX = np.sqrt(np.sum(X0 ** 2, axis=(1, 2), keepdims=True))
-    normY = np.sqrt(np.sum(Y0 ** 2, axis=(1, 2), keepdims=True))
+            # 2. Compute variance of X1 used for scale.
+            var1 = np.sum(X0 ** 2)
 
-    X0 /= normX
-    Y0 /= normY
+            # 3. The outer product of X1 and X2.
+            K = X0.dot(Y0.T)
 
-    H = np.matmul(X0.transpose(0, 2, 1), Y0)
+            # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are singular vectors of K.
+            U, s, Vh = np.linalg.svd(K)
+            V = Vh.T
+            # Construct Z that fixes the orientation of R to get det(R)=1.
+            Z = np.eye(U.shape[0])
+            Z[-1, -1] *= np.sign(np.linalg.det(U.dot(V.T)))
+            # Construct R.
+            R = V.dot(Z.dot(U.T))
 
-    try:
-        U, _, V = np.linalg.svd(H)
-    except:
-        return np.nan, np.nan
+            # 5. Recover scale.
+            scale = np.trace(R.dot(K)) / var1
 
-    u, s, v_t = np.linalg.svd(H)
-    v = v_t.transpose(0, 2, 1)
-    r = np.matmul(v, u.transpose(0, 2, 1))
+            # 6. Recover translation.
+            t = muY - scale * (R.dot(muX))
 
-    # Avoid improper rotations (reflections), i.e. rotations with det(R) = -1
-    sign_det_r = np.sign(np.expand_dims(np.linalg.det(r), axis=1))
-    v[:, :, -1] *= sign_det_r
-    s[:, -1] *= sign_det_r.flatten()
-    r = np.matmul(v, u.transpose(0, 2, 1))  # Rotation
+            # 7. Error:
+            pred_hat = scale * R.dot(pred) + t
 
-    tr = np.expand_dims(np.sum(s, axis=1, keepdims=True), axis=2)
+            if transposed:
+                pred_hat = pred_hat.T
 
-    a = tr * normX / normY  # Scale
-    t = muX - a * np.matmul(muY, r)  # Translation
+        else:
+            pred_hat = np.tile(np.mean(gt, axis=0), (17, 1))
+            R = np.identity(3)
 
-    # Perform rigid transformation on the input
-    predicted_aligned = a * np.matmul(prediction, r) + t
+        pa_error = mpjpe = np.linalg.norm(gt_raw - pred_hat, axis=1)
+        pred_hat_all.append(np.mean(pa_error))
 
-    # Return MPJPE
-    mean = np.mean(np.linalg.norm(predicted_aligned - target, axis=len(target.shape) - 1))
-    std = np.std(np.linalg.norm(predicted_aligned - target, axis=len(target.shape) - 1))
-
-    return mean, std
+    return np.mean(pred_hat_all), np.std(pred_hat_all)
 
 
-def mean_velocity_error(predicted, target):
+def calculate_pck(target, prediction, threshold=100.0, joints_to_use=[1, 2, 3, 4, 5, 6, 8, 10, 11]):
     """
-    Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
-    """
-    assert predicted.shape == target.shape
-
-    velocity_predicted = np.diff(predicted, axis=0)
-    velocity_target = np.diff(target, axis=0)
-
-    mean = np.mean(np.linalg.norm(velocity_predicted - velocity_target, axis=len(target.shape) - 1))
-    std = np.std(np.linalg.norm(velocity_predicted - velocity_target, axis=len(target.shape) - 1))
-
-    return mean, std
-
-
-def mean_acceleration_error(predicted, target):
-    """
-    Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
-    """
-    assert predicted.shape == target.shape
-
-    velocity_predicted = np.diff(predicted, axis=0)
-    velocity_target = np.diff(target, axis=0)
-
-    acceleration_predicted = np.diff(velocity_predicted, axis=0)
-    acceleration_target = np.diff(velocity_target, axis=0)
-
-    mean = np.mean(np.linalg.norm(np.abs(acceleration_target - acceleration_predicted), axis=len(target.shape) - 1))
-    std = np.std(np.linalg.norm(np.abs(acceleration_target - acceleration_predicted), axis=len(target.shape) - 1))
-
-    return mean, std
-
-
-def compute_CP(target, prediction, threshold=180):
-    """
-    Compute the number of correct poses
-    """
-    assert len(target.shape) == len(prediction.shape)
-
-    joints_to_use = [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11]
-    distances = np.sqrt(np.sum((target[:, joints_to_use, :]
-                                - prediction[:, joints_to_use, :]) ** 2,
-                               axis=1))  # maybe use procustes distance instead of MPJPE
-    correct_poses = np.count_nonzero(distances < threshold, axis=1) == len(joints_to_use)
-    return correct_poses
-
-## NOT WORKING
-def compute_CPS(target, prediction, min_th=1, max_th=300, step=1):
-    """
-    Compute the correct pose score (CPS) according to (https://arxiv.org/abs/2011.14679) for different thresholds
+    Calculate percentage of correct keypoints (PCK) in [%] (https://arxiv.org/pdf/1611.09813.pdf)
+    :param target: Ground truth 3D joint positions
+    :param prediction: Predicted 3D joint positions
+    :param threshold: Threshold for correct keypoints
+    :param joints_to_use: List of joints to use for PCK calculation
+    :return: PCK in [%]
     """
 
     assert len(prediction.shape) == len(target.shape)
 
-    thresholds = np.arange(min_th, max_th + 1, step)
-    cp_values_list = np.empty((prediction.shape[0], len(thresholds)), dtype=np.double)
-    for i, threshold in enumerate(thresholds):
-        cp_values_list[:, i] = compute_CP(target, prediction, threshold=threshold)
+    distance = np.linalg.norm(target - prediction, axis=2)
 
-    values, _ = np.max(cp_values_list, axis=0)
-    cps_best_list = np.sum(values, axis=0)
+    pck = distance <= threshold
+    pck = np.mean(pck[:, joints_to_use], axis=1)
+    pck = np.mean(pck) * 100.
 
-    values, _ = np.min(cp_values_list, axis=0)
-    cps_worst_list = np.sum(values, axis=0)
-
-    k_list = np.arange(min_th, max_th + 1, step)
-    cps_best_list /= prediction.size(0)
-    cps_best = auc(k_list, cps_best_list)
-
-    cps_worst_list /= prediction.size(0)
-    cps_worst = auc(k_list, cps_worst_list)
-
-    return cps_best, cps_worst
+    return pck
 
 
-## NOT WORKING
-def calculate_cmc(target, prediction):
+def mean_velocity_error(prediction, target):
+    """
+    Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
+    :param prediction: Predicted 3D joint positions
+    :param target: Ground truth 3D joint positions
+    :return: Mean and standard deviation of the mean per-joint velocity error
+    """
+
+    assert prediction.shape == target.shape
+
+    velocity_predicted = np.diff(prediction, axis=0)
+    velocity_target = np.diff(target, axis=0)
+
+    mean, std = calculate_pmpjpe(velocity_target, velocity_predicted)
+
+    return mean, std
+
+
+def mean_acceleration_error(prediction, target):
+    """
+    Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
+    :param prediction: Predicted 3D joint positions
+    :param target: Ground truth 3D joint positions
+    :return: Mean and standard deviation of the mean per-joint velocity error
+    """
+
+    assert prediction.shape == target.shape
+
+    acceleration_predicted = np.diff(np.diff(prediction, axis=0), axis=0)
+    acceleration_target = np.diff(np.diff(target, axis=0), axis=0)
+
+    mean, std = calculate_pmpjpe(acceleration_target, acceleration_predicted)
+
+    return mean, std
+
+
+def calculate_cmc(target, prediction, joints_to_use=[1, 2, 3, 4, 5, 6, 8, 10, 11], axes_to_use=[0, 1, 2]):
     """
     Calculate coefficient of multiple correlation (CMC) for all joints and axes
+    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :param joints_to_use: List of joints to use for CMC calculation
+    :param axes_to_use: List of axes to use for CMC calculation
+    :return: CMC
+    :return: P-value
     """
 
     assert len(prediction) == len(target)
 
-    # normalize inputs (or calculate euclidian norm first?)
-    norm_predicted = np.mean(np.sum(prediction ** 2, axis=2, keepdims=True), axis=1, keepdims=True)
-    norm_target = np.mean(np.sum(target * prediction, axis=2, keepdims=True), axis=1, keepdims=True)
-    scale = norm_target / norm_predicted
-    norm_predicted = prediction * scale
+    target = target[:, joints_to_use, :][:, :, axes_to_use]
+    prediction = prediction[:, joints_to_use, :][:, :, axes_to_use]
 
-    # calculate CMC based on normalized inputs per joint and axis
-    cmc = []
-    for i in range(target.shape[1]):
-        for j in range(target.shape[2]):
-            r2 = r2_score(target[:, i, j], norm_predicted[:, i, j])
-            _cmc = np.square(r2)
-            cmc.append(_cmc)
-    cmc = np.mean(cmc)
-    return cmc
+    cmc_all = []
+    pvalues_all = []
+    for keypoints in range(target.shape[1]):
+        for coordinates in range(target.shape[2]):
+            gt = target[:, keypoints, coordinates]
+            pred = prediction[:, keypoints, coordinates]
+            cmc, pvalue = stats.pearsonr(gt, pred)
+            cmc_all.append(cmc)
+            pvalues_all.append(pvalue)
+
+    return np.mean(cmc_all), np.mean(pvalues_all)
+
+
+def compute_CP(target, prediction, threshold=180, joints_to_use=[0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11]):
+    """
+    Compute the number of correct poses
+    :param target: Ground truth 3D joint positions
+    :param prediction: Predicted 3D joint positions
+    :param threshold: Threshold for correct poses
+    :param joints_to_use: List of joints to use for CP calculation
+    :return: Number of correct poses
+    """
+    assert len(target.shape) == len(prediction.shape)
+
+    distances = np.linalg.norm(target[:, joints_to_use, :] - prediction[:, joints_to_use, :], axis=2)
+    correct_poses = np.count_nonzero(distances < threshold, axis=1) == len(joints_to_use)
+
+    return correct_poses
+
+
+def compute_CPS(target, prediction, min_th=1, max_th=300, step=1, joints_to_use=[0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11]):
+    """
+    Compute the correct pose score (CPS) according to (https://arxiv.org/abs/2011.14679) for different thresholds
+    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :param min_th: Minimum threshold
+    :param max_th: Maximum threshold
+    :param step: Step size
+    :param joints_to_use: List of joints to use for CPS calculation
+    :return: CPS
+    :return: idx of best CPS
+    """
+
+    assert len(prediction.shape) == len(target.shape)
+
+    cps_length = int((max_th + 1 - min_th) / step)
+    thresholds = np.arange(min_th, max_th + 1, step)
+    cps_best_list = np.zeros(cps_length, dtype=np.double)
+    cp_values_list = np.empty((prediction.shape[0], len(thresholds)), dtype=np.double)
+
+    for i, threshold in enumerate(thresholds):
+        cp_values_list[:, i] = compute_CP(target, prediction, threshold, joints_to_use)
+
+    values = np.max(cp_values_list, axis=1)
+    cps_idx = np.argmax(cp_values_list, axis=1)
+    cps_best_list += np.sum(values)
+
+    cps_best_list /= prediction.shape[0]
+    cps_best = auc(thresholds, cps_best_list)
+
+    return cps_best, cps_idx
 
 
 def angle_2p_3d(joint_a, joint_b, joint_c):
@@ -250,20 +310,6 @@ def calculate_rom(target, prediction, segments):
     return signed_ROM, signed_max, signed_min, ROM, max, min
 
 
-## NOT WORKING
-def calculate_pck(target, prediction, threshold=50.0, joints_to_use = [1, 2, 3, 4, 5, 6, 8, 10, 11]):
-    """ Calculate percentage of correct keypoints (PCK) in [%]"""
-    assert len(prediction.shape) == len(target.shape)
-
-    # see https://arxiv.org/pdf/1611.09813.pdf
-    distances = np.sqrt(np.sum((target[:, joints_to_use, :]
-                                - prediction[:, joints_to_use, :]) ** 2, axis=1))
-
-    pck =  distances <= threshold
-    pck = np.mean(pck, axis=1)
-    return np.mean(pck)*100.
-
-
 def wrap_to_pi(x):
     xwrap = np.remainder(x, 2 * np.pi)
     mask = np.abs(xwrap) > np.pi
@@ -302,3 +348,40 @@ def calculate_mpjphe(target, prediction):
     phase_diff = phase_diff[pad_width:-pad_width]
 
     return np.median(phase_diff), np.std(phase_diff), phase_target, phase_prediction, phase_diff
+
+
+def calculate_symmetry_error(poses, reduction='none', dim=-1):
+    bones = {
+        'h36m': torch.tensor([[0, 1], [1, 2], [3, 4], [4, 5], [6, 7], [7, 8], [8, 9], [7, 10], [10, 11],
+                           [11, 12], [7, 13], [13, 14], [14, 15]], device=poses.device),
+        '3dpw': torch.tensor([[0, 1], [0, 2], [0, 3], [1, 4], [2, 5], [3, 6], [4, 7], [5, 8], [6, 9],
+                      [7, 10], [8, 11], [9, 12], [9, 13], [9, 14], [12, 15], [13, 16], [14, 17],
+                      [16, 18], [17, 19], [18, 20], [19, 21], [20, 22], [21, 23]], device=poses.device)
+             }
+
+    # TODO: Fix support for SIMPL joints
+
+    bone_pairs = {'h36m': torch.tensor([[0, 2], [1, 3], [7, 10], [8, 11], [9, 12]], device=poses.device)}
+    bone_indices = bones["h36m"] + 1
+
+    start_pos = torch.index_select(poses, -1, bone_indices[:, 0])
+    end_pos = torch.index_select(poses, -1, bone_indices[:, 1])
+
+    # Extract bones as delta positions and calculate length
+    bone_lengths = torch.linalg.norm(end_pos - start_pos, dim=-2)
+    # Find matching bones in skeleton
+    bone0 = torch.index_select(bone_lengths, -1, bone_pairs['h36m'][:, 0])
+    bone1 = torch.index_select(bone_lengths, -1, bone_pairs['h36m'][:, 1])
+
+    # Calculate the absolute length difference between symmetries
+    absolute_error = torch.abs(bone0 - bone1)
+
+    # Calculate the average error for all bones
+    absolute_error = absolute_error.mean(dim=-1)
+
+    if reduction == 'none':
+        return absolute_error
+    elif reduction == 'mean':
+        return absolute_error.mean(dim=dim)
+    elif reduction == 'sum':
+        return absolute_error.sum(dim=dim)
