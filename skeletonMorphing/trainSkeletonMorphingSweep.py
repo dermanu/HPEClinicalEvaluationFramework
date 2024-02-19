@@ -70,8 +70,11 @@ sweep_config = {
 sweep_id = wandb.sweep(sweep=sweep_config, project="SkeletonMorphingSweep")
 
 
-def data_loader(data_config):
-    # Creating dataset and data loader
+def train_data_loader(data_config):
+    """
+    Creating dataset and data loader for training
+    :param data_config: Configuration for the data loader
+    """
     # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
     # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
     my_dataset1 = torch.load('morph_dataset/par4_mediapipe_test.pth')
@@ -79,11 +82,30 @@ def data_loader(data_config):
     my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
     train_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=True, num_workers=8,
                                    pin_memory=True)
-
     return train_loader
 
 
+def test_data_loader(data_config):
+    """
+    Creating dataset and data loader
+    :param data_config: Configuration for the data loader
+    """
+    # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
+    # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
+    my_dataset = torch.load('morph_dataset/par6_mediapipe_test.pth')
+    test_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=False, num_workers=8,
+                                  pin_memory=True)
+    return test_loader
+
+
 def train(model, train_loader, optimizer):
+    """
+    Training the model
+    :param model: Morphing model to train
+    :param train_loader: training data loader
+    :param optimizer: optimizer for the model
+    :return: Average loss of the model
+    """
     # Iterate through batches
     losses = 0
     for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
@@ -107,17 +129,47 @@ def train(model, train_loader, optimizer):
         loss.backward()
         optimizer.step()
 
-        # Append loss
-        losses += (loss.item())
 
-        # Log the loss of each batch
-        wandb.log({"batch_loss": loss.item(), "batch": step+1})
+def test(model, test_loader):
+    """
+    Testing the model
+    :param model: Morphing model to train
+    :param test_loader: training data loader
+    :return: Average loss of the model
+    """
+    # Iterate through batches
+    with torch.no_grad():
+        losses = 0
+        for step, batch in enumerate(tqdm.tqdm(test_loader, desc="Testing progress", leave=False)):
+            # Access data for each batch
+            pose_gt_batch = batch['pose_gt']
+            pose_inf_batch = batch['pose_inf']
 
-    return losses / len(train_loader), pred_poses, pose_gt_batch, pose_inf_batch
+            # Creating tensors for input and output poses
+            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
+                2)).cuda().float()  # batches/frames x cams, keypoints x 3
+            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+            # Forward pass through the model
+            pred_poses = model(inp_poses)
+
+            # Calculating MSE loss
+            loss = nn.functional.mse_loss(pred_poses, output_poses)
+
+            # Append loss
+            losses += (loss.item())
+
+            # Log the loss of each batch
+            wandb.log({"batch_loss": loss.item(), "batch": step+1})
+
+    return losses / len(test_loader), pred_poses, pose_gt_batch, pose_inf_batch
 
 
 def main(config=None):
-    # Initialize a new wandb run
+    """
+    Initialize a new wandb run
+    :param config: Configuration for the model
+    """
     with wandb.init(config=config):
         # If called by wandb.agent, as below,
         # this config will be set by Sweep Controller
@@ -138,7 +190,8 @@ def main(config=None):
         torch.autograd.set_detect_anomaly(True)
 
         # Load dataset
-        dataset = data_loader(config)
+        train_dataset = train_data_loader(config)
+        test_dataset = test_data_loader(config)
 
         # Start loss
         last_loss = 1000000
@@ -147,7 +200,8 @@ def main(config=None):
         for epoch in range(config.epochs):
             time.sleep(15)
             # Training the model
-            losses, pred_poses, pose_gt_batch, pose_inf_batch = train(model, dataset, optimizer)
+            train(model, train_dataset, optimizer)
+            losses, pred_poses, pose_gt_batch, pose_inf_batch = test(model, test_dataset)
 
             # Logging the loss and epoch
             wandb.log({"epoch_loss": np.sqrt(np.mean(losses)), "epoch": epoch+1})
@@ -159,7 +213,7 @@ def main(config=None):
             plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
             plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
             plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
-            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
+            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, config.model_type, epoch)
 
             # Print loss and epoch
             print('Finished epoch ' + str(epoch+1) + ' of ' + str(config.epochs) + ' with loss ' + str(np.mean(losses)))

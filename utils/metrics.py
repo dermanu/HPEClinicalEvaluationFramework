@@ -333,6 +333,36 @@ def calculate_mpsae(target, prediction, joint_segments):
     return np.mean(single_segment_err), np.std(single_segment_err), segment_errors_mean, segment_errors_std
 
 
+def calculate_symmetry_error(prediction, bones, bone_pairs):
+    """
+    Calculate the symmetry error for a given set of bones
+    :param prediction: Predicted 3D joint positions
+    :param bones: Definition of bones
+    :param bone_pairs: Pairs of left and right bones
+    :return:
+    """
+    # Extract bones as delta positions and calculate length
+    bone_start = [segment_array[0] for segment_array in bones.values()]
+    bone_end = [segment_array[1] for segment_array in bones.values()]
+
+    bone_lengths = np.linalg.norm(prediction[:, bone_start, :] - prediction[:, bone_end, :], axis=2)
+
+    # Find matching bones in skeleton
+    idx_bone0 = [segment_array[0] for segment_array in bone_pairs.values()]
+    idx_bone1 = [segment_array[1] for segment_array in bone_pairs.values()]
+    bone0 = bone_lengths[:, idx_bone0]
+    bone1 = bone_lengths[:, idx_bone1]
+
+    # Calculate the absolute length difference between symmetries
+    absolute_error = np.abs(bone0 - bone1)
+
+    # Calculate the average error for all bones
+    single_bone_err = np.mean(absolute_error, axis=0)
+    mean = np.mean(single_bone_err)
+    std = np.std(single_bone_err)
+
+    return mean, std, single_bone_err
+
 def wrap_to_pi(x):
     xwrap = np.remainder(x, 2 * np.pi)
     mask = np.abs(xwrap) > np.pi
@@ -371,37 +401,3 @@ def calculate_mpjphe(target, prediction):
     phase_diff = phase_diff[pad_width:-pad_width]
 
     return np.median(phase_diff), np.std(phase_diff), phase_target, phase_prediction, phase_diff
-
-
-def calculate_symmetry_error(poses, bones, bone_pairs, reduction='none', dim=-1):
-    bones = {
-        'h36m': torch.tensor([[0, 1], [1, 2], [3, 4], [4, 5], [6, 7], [7, 8], [8, 9], [7, 10], [10, 11],
-                           [11, 12], [7, 13], [13, 14], [14, 15]], device=poses.device),
-        '3dpw': torch.tensor([[0, 1], [0, 2], [0, 3], [1, 4], [2, 5], [3, 6], [4, 7], [5, 8], [6, 9],
-                      [7, 10], [8, 11], [9, 12], [9, 13], [9, 14], [12, 15], [13, 16], [14, 17],
-                      [16, 18], [17, 19], [18, 20], [19, 21], [20, 22], [21, 23]], device=poses.device)
-             }
-
-    bone_pairs = {'h36m': torch.tensor([[0, 2], [1, 3], [7, 10], [8, 11], [9, 12]], device=poses.device)}
-
-    start_pos = torch.index_select(poses, -1, bone_indices[:, 0])
-    end_pos = torch.index_select(poses, -1, bone_indices[:, 1])
-
-    # Extract bones as delta positions and calculate length
-    bone_lengths = torch.linalg.norm(end_pos - start_pos, dim=-2)
-    # Find matching bones in skeleton
-    bone0 = torch.index_select(bone_lengths, -1, bone_pairs['h36m'][:, 0])
-    bone1 = torch.index_select(bone_lengths, -1, bone_pairs['h36m'][:, 1])
-
-    # Calculate the absolute length difference between symmetries
-    absolute_error = torch.abs(bone0 - bone1)
-
-    # Calculate the average error for all bones
-    absolute_error = absolute_error.mean(dim=-1)
-
-    if reduction == 'none':
-        return absolute_error
-    elif reduction == 'mean':
-        return absolute_error.mean(dim=dim)
-    elif reduction == 'sum':
-        return absolute_error.sum(dim=dim)

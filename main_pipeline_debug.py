@@ -50,15 +50,26 @@ class Framework:
 
         # Defines body segments
         self.body_segments = {
-            "left_lower_arm": [16, 14],
-            "left_upper_arm": [14, 12],
-            "right_lower_arm": [15, 13],
-            "right_upper_arm": [13, 11],
-            "torso": [11, 12, 23, 24],
-            "left_upper_leg": [24, 26],
-            "left_lower_leg": [32, 30, 28, 26],
-            "right_upper_leg": [23, 25],
-            "right_lower_leg": [31, 29, 27, 25]}
+            "left_lower_arm": [3, 5],
+            "left_upper_arm": [1, 3],
+            "right_lower_arm": [2, 4],
+            "right_upper_arm": [0, 2],
+            # "torso": [0, 1, 7, 6],
+            "left_upper_leg": [7, 9],
+            "left_lower_leg": [9, 11],
+            "right_upper_leg": [6, 8],
+            "right_lower_leg": [8, 12],
+            "left_foot": [13, 15],
+            "right_foot": [12, 14]}
+
+        # Defines pairs of bones for each body segment of each side of the body
+        self.bone_pairs = {
+            "lower_arm": [0, 2],
+            "upper_arm": [1, 3],
+            "upper_leg": [4, 6],
+            "lower_leg": [5, 7],
+            "foot": [8, 9]
+        }
 
         # Defines segments around each joint to calculate angles (distal to proximal).
         self.joint_segments = {
