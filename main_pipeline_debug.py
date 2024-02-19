@@ -62,21 +62,20 @@ class Framework:
 
         # Defines segments around each joint to calculate angles (distal to proximal).
         self.joint_segments = {
-            "right_elbow": [15, 13, 11],
-            "left_elbow": [16, 14, 12],
-            "right_shoulder_1": [13, 11, 12],
-            "right_shoulder_2": [13, 11, 23],
-            "left_shoulder_1": [14, 12, 11],
-            "left_shoulder_2": [14, 12, 24],
-            # "torso": [11, 12, 23, 24],
-            "right_hips_1": [25, 23, 24],
-            "right_hips_2": [25, 23, 11],
-            "left_hips_1": [26, 24, 23],
-            "left_hips_2": [26, 24, 12],
-            "right_knee": [23, 25, 27],
-            "left_knee": [24, 26, 28],
-            "right_ankle": [31, 27, 25],
-            "left_ankle": [32, 28, 26]
+            "right_elbow": [0, 2, 4],
+            "left_elbow": [1, 3, 5],
+            "right_shoulder_1": [2, 0, 1],
+            "right_shoulder_2": [2, 0, 6],
+            "left_shoulder_1": [3, 1, 0],
+            "left_shoulder_2": [3, 1, 7],
+            "right_hips_1": [8, 6, 7],
+            "right_hips_2": [8, 6, 0],
+            "left_hips_1": [9, 7, 8],
+            "left_hips_2": [9, 7, 1],
+            "right_knee": [6, 8, 10],
+            "left_knee": [7, 9, 11],
+            "right_ankle": [12, 10, 14],
+            "left_ankle": [13, 11, 15]
         }
 
         self.interpolation_fun = "akima"
