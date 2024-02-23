@@ -62,4 +62,4 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
     cap.release()
 
     # Return keypoints data to NumPy array, save last frame for logging
-    return np.array(keypoints_data), np.array(inference_time), frame
+    return np.array(keypoints_data), np.array(inference_time), rgb_frame

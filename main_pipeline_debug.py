@@ -3,7 +3,6 @@ import wandb
 import numpy as np
 import torch
 from tqdm import tqdm
-import multiprocessing
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
@@ -16,7 +15,7 @@ def log_frame_example(frames):
     Log the last frame of one camera angle to visualize applied frame augmentations
     :param frames: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
-    image = wandb.Image(frames[0], caption=f"Frame example of current evaluation")
+    image = wandb.Image(frames, caption=f"Frame example of current evaluation")
     wandb.log({"Example_Frame": image})
 
 
@@ -38,7 +37,7 @@ class Framework:
         # self.participants = ['par6', 'par7', 'par8', 'par9', 'par10', 'par11', 'par12', 'par14', 'par15',
         #                     'par16', 'par17', 'par18', 'par19', 'par20', 'par21', 'par22', 'par23', 'par24', 'par25',
         #                     'par26']
-        self.participants = ['par6']
+        self.participants = ['par5']
 
         # Defines movement number in dataset related to different movement categories
         self.movement_category = {
@@ -130,42 +129,42 @@ class Framework:
 
         # First we calculate the metrics for all extracted keypoints
         # The metric for distance is millimeters
-        mpjpe = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
-        #pmpjpe = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
-        #pck = metrics.calculate_pck(gt_keypoints, pred_keypoints)
-        #velocity_error = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
-        #acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
-        #cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
-        #angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
-        #cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
+        mpjpe_m, mpjpe_s = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
+        pmpjpe_m, pmpjpe_s = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
+        pck = metrics.calculate_pck(gt_keypoints, pred_keypoints)
+        velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
+        cps, cps_auc = metrics.compute_CPS(gt_keypoints, pred_keypoints)
+        angular_m, angular_s, angular_m_s, angular_s_s = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
+        cmc, pvalue = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
 
         # Log whole body metrics
-        wandb.log({mpjpe_all: mpjpe})
-        #wandb.log({"mpjpe_all": mpjpe, "pmpjpe_all": pmpjpe, "pck": pck, "velocity_error_all": velocity_error,
-        #           "acceleration_error_all": acceleration_error, "cps": cps, "angular_error_all": angular_error,
-        #           "cmc_all": cmc})
+        wandb.log({"mpjpe_all_mean": mpjpe_m, "mpjpe_all_std": mpjpe_s,
+                   "pmpjpe_all_mean": pmpjpe_m, "pmpjpe_all_std": pmpjpe_s,
+                   "velocity_error_all_mean": velocity_m, "velocity_error_all_std": velocity_s,
+                   "pck_all": pck,
+                   "cps_all": cps, "cps_auc_all": cps_auc,
+                   "angular_all_mean": angular_m, "angular_all_std": angular_s,
+                   "angular_seg_mean": angular_m_s, "angular_seg_std": angular_s_s,
+                   "cmc_all": cmc, "cmc_pvalue_all": pvalue})
+
+        # Bone symmetry MISSING
 
         # Log metrics for different body segments
         for segment in self.body_segments:
             keypoints = self.body_segments[segment]
-            mpjpe = metrics.calculate_mpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            #pmpjpe = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            #pck = metrics.calculate_pck(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            #velocity_error = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints)
-            #acceleration_error = metrics.mean_acceleration_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            #cmc = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            mpjpe_m, mpjpe_s = metrics.calculate_mpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            pmpjpe_m, pmpjpe_s = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            # pck = metrics.calculate_pck(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            cmc, pvalue = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
 
-            wandb.log({"mpjpe_" + segment: mpjpe})
-            #wandb.log({"mpjpe_" + segment: mpjpe, "pmpjpe_" + segment: pmpjpe, "pck": pck,
-            #           "velocity_error_" + segment: velocity_error,
-            #           "acceleration_error_" + segment: acceleration_error, "cmc_" + segment: cmc})
+            # Bone symmetry MISSING
 
-        # Calculate for each joint separately
-        #for joint_name in self.joint_segments:
-        #    joint = self.joint_segments[joint_name]
-        #    angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, joint)
-
-        #    wandb.log({"angular_error_" + joint_name: angular_error})
+            wandb.log({"mpjpe_mean_"+segment: mpjpe_m, "mpjpe_std_"+segment: mpjpe_s,
+                       "pmpjpe_mean_"+segment: pmpjpe_m, "pmpjpe_std_"+segment: pmpjpe_s,
+                       "velocity_mean_"+segment: velocity_m, "velocity_std_"+segment: velocity_s,
+                       # "pck_"+segment: pck,
+                       "cmc_"+segment: cmc, "cmc_pvalue_"+segment: pvalue})
 
         # Log inference time
         inference_time_mean = np.mean(inference_times)
@@ -173,16 +172,19 @@ class Framework:
         wandb.log({"inference_time_mean": inference_time_mean, "inference_time_std": inference_time_std})
 
         # Log number (n) of frames metrics are based on:
-        wandb.log({"n": len(pred_keypoints)})
+        wandb.log({"sample_number": len(pred_keypoints)})
 
     def main(self, config=None):
         """
         Run inference on the chosen model with sweep parameters and log results to wandb project.
         """
-        with wandb.init(config=config):
+        with wandb.init(config=config) as run:
             # If called by wandb.agent, as below,
             # this config will be set by Sweep Controller
             config = wandb.config
+
+            # Overwrite the random name of the run with the sweep name
+            run.name = config.model_name + "-" + config.movement + "-" + config.augmentation + "-" + str(config.cameras)
 
             # Generate cv2 video API and load respective ground truth keypoints
             gt_keypoints_all = []
@@ -246,7 +248,7 @@ class Framework:
             gt_keypoints_all = np.concatenate(gt_keypoints_all, axis=0)
             pred_keypoints_all = np.concatenate(pred_keypoints_all, axis=0)
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
-            #plot_3d_keypoints_gt_pred(gt_keypoints[0], pred_keypoints_morphed[0], 'mediapipe')
+            plot_3d_keypoints_gt_pred(gt_keypoints[-1], pred_keypoints_morphed[-1], self.model_name)
             #log_frame_example(frame)
 
     def initiate_wandb_sweep(self):
@@ -271,9 +273,15 @@ class Framework:
 
         # Set sweep config to grid search, which iterates over every possible combination
         self.sweep_config = {
-            'name': 'sweep_' + self.model_type + '_' + self.model_name,
             'method': 'grid',
+            'program': 'main_pipeline_debug.py',
             'parameters': {
+                'model_type': {
+                    'value': [self.model_type]
+                },
+                'model_name': {
+                    'value': [self.model_name]
+                },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
                 }
@@ -309,7 +317,7 @@ class Framework:
 
         # Initialize the sweep run
         sweep_id = wandb.sweep(sweep=self.sweep_config,
-                               project='HPE_framework')
+                               project='HPE_framework_2')
 
         # Start sweep
         wandb.agent(sweep_id, function=self.main)

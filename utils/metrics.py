@@ -35,6 +35,7 @@ def align_procrustes(target, prediction):
     """
     Procrustes MJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers.
+    Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
     :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
     :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
@@ -43,6 +44,8 @@ def align_procrustes(target, prediction):
 
     gt_all = []
     pred_all = []
+    error_count = 0
+    joint_number = target.shape[1]
 
     for (gt, pred) in (zip(target, prediction)):
         gt_raw = gt
@@ -67,7 +70,13 @@ def align_procrustes(target, prediction):
             K = X0.dot(Y0.T)
 
             # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are singular vectors of K.
-            U, s, Vh = np.linalg.svd(K)
+            try:
+                U, s, Vh = np.linalg.svd(K)
+            except np.linalg.LinAlgError:
+                print("SVD did not converge")
+                error_count += 1
+                continue
+
             V = Vh.T
             # Construct Z that fixes the orientation of R to get det(R)=1.
             Z = np.eye(U.shape[0])
@@ -88,7 +97,7 @@ def align_procrustes(target, prediction):
                 pred_hat = pred_hat.T
 
         else:
-            pred_hat = np.tile(np.mean(gt, axis=0), (17, 1))
+            pred_hat = np.tile(np.mean(gt, axis=0), (joint_number, 1))
             R = np.identity(3)
 
         gt_all.append(gt_raw)
@@ -96,6 +105,9 @@ def align_procrustes(target, prediction):
 
     gt_all = np.array(gt_all)
     pred_all = np.array(pred_all)
+
+    if error_count > 0:
+        print(f"Procrustes alignment failed {error_count} times")
 
     return gt_all, pred_all
 
@@ -116,7 +128,8 @@ def calculate_pmpjpe(target, prediction):
     return mean, std
 
 
-def calculate_pck(target, prediction, threshold=100.0, joints_to_use=[1, 2, 3, 4, 5, 6, 8, 10, 11], procrustes=False):
+def calculate_pck(target, prediction, threshold=100.0,
+                  joints_to_use=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], procrustes=False):
     """
     Calculate percentage of correct keypoints (PCK) in [%] (https://arxiv.org/pdf/1611.09813.pdf)
     :param target: Ground truth 3D joint positions
@@ -186,8 +199,7 @@ def mean_acceleration_error(prediction, target, procrustes=True):
     return mean, std
 
 
-def calculate_cmc(target, prediction, joints_to_use=[1, 2, 3, 4, 5, 6, 8, 10, 11], axes_to_use=[0, 1, 2],
-                  procrustes=False):
+def calculate_cmc(target, prediction, axes_to_use=[0, 1, 2], procrustes=False):
     """
     Calculate coefficient of multiple correlation (CMC) for all joints and axes
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -201,18 +213,22 @@ def calculate_cmc(target, prediction, joints_to_use=[1, 2, 3, 4, 5, 6, 8, 10, 11
 
     assert len(prediction) == len(target)
 
-    target = target[:, joints_to_use, :][:, :, axes_to_use]
-    prediction = prediction[:, joints_to_use, :][:, :, axes_to_use]
+    target = target[:, :, axes_to_use]
+    prediction = prediction[:, :, axes_to_use]
 
     if procrustes:
         target, prediction = align_procrustes(target, prediction)
 
     cmc_all = []
     pvalues_all = []
-    for keypoints in range(target.shape[1]):
+    for keypoint in range(target.shape[1]):
         for coordinates in range(target.shape[2]):
-            gt = target[:, keypoints, coordinates]
-            pred = prediction[:, keypoints, coordinates]
+            gt = target[:, keypoint, coordinates]
+            pred = prediction[:, keypoint, coordinates]
+            gt_norm = np.linalg.norm(gt)
+            pred_norm = np.linalg.norm(pred)
+            gt = gt / gt_norm
+            pred = pred / pred_norm
             cmc, pvalue = stats.pearsonr(gt, pred)
             cmc_all.append(cmc)
             pvalues_all.append(pvalue)
@@ -220,7 +236,7 @@ def calculate_cmc(target, prediction, joints_to_use=[1, 2, 3, 4, 5, 6, 8, 10, 11
     return np.mean(cmc_all), np.mean(pvalues_all)
 
 
-def compute_CP(target, prediction, threshold=180, joints_to_use=[0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11]):
+def compute_CP(target, prediction, threshold=180, joints_to_use=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]):
     """
     Compute the number of correct poses
     :param target: Ground truth 3D joint positions
@@ -237,8 +253,8 @@ def compute_CP(target, prediction, threshold=180, joints_to_use=[0, 1, 2, 3, 4, 
     return correct_poses
 
 
-def compute_CPS(target, prediction, min_th=1, max_th=300, step=1, joints_to_use=[0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11],
-                procrustes=False):
+def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
+                joints_to_use=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], procrustes=False):
     """
     Compute the correct pose score (CPS) according to (https://arxiv.org/abs/2011.14679) for different thresholds
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -272,7 +288,7 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1, joints_to_use=
     cps_best_list /= prediction.shape[0]
     cps_best = auc(thresholds, cps_best_list)
 
-    return cps_best, cps_idx
+    return cps_best[1], cps_best, cps_idx
 
 
 def angle_2p_3d(joint_a, joint_b, joint_c):

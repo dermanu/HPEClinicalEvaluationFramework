@@ -137,7 +137,6 @@ class SingleCSVFileDataset(Dataset):
                                'LHJC']
 
 
-
         if self.model_type == 'mediapipe':
             column_mapping = {
                 'RShoulder': 'RSJC', # 12 - 0
@@ -201,16 +200,6 @@ class SingleCSVFileDataset(Dataset):
         return len(self.csv_data)
 
     def __getitem__(self, idx):
-        # Get the data for the specified index
-        csv_data = self.csv_data[idx]
-        pose_inf = self.pose_inf[idx]
-        confidences_inf = self.confidences_inf[idx]
-
-        # Check for NaN values in the CSV data
-        if np.isnan(csv_data).any() or np.isnan(pose_inf).any() or np.isnan(confidences_inf).any():
-            # If NaN values are present, return None to skip this sample
-            return None
-
         # Combine CSV and video data into a single dictionary
         combined_data = {'pose_gt': self.csv_data[idx], 'pose_inf': self.pose_inf[idx],
                          'confidences_inf': self.confidences_inf[idx]}

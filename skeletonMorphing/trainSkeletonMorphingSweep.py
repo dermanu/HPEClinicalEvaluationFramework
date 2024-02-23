@@ -28,13 +28,13 @@ sweep_config = {
     },
     'parameters': {
         'learning_rate': {
-            'value': 1e-4  # Learning rate: 1e-4
+            'values': [1e-3, 1e-4]  # Learning rate: 1e-4 0.000
         },
         'BATCH_SIZE': {
             'value': 32  # Batch size: 32
         },
         'weight_decay': {
-            'values': [1e-5, 1e-6]  # Weight decay: 1e-5
+            'values': [1e-4, 1e-5]  # Weight decay: 1e-5
         },
         'epochs': {
             'value': 100
@@ -60,7 +60,7 @@ sweep_config = {
     },
     'early_terminate': {
         'type': 'hyperband',
-        'min_iter': 10,
+        'min_iter': 7,
         'eta': 3
     }
 }
@@ -79,23 +79,23 @@ def train_data_loader(data_config):
     # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
     my_dataset1 = torch.load('morph_dataset/par4_mediapipe_test.pth')
     my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-    my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
-    train_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=True, num_workers=8,
+    #my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
+    train_loader = data.DataLoader(my_dataset1, batch_size=data_config.BATCH_SIZE, shuffle=True, num_workers=8,
                                    pin_memory=True)
     return train_loader
 
 
-def test_data_loader(data_config):
+def validation_data_loader(data_config):
     """
     Creating dataset and data loader
     :param data_config: Configuration for the data loader
     """
     # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
     # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-    my_dataset = torch.load('morph_dataset/par6_mediapipe_test.pth')
-    test_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=False, num_workers=8,
+    my_dataset = torch.load('morph_dataset/par5_mediapipe_test.pth')
+    validation_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=False, num_workers=8,
                                   pin_memory=True)
-    return test_loader
+    return validation_loader
 
 
 def train(model, train_loader, optimizer):
@@ -113,9 +113,8 @@ def train(model, train_loader, optimizer):
         pose_gt_batch = batch['pose_gt']
         pose_inf_batch = batch['pose_inf']
 
-        # Creating tensors for input and output poses
-        inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
-            2)).cuda().float()  # batches/frames x cams, keypoints x 3
+        # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
+        inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()
         output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
 
         # Forward pass through the model
@@ -130,17 +129,17 @@ def train(model, train_loader, optimizer):
         optimizer.step()
 
 
-def test(model, test_loader):
+def validation(model, validation_loader):
     """
-    Testing the model
+    Validation of the model
     :param model: Morphing model to train
-    :param test_loader: training data loader
+    :param validation_loader: training data loader
     :return: Average loss of the model
     """
     # Iterate through batches
     with torch.no_grad():
         losses = 0
-        for step, batch in enumerate(tqdm.tqdm(test_loader, desc="Testing progress", leave=False)):
+        for step, batch in enumerate(tqdm.tqdm(validation_loader, desc="Validation progress", leave=False)):
             # Access data for each batch
             pose_gt_batch = batch['pose_gt']
             pose_inf_batch = batch['pose_inf']
@@ -156,13 +155,16 @@ def test(model, test_loader):
             # Calculating MSE loss
             loss = nn.functional.mse_loss(pred_poses, output_poses)
 
+            print(loss.item())
+
             # Append loss
             losses += (loss.item())
 
             # Log the loss of each batch
             wandb.log({"batch_loss": loss.item(), "batch": step+1})
 
-    return losses / len(test_loader), pred_poses, pose_gt_batch, pose_inf_batch
+
+    return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
 
 
 def main(config=None):
@@ -183,7 +185,7 @@ def main(config=None):
         params = list(model.parameters())  # + list(dec.parameters())
 
         # Setting anomaly detection for autograd
-        optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay,
+        optimizer = optim.AdamW(params, lr=config.learning_rate, weight_decay=config.weight_decay,
                                amsgrad=True, foreach=True)
 
         # Setting anomaly detection for autograd
@@ -191,7 +193,7 @@ def main(config=None):
 
         # Load dataset
         train_dataset = train_data_loader(config)
-        test_dataset = test_data_loader(config)
+        validation_dataset = validation_data_loader(config)
 
         # Start loss
         last_loss = 1000000
@@ -201,7 +203,7 @@ def main(config=None):
             time.sleep(15)
             # Training the model
             train(model, train_dataset, optimizer)
-            losses, pred_poses, pose_gt_batch, pose_inf_batch = test(model, test_dataset)
+            losses, pred_poses, pose_gt_batch, pose_inf_batch = validation(model, validation_dataset)
 
             # Logging the loss and epoch
             wandb.log({"epoch_loss": np.sqrt(np.mean(losses)), "epoch": epoch+1})
@@ -216,7 +218,7 @@ def main(config=None):
             plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, config.model_type, epoch)
 
             # Print loss and epoch
-            print('Finished epoch ' + str(epoch+1) + ' of ' + str(config.epochs) + ' with loss ' + str(np.mean(losses)))
+            print('Finished epoch ' + str(epoch+1) + ' of ' + str(config.epochs) + ' with loss ' + str(np.sqrt(np.mean(losses))))
 
             # Save so far best model
             if np.mean(losses) < last_loss:
@@ -224,10 +226,11 @@ def main(config=None):
                 torch.save(model.state_dict(), model_path)
                 last_loss = np.mean(losses)
 
-            # Save best model to wandb
-            artifact = wandb.Artifact('model', type='model')
-            artifact.add_file(model_path)
-            wandb.log_artifact(artifact)
+        # Save best model to wandb
+        artifact = wandb.Artifact('model', type='model')
+        artifact.add_file(model_path)
+        wandb.log_artifact(artifact)
+
 
 
 # Start sweep job.
