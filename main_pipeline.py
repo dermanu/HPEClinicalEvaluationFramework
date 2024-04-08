@@ -25,7 +25,8 @@ class Framework:
         # Initialize some functions
         self.model_skel_morph = None
         self.cam_desynchronizer = frameAug.CameraDesynchronizer()
-        self.run = wandb.init()
+        # Remove when running fr fr
+        self.run = wandb.init(mode="disabled")
 
         # Initialize empty global variables
         self.dataset_path = None
