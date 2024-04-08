@@ -62,7 +62,7 @@ class FrameAugmentor:
         # Apply augmentation to each frame of input based on settings in sweep_config
         augmentation_type = sweep_config['augmentation']
         if augmentation_type == 'background':
-            frame = self.change_bg.change_frame_bg(frame, 'background.jpg', detect="person")
+            frame = self.change_bg.change_frame_bg(frame, 'background.jpeg', detect="person")
         if augmentation_type == 'motion_blur':
             frame = motion_blur(frame)
         if augmentation_type == 'occlusion':
@@ -85,7 +85,7 @@ class CameraDesynchronizer:
         # Open video file at different offset frames
         caps_offset = []
         for cap in caps:
-            frame_offset = self.rng.integers(low=0, high=2, size=1)
+            frame_offset = self.rng.integers(low=0, high=1, size=1)
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_offset)
             caps_offset.append(cap)
 

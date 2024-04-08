@@ -4,7 +4,7 @@ import numpy as np
 
 def plot_3d_keypoints(keypoints, model_name, wandb_name, epoch):
     # Extract X, Y, and Z coordinates from keypoints
-    x, y, z = zip(*keypoints)
+    x, z, y = zip(*keypoints)
 
     # Define connections between related keypoints
     if model_name == 'mediapipe':
@@ -68,7 +68,7 @@ def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_h
     idx = 0
     for keypoints in [keypoints_morphed, keypoints_ground_truth, keypoints_hpe_truth]:
         # Extract X, Y, and Z coordinates from keypoints
-        x, y, z = zip(*keypoints)
+        x, z, y = zip(*keypoints)
 
         # Scatter plot for keypoints
         fig.add_trace(go.Scatter3d(x=x, y=y, z=z, mode='markers', marker=dict(color=colors[idx], size=5)))
@@ -119,7 +119,7 @@ def plot_3d_keypoints_gt_pred(keypoints_gt, keypoints_pred, model_name):
     idx = 0
     for keypoints in [keypoints_gt, keypoints_pred]:
         # Extract X, Y, and Z coordinates from keypoints
-        x, y, z = zip(*keypoints)
+        x, z, y = zip(*keypoints)
 
         # Scatter plot for keypoints
         fig.add_trace(go.Scatter3d(x=x, y=y, z=z, mode='markers', marker=dict(color=colors[idx], size=5)))
@@ -146,7 +146,7 @@ def plot_3d_keypoints_gt_pred(keypoints_gt, keypoints_pred, model_name):
             aspectmode='cube',
             xaxis=dict(title='X', range=[min_value, max_value]),
             yaxis=dict(title='Y', range=[min_value, max_value]),
-            zaxis=dict(title='Z', range=[min_value, max_value])
+            zaxis=dict(title='Z', range=[0, max_value])
         )
     )
 

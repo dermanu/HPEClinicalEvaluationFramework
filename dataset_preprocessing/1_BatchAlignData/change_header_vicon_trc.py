@@ -115,4 +115,4 @@ def expand_header(header):
 
 
 # Replace 'your_folder_path' with the actual path to the root folder containing subfolders
-read_csv_files('/media/emanu/LaCie/MoCap/Broken', '/home/emanu/Desktop/MoCap/complete_raw/vicon')
+read_csv_files('/media/emanu/LaCie/2_VICON_DATA_COMPLETE/Done', '/home/emanu/Desktop/MoCap/complete_raw/vicon')

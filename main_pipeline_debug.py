@@ -2,6 +2,7 @@ import os
 import wandb
 import numpy as np
 import torch
+import cv2
 from tqdm import tqdm
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
@@ -10,12 +11,25 @@ from utils.plotKeypoints import plot_3d_keypoints_gt_pred
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
 
-def log_frame_example(frames):
+
+def log_frame_example(frame):
     """
-    Log the last frame of one camera angle to visualize applied frame augmentations
+    Log the last frame of one camera angle to visualize applied frame augmentations. Blur the faces for privacy.
     :param frames: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
-    image = wandb.Image(frames, caption=f"Frame example of current evaluation")
+
+    face_detect = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
+    face_data = face_detect.detectMultiScale(frame, 1.2, 3)
+
+    for (x, y, w, h) in face_data:
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        roi = frame[y:y + h, x:x + w]
+        # applying a gaussian blur over this new rectangle area
+        roi = cv2.GaussianBlur(roi, (23, 23), 30)
+        # impose this blurred image on original image to get final image
+        frame[y:y + roi.shape[0], x:x + roi.shape[1]] = roi
+
+    image = wandb.Image(frame)
     wandb.log({"Example_Frame": image})
 
 
@@ -130,7 +144,7 @@ class Framework:
         # First we calculate the metrics for all extracted keypoints
         # The metric for distance is millimeters
         mpjpe_m, mpjpe_s = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
-        pmpjpe_m, pmpjpe_s = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
+        pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
         pck = metrics.calculate_pck(gt_keypoints, pred_keypoints)
         velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
         cps, cps_auc = metrics.compute_CPS(gt_keypoints, pred_keypoints)
@@ -140,6 +154,7 @@ class Framework:
         # Log whole body metrics
         wandb.log({"mpjpe_all_mean": mpjpe_m, "mpjpe_all_std": mpjpe_s,
                    "pmpjpe_all_mean": pmpjpe_m, "pmpjpe_all_std": pmpjpe_s,
+                   "procustes_n": len(pred_keypoints) - proc_error,
                    "velocity_error_all_mean": velocity_m, "velocity_error_all_std": velocity_s,
                    "pck_all": pck,
                    "cps_all": cps, "cps_auc_all": cps_auc,
@@ -153,7 +168,7 @@ class Framework:
         for segment in self.body_segments:
             keypoints = self.body_segments[segment]
             mpjpe_m, mpjpe_s = metrics.calculate_mpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            pmpjpe_m, pmpjpe_s = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
             # pck = metrics.calculate_pck(gt_keypoints[keypoints], pred_keypoints[keypoints])
             velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
             cmc, pvalue = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
@@ -241,15 +256,20 @@ class Framework:
                     pred_keypoints_all.append(pred_keypoints_morphed)
                     inference_times_all.append(inference_times)
 
+                    # Collect last good frame for visualization
+                    if frame is not None or frame.size != 0:
+                        frame_example = frame
+
             # Calculate the metrics, generate plots and log them to wandb
             #with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
             #    pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
+            print("Calculating metrics and logging to wandb")
             inference_times_all = np.concatenate(inference_times_all)
             gt_keypoints_all = np.concatenate(gt_keypoints_all, axis=0)
             pred_keypoints_all = np.concatenate(pred_keypoints_all, axis=0)
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
             plot_3d_keypoints_gt_pred(gt_keypoints[-1], pred_keypoints_morphed[-1], self.model_name)
-            #log_frame_example(frame)
+            log_frame_example(frame_example)
 
     def initiate_wandb_sweep(self):
         """
@@ -277,10 +297,10 @@ class Framework:
             'program': 'main_pipeline_debug.py',
             'parameters': {
                 'model_type': {
-                    'value': [self.model_type]
+                    'value': self.model_type
                 },
                 'model_name': {
-                    'value': [self.model_name]
+                    'value': self.model_name
                 },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
@@ -307,9 +327,7 @@ class Framework:
                                'desynchronize', 'decalibration']
                 },
                 'cameras': {
-                    'values': [[4, 0], [3, 2], [5, 1], [4, 2], [0, 4, 3], [0, 2, 3], [5, 4, 1], [0, 4, 3, 2],
-                               [0, 5, 4, 3, 2],
-                               [0, 5, 4, 1, 3, 2]]
+                    'values': [[4, 0], [5, 1], [4, 3], [4, 2], [0, 4, 3], [5, 4, 1], [0, 4, 3, 2]]
                 }
             }
 
@@ -328,4 +346,4 @@ class Framework:
 
 # Run the framework
 Framework(model_name="mediapipe", model_type="mono",
-          directory="/home/emanu/Desktop/SegmentedData").initiate_wandb_sweep()
+          directory="/home/emanu/Desktop/MoCap/segmented").initiate_wandb_sweep()

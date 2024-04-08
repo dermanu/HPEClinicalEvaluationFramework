@@ -1,5 +1,5 @@
 """
-This script trainSkeletonMorphing trains the model modelSkeletonMorphing based on the ground throuth of two different
+This script trainSkeletonMorphing trains the model modelSkeletonMorphing based on the ground thruth of two different
 dataset.
 The morphing network should be trained one subject of each dataset. Subject one then has to be excluded for all other
 experiments to not include ground truth data.
@@ -90,6 +90,7 @@ def validation_data_loader(data_config):
     Creating dataset and data loader
     :param data_config: Configuration for the data loader
     """
+    # Save dataset in pytorch model
     # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
     # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
     my_dataset = torch.load('morph_dataset/par5_mediapipe_test.pth')

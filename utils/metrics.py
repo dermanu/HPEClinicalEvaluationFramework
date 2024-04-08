@@ -73,7 +73,7 @@ def align_procrustes(target, prediction):
             try:
                 U, s, Vh = np.linalg.svd(K)
             except np.linalg.LinAlgError:
-                print("SVD did not converge")
+                # print("SVD did not converge")
                 error_count += 1
                 continue
 
@@ -109,7 +109,7 @@ def align_procrustes(target, prediction):
     if error_count > 0:
         print(f"Procrustes alignment failed {error_count} times")
 
-    return gt_all, pred_all
+    return gt_all, pred_all, error_count
 
 
 def calculate_pmpjpe(target, prediction):
@@ -122,10 +122,10 @@ def calculate_pmpjpe(target, prediction):
     """
     assert prediction.shape == target.shape
 
-    target, prediction = align_procrustes(target, prediction)
+    target, prediction, error_count = align_procrustes(target, prediction)
     mean, std = calculate_mpjpe(target, prediction)
 
-    return mean, std
+    return mean, std, error_count
 
 
 def calculate_pck(target, prediction, threshold=100.0,
@@ -143,7 +143,7 @@ def calculate_pck(target, prediction, threshold=100.0,
     assert len(prediction.shape) == len(target.shape)
 
     if procrustes:
-        target, prediction = align_procrustes(target, prediction)
+        target, prediction, err = align_procrustes(target, prediction)
 
     distance = np.linalg.norm(target - prediction, axis=2)
 
@@ -169,9 +169,9 @@ def mean_velocity_error(prediction, target, procrustes=True):
     velocity_target = np.diff(target, axis=0)
 
     if procrustes:
-        mean, std = calculate_pmpjpe(velocity_target, velocity_predicted)
+        mean, std, err = calculate_pmpjpe(velocity_target, velocity_predicted)
     else:
-        mean, std = calculate_mpjpe(velocity_target, velocity_predicted)
+        mean, std, err = calculate_mpjpe(velocity_target, velocity_predicted)
 
     return mean, std
 
@@ -188,13 +188,13 @@ def mean_acceleration_error(prediction, target, procrustes=True):
     assert prediction.shape == target.shape
 
     if procrustes:
-        target, prediction = align_procrustes(target, prediction)
+        target, prediction, err = align_procrustes(target, prediction)
 
 
     acceleration_predicted = np.diff(np.diff(prediction, axis=0), axis=0)
     acceleration_target = np.diff(np.diff(target, axis=0), axis=0)
 
-    mean, std = calculate_pmpjpe(acceleration_target, acceleration_predicted)
+    mean, std, err = calculate_pmpjpe(acceleration_target, acceleration_predicted)
 
     return mean, std
 
@@ -217,7 +217,7 @@ def calculate_cmc(target, prediction, axes_to_use=[0, 1, 2], procrustes=False):
     prediction = prediction[:, :, axes_to_use]
 
     if procrustes:
-        target, prediction = align_procrustes(target, prediction)
+        target, prediction, err = align_procrustes(target, prediction)
 
     cmc_all = []
     pvalues_all = []
@@ -229,7 +229,7 @@ def calculate_cmc(target, prediction, axes_to_use=[0, 1, 2], procrustes=False):
             pred_norm = np.linalg.norm(pred)
             gt = gt / gt_norm
             pred = pred / pred_norm
-            cmc, pvalue = stats.pearsonr(gt, pred)
+            cmc, pvalue = stats.pearsonr(gt, pred) # ValueError: array must not contain infs or NaNs
             cmc_all.append(cmc)
             pvalues_all.append(pvalue)
 
@@ -276,7 +276,7 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
     cp_values_list = np.empty((prediction.shape[0], len(thresholds)), dtype=np.double)
 
     if procrustes:
-        target, prediction = align_procrustes(target, prediction)
+        target, prediction, err = align_procrustes(target, prediction)
 
     for i, threshold in enumerate(thresholds):
         cp_values_list[:, i] = compute_CP(target, prediction, threshold, joints_to_use)
@@ -288,7 +288,7 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
     cps_best_list /= prediction.shape[0]
     cps_best = auc(thresholds, cps_best_list)
 
-    return cps_best[1], cps_best, cps_idx
+    return cps_best, cps_idx
 
 
 def angle_2p_3d(joint_a, joint_b, joint_c):
