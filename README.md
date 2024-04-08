@@ -1,3 +1,12 @@
+# TODO
+# 1. Morphing 
+- Devide data into train and evaluate (80/20)
+	- Using all participants and all movement types (23 participants with 17 movements with each 10 iterations in total)
+- Train morphing model with mediapipe (to start with)
+- Meet
+- Train morphing model on the other 3 models (OpenPose, AlphaPose, YoloV7)
+- 
+
 # Methods
 
 The methods describe the initial collection of the ground truth dataset and then the framework for the applied augmentation methods and subsequent evaluation of various 3D real-time HPE models. 
