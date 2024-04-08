@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 import cv2
 import numpy as np
@@ -54,6 +55,9 @@ class ReadDatasetFiles(Dataset):
 
         print('All csv files paths are read')
 
+        if len(csv_file_paths) == 0:
+            raise ValueError('No CSV files found in the specified folder')
+
         return csv_file_paths
 
     def create_datasets(self):
@@ -64,18 +68,13 @@ class ReadDatasetFiles(Dataset):
         with multiprocessing.Pool(processes=10) as pool:
             datasets = pool.map(self.create_single_dataset, self.csv_file_paths)
 
-
-        #for csv_file_path in self.csv_file_paths:
-        #    i += 1
-        #    print('Getting dataset nr ' + str(i) + ' of ' + str(len(self.csv_file_paths)) + '...')
-        #    dataset = SingleCSVFileDataset(csv_file_path, self.model_type)
-        #    datasets.append(dataset)
-
+        
+        print('All datasets are created')
         return datasets
 
     def create_single_dataset(self, csv_file_path):
         i = self.csv_file_paths.index(csv_file_path) + 1
-        print('Getting dataset nr ' + str(i) + ' of ' + str(len(self.csv_file_paths)) + '...')
+        print('Getting dataset nr ' + str(i) + ' of ' + str(len(self.csv_file_paths)) + '...', flush=True)
         dataset = SingleCSVFileDataset(csv_file_path, self.model_type)
         return dataset
 
@@ -98,24 +97,68 @@ class SingleCSVFileDataset(Dataset):
     def __init__(self, csv_file_path, model_type):
         self.csv_file_path = csv_file_path
         self.model_type = model_type
+        #self.train_frames = [] 
+        #self.test_frames = []
 
         # Add any additional initialization for your SingleCSVFileDataset
-        self.csv_data = self.load_csv_data()
+        self.csv_data, self.train_frames, self.test_frames = self.load_csv_data()
+
         self.pose_inf, self.confidences_inf = self.load_video_data()
 
-    def load_csv_data(self):
-        # Load CSV data
-        csv_data = pd.read_csv(self.csv_file_path)
+    def _get_csv_data(self, csv_data : pd.DataFrame):
+        """
+        Aligns the columns of the CSV data based on the model type.
+        """
 
-        # Drop irrelevant columns
-        csv_data.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
-
-        # Align the columns (you may need to modify this part based on your needs)
         csv_data = self.align_keypoints(csv_data)
         csv_data = np.array(list(csv_data.values()))
         csv_data = csv_data.transpose((1, 0, 2))
 
         return csv_data
+
+    def get_training_data(self):
+        return self.csv_data[self.train_frames], self.pose_inf[self.train_frames], self.confidences_inf[self.train_frames]
+
+    def get_test_data(self):
+        return self.csv_data[self.test_frames], self.pose_inf[self.test_frames], self.confidences_inf[self.test_frames]
+
+    def get_split_indexes(self, csv_data, split=[0.8,0.2]):
+        # Drop NaN values in Iteration column
+        iteration_values = csv_data['Iteration'].dropna().unique()
+
+        # Perform 80/20 split
+        split_index = int(len(iteration_values) * split[0])
+
+        # If Train take 80% of the data, else take 20% (Must find better split)
+        values = iteration_values[:split_index]
+        
+
+        # Fill NaN values in Iteration column
+        csv_data['Iteration'] = csv_data['Iteration'].ffill()
+
+        # Create a new column to filter based on train
+        csv_data['Training'] = csv_data['Iteration'].isin(values)
+
+        # Filter based on train to return test dataset if not train
+        train_index = csv_data[csv_data['Training'] == 1].index
+        test_index = csv_data[csv_data['Training'] == 0].index
+        csv_data.drop(columns=['Training'], inplace=True)
+
+        return train_index, test_index
+
+    def load_csv_data(self):
+        # Load CSV data
+        csv_data = pd.read_csv(self.csv_file_path)
+
+        train_index, test_index = self.get_split_indexes(csv_data)
+        
+        # Drop irrelevant columns
+        csv_data.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
+
+        # Align the columns (you may need to modify this part based on your needs)
+        csv_data = self._get_csv_data(csv_data)
+
+        return csv_data, train_index, test_index
 
     def align_keypoints(self, keypoints_org):
         """
@@ -194,6 +237,7 @@ class SingleCSVFileDataset(Dataset):
         else:
             raise ValueError(f"Invalid model_name: {self.model_type}")
         print('Finished loading video data' + self.csv_file_path.replace('.csv', '.avi') + '...')
+        print(pose_keypoints.shape, confidences.shape)
 
         return pose_keypoints, confidences
 

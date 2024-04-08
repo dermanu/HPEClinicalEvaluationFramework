@@ -24,14 +24,25 @@ data_folder = '/media/ofplarsen/LaCie/MoCap/segmented'
 
 # Assuming you have a model type
 model_type = 'mediapipe'
-cam = [0, 1, 2, 3, 4, 5]
+
+#cam = [0, 1, 2, 3, 4, 5]
+cam = [0]
+
 # Assuming you have a list of movements
-mov = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+#mov = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+mov = [1]
+
+## For each camera
+## For each mov
+## find n iterations in mov
+## Split movements into n iterations
+## Take random sample of n iterations (80/20)
+
 
 # Assuming you have a list of participant folders
 #par = [14]
 par_full, par = all_participants(data_folder)
-par = [12, 14]
+par = [12]
 
 # Read the dataset for the current participant
 my_dataset = rdm.ReadDatasetFiles(data_folder, par, mov, cam, model_type)

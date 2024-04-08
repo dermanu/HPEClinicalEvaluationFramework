@@ -73,6 +73,7 @@ num_cam = 6
 #my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
 #torch.save(my_dataset, 'par4_mediapipe_test2.pth')
 #print('done')
+
 my_dataset1 = torch.load('morph_dataset/par4_mediapipe_test.pth')
 my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
 my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
