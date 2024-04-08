@@ -1,3 +1,5 @@
+# Methods
+
 The methods describe the initial collection of the ground truth dataset and then the framework for the applied augmentation methods and subsequent evaluation of various 3D real-time HPE models. 
 
 **Keep dataset characteristics in methods - collection method into appendix?**
