@@ -9,7 +9,7 @@ import multiprocessing
 
 
 class ReadDatasetFiles(Dataset):
-    def __init__(self, data_dir, participant_list, movement_list, camera_list, model_type):
+    def __init__(self, data_dir, participant_list, movement_list, camera_list, model_type, init=True):
         self.data_dir = data_dir
         self.participant_list = participant_list
         self.movement_list = movement_list
@@ -17,8 +17,11 @@ class ReadDatasetFiles(Dataset):
         self.model_type = model_type
 
         # Initialize these lists in the constructor
-        self.csv_file_paths = self.read_dataset_path()
-        self.datasets = self.create_datasets()
+        self.csv_file_paths = []
+        self.datasets = []
+        if init:
+            self.csv_file_paths = self.read_dataset_path()
+            self.datasets = self.create_datasets()
 
     def read_dataset_path(self):
         """
@@ -78,6 +81,30 @@ class ReadDatasetFiles(Dataset):
         dataset = SingleCSVFileDataset(csv_file_path, self.model_type)
         return dataset
 
+    def _create_self_copy_new_dataset(self, datasets):
+        read_dataset_files = ReadDatasetFiles(self.data_dir, self.participant_list, self.movement_list, self.camera_list, self.model_type, init=False)
+        read_dataset_files.datasets = datasets
+        read_dataset_files.csv_file_paths = self.csv_file_paths
+        return read_dataset_files
+    
+    def get_single_train(self, dataset):
+        return dataset.get_dataset(train=True)
+
+    def get_single_test(self, dataset):
+        return dataset.get_dataset(train=False)
+
+
+    def get_train_test(self):
+
+        with multiprocessing.Pool(processes=10) as pool:
+            train = pool.map(self.get_single_train, self.datasets)
+            test = pool.map(self.get_single_test, self.datasets)
+
+        train_dataset = self._create_self_copy_new_dataset(train)
+        test_dataset = self._create_self_copy_new_dataset(test)
+
+        return train_dataset, test_dataset
+
     def __len__(self):
         total_length = sum(len(dataset) for dataset in self.datasets)
         return total_length
@@ -92,18 +119,24 @@ class ReadDatasetFiles(Dataset):
         # Retrieve the item from the corresponding dataset
         return self.datasets[dataset_idx][idx]
 
+    def __str__(self):
+        return f"ReadDatasetFiles({self.data_dir}), len={len(self)}"
+
 
 class SingleCSVFileDataset(Dataset):
-    def __init__(self, csv_file_path, model_type):
+    def __init__(self, csv_file_path, model_type, init=True):
         self.csv_file_path = csv_file_path
         self.model_type = model_type
-        #self.train_frames = [] 
-        #self.test_frames = []
+        self.csv_data = None
+        self.pose_inf = None
+        self.confidences_inf = None
+        self.selected_columns = None
 
         # Add any additional initialization for your SingleCSVFileDataset
-        self.csv_data, self.train_frames, self.test_frames = self.load_csv_data()
+        if init:
+            self.csv_data, self.train_frames, self.test_frames = self.load_csv_data()
+            self.pose_inf, self.confidences_inf = self.load_video_data()
 
-        self.pose_inf, self.confidences_inf = self.load_video_data()
 
     def _get_csv_data(self, csv_data : pd.DataFrame):
         """
@@ -116,11 +149,24 @@ class SingleCSVFileDataset(Dataset):
 
         return csv_data
 
+    def get_dataset(self, train=True):
+        dataset = SingleCSVFileDataset(self.csv_file_path, self.model_type, init=False)
+        csv_data, pose_inf, confidences_inf = self.get_training_data() if train else self.get_test_data()
+        dataset.csv_data = csv_data
+        dataset.pose_inf = pose_inf
+        dataset.confidences_inf = confidences_inf
+        return dataset
+
     def get_training_data(self):
         return self.csv_data[self.train_frames], self.pose_inf[self.train_frames], self.confidences_inf[self.train_frames]
 
     def get_test_data(self):
         return self.csv_data[self.test_frames], self.pose_inf[self.test_frames], self.confidences_inf[self.test_frames]
+
+    def get_train_test_datasets(self):
+        training = self.get_dataset(train=True)
+        test = self.get_dataset(train=False)
+        return training, test
 
     def get_split_indexes(self, csv_data, split=[0.8,0.2]):
         # Drop NaN values in Iteration column
@@ -143,6 +189,8 @@ class SingleCSVFileDataset(Dataset):
         train_index = csv_data[csv_data['Training'] == 1].index
         test_index = csv_data[csv_data['Training'] == 0].index
         csv_data.drop(columns=['Training'], inplace=True)
+
+        assert len(train_index) + len(test_index) == len(csv_data), "Train and test indexes do not match the length of the dataset"
 
         return train_index, test_index
 
@@ -260,3 +308,7 @@ class SingleCSVFileDataset(Dataset):
                          'confidences_inf': self.confidences_inf[idx]}
 
         return combined_data
+
+    def __str__(self):
+        return f"SingleCSVFileDataset({self.csv_file_path}), len={len(self)}"
+

@@ -10,7 +10,7 @@ https://arxiv.org/pdf/2011.14679.pdf).
 import torch.optim
 from torch.utils import data
 import torch.optim as optim
-import modelSkeletonMorphing
+import skeletonMorphing.modelSkeletonMorphing as modelSkeletonMorphing
 from types import SimpleNamespace
 import torch.nn as nn
 import wandb
@@ -51,12 +51,14 @@ sweep_config = {
     }
 }
 
+mode = "disabled"
 # WandB – Initialize a new run
-wandb.init(project="skeleton-morphing", config=config)
+wandb.init(project="skeleton-morphing", config=config, mode=mode)
 
 
 # Folder containing data
-data_folder = '/home/emanu/Desktop/SegmentedData'
+#data_folder = '/home/emanu/Desktop/SegmentedData'
+data_folder = '/media/ofplarsen/LaCie/MoCap/segmented'
 
 # Parameters for training
 par = [5]
@@ -74,10 +76,18 @@ num_cam = 6
 #torch.save(my_dataset, 'par4_mediapipe_test2.pth')
 #print('done')
 
-my_dataset1 = torch.load('morph_dataset/par4_mediapipe_test.pth')
-my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
-train_loader = data.DataLoader(my_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+my_dataset1 = torch.load('morph_dataset/par_[12]_mediapipe_dataset.pth')
+#my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+#my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+#my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
+
+
+train, test = my_dataset1.get_train_test()
+print(my_dataset1)
+print(train)
+print(test)
+train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
 print('Data loader created')
 
 # Initializing the model (Synthesizer) and moving it to GPU
