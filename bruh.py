@@ -1,2 +1,2 @@
-#import skeletonMorphing.loadMorphDatasets
+import skeletonMorphing.loadMorphDatasets
 import skeletonMorphing.trainSkeletonMorphing
