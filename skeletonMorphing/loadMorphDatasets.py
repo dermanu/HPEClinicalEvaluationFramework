@@ -29,10 +29,10 @@ def list_to_file_name(lst):
 Needed due to how multiprocessing works in windows (Ok without in Linux)
 """
 
-if __name__ == '__main__':
+def run_load():
     # Define the path to the folder containing the segmented data
     #data_folder = '/home/emanu/Desktop/SegmentedData'
-    data_folder = '/media/ofplarsen/LaCie/MoCap/segmented'
+    data_folder = 'E:\MoCap\segmented'
 
     # Assuming you have a model type
     model_type = 'mediapipe'
