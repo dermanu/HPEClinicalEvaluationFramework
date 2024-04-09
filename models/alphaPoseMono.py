@@ -58,6 +58,8 @@ def process_video_alphaPose(input_video_path, cfg_path, checkpoint_path):
                     'smpl_faces': torch.from_numpy(pose_model.smpl.faces.astype(np.int32))
                 }
 
+    except:
+        pass
 
 
 # Now, `keypoints_data` contains the parsed keypoints from the AlphaPose output file
