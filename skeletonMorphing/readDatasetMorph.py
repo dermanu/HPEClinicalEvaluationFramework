@@ -70,8 +70,6 @@ class ReadDatasetFiles(Dataset):
         # Use multiprocessing to parallelize dataset creation
         with multiprocessing.Pool(processes=10) as pool:
             datasets = pool.map(self.create_single_dataset, self.csv_file_paths)
-            pool.close()
-            pool.join()
 
         
         print('All datasets are created')
@@ -101,8 +99,6 @@ class ReadDatasetFiles(Dataset):
         with multiprocessing.Pool(processes=10) as pool:
             train = pool.map(self.get_single_train, self.datasets)
             test = pool.map(self.get_single_test, self.datasets)
-            pool.close()
-            pool.join()
 
         train_dataset = self._create_self_copy_new_dataset(train)
         test_dataset = self._create_self_copy_new_dataset(test)
