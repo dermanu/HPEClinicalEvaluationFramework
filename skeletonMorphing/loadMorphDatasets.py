@@ -47,13 +47,16 @@ def run_load():
     # Assuming you have a list of participant folders
     #par = [14]
     par_full, par = all_participants(data_folder)
-    par = [12]
+    par = [11, 19, 20, 21, 22, 23, 24, 25, 26]
 
     # Read the dataset for the current participant
-    my_dataset = rdm.ReadDatasetFiles(data_folder, par, mov, cam, model_type)
+    for p in par:
+        p = [p]
+        my_dataset = rdm.ReadDatasetFiles(data_folder, p, mov, cam, model_type)
 
-    # Save the dataset to a .pth file named after the participant
+        # Save the dataset to a .pth file named after the participant
 
-    file_name = f"par_{list_to_file_name(par)}_{model_type}_dataset.pth"
-    torch.save(my_dataset, file_name)
+        print("Saving Dataset")
+        file_name = f"E:\MoCap\morph_dataset\par_{list_to_file_name(p)}_{model_type}_dataset.pth"
+        torch.save(my_dataset, file_name)
 

@@ -17,148 +17,148 @@ import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 
+def train():
+    # Configuration settings using SimpleNamespace
+    config = SimpleNamespace()
+    config.learning_rate = 0.0001
+    config.BATCH_SIZE = 32
+    config.N_epochs = 100
+    config.log_interval = 100
+    config.weight_decay = 1e-5
+    last_loss_mean = 100000
 
-# Configuration settings using SimpleNamespace
-config = SimpleNamespace()
-config.learning_rate = 0.0001
-config.BATCH_SIZE = 32
-config.N_epochs = 100
-config.log_interval = 100
-config.weight_decay = 1e-5
-last_loss_mean = 100000
-
-# Sweep configuration
-sweep_config = {
-    'method': 'bayes',
-    'metric': {
-        'name': 'loss',
-        'goal': 'minimize'
-    },
-    'parameters': {
-        'learning_rate': {
-            'values': [0.0001, 0.00001]
+    # Sweep configuration
+    sweep_config = {
+        'method': 'bayes',
+        'metric': {
+            'name': 'loss',
+            'goal': 'minimize'
         },
-        'BATCH_SIZE': {
-            'values': [8, 16, 32]
+        'parameters': {
+            'learning_rate': {
+                'values': [0.0001, 0.00001]
+            },
+            'BATCH_SIZE': {
+                'values': [8, 16, 32]
+            },
+            'weight_decay': {
+                'values': [1e-4, 1e-5, 1e-6]
+            }
         },
-        'weight_decay': {
-            'values': [1e-4, 1e-5, 1e-6]
+        'early_terminate': {
+            'type': 'hyperband',
+            'min_iter': 10
         }
-    },
-    'early_terminate': {
-        'type': 'hyperband',
-        'min_iter': 10
     }
-}
 
-mode = "disabled"
-# WandB – Initialize a new run
-wandb.init(project="skeleton-morphing", config=config, mode=mode)
-
-
-# Folder containing data
-#data_folder = '/home/emanu/Desktop/SegmentedData'
-data_folder = '/media/ofplarsen/LaCie/MoCap/segmented'
-
-# Parameters for training
-par = [5]
-mov = list(range(1, 18))
-cam = list(range(0, 6))
-model_type = 'mediapipe'
-num_cam = 6
-
-# Data file for training
-# config.datafile = data_folder + 'h36m_train_mpi_skeleton_pred.pickle'
-
-# Creating dataset and data loader
-#print('Creating dataset of participant' + str(par) + '...')
-#my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
-#torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-#print('done')
-
-my_dataset1 = torch.load('morph_dataset/par_[12]_mediapipe_dataset.pth')
-#my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-#my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-#my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
+    mode = "disabled"
+    # WandB – Initialize a new run
+    wandb.init(project="skeleton-morphing", config=config, mode=mode)
 
 
-train, test = my_dataset1.get_train_test()
-print(my_dataset1)
-print(train)
-print(test)
-train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
-test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
-print('Data loader created')
+    # Folder containing data
+    #data_folder = '/home/emanu/Desktop/SegmentedData'
+    data_folder = '/media/ofplarsen/LaCie/MoCap/segmented'
 
-# Initializing the model (Synthesizer) and moving it to GPU
-model = modelSkeletonMorphing.Synthesizer().cuda()
+    # Parameters for training
+    par = [5]
+    mov = list(range(1, 18))
+    cam = list(range(0, 6))
+    model_type = 'mediapipe'
+    num_cam = 6
 
-wandb.watch(model, log_freq=100)
+    # Data file for training
+    # config.datafile = data_folder + 'h36m_train_mpi_skeleton_pred.pickle'
 
-# Mean Squared Error Loss
-mse_loss = nn.MSELoss()
+    # Creating dataset and data loader
+    #print('Creating dataset of participant' + str(par) + '...')
+    #my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
+    #torch.save(my_dataset, 'par4_mediapipe_test2.pth')
+    #print('done')
 
-# Number of epochs
-N_epochs = 100
-
-# Parameters for optimization
-params = list(model.parameters())  # + list(dec.parameters())
-
-# Setting anomaly detection for autograd
-optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay)
-scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, 80, 95], gamma=0.1)
-
-# Setting anomaly detection for autograd
-torch.autograd.set_detect_anomaly(True)
-
-# Namespace to store losses during training
-losses_mean = []
-batch_idx = 0
-
-# Training loop
-for epoch in range(N_epochs):
-    for batch in train_loader:
-        batch_idx += 1
-        # Access data for each batch
-        pose_gt_batch = batch['pose_gt']
-        pose_inf_batch = batch['pose_inf']
-
-        # Creating tensors for input and output poses
-        inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()  # batches/frames x cams, keypoints x 3
-        output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-        # Forward pass through the model
-        pred_poses = model(inp_poses)
-
-        # Calculating MSE loss
-        loss = mse_loss(pred_poses, output_poses)
-
-        # Backward pass and optimization step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        losses_mean.append(loss.item())
+    my_dataset1 = torch.load('morph_dataset/par_12_mediapipe_dataset.pth')
+    #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+    #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+    #my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
 
 
-    wandb.log({"loss": np.mean(losses_mean)})
-    prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
-    ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
-    hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
-    plot_3d_keypoints(prediction, 'mediapipe', 'morphed')
-    plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth')
-    plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth')
-    plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe')
-    wandb.log({"epoch": epoch})
+    train, test = my_dataset1.get_train_test()
+    print(my_dataset1)
+    print(train)
+    print(test)
+    train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+    test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+    print('Data loader created')
 
-    # Saving the model after each epoch
-    print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
-    if np.mean(losses_mean) < last_loss_mean:
-        last_loss_mean = np.mean(losses_mean)
-        torch.save(model, 'models/model_skeleton_morph_par4_mediapipe.pt')
+    # Initializing the model (Synthesizer) and moving it to GPU
+    model = modelSkeletonMorphing.Synthesizer().cuda()
 
+    wandb.watch(model, log_freq=100)
+
+    # Mean Squared Error Loss
+    mse_loss = nn.MSELoss()
+
+    # Number of epochs
+    N_epochs = 100
+
+    # Parameters for optimization
+    params = list(model.parameters())  # + list(dec.parameters())
+
+    # Setting anomaly detection for autograd
+    optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, 80, 95], gamma=0.1)
+
+    # Setting anomaly detection for autograd
+    torch.autograd.set_detect_anomaly(True)
+
+    # Namespace to store losses during training
     losses_mean = []
+    batch_idx = 0
 
-# Training complete
-print('done')
+    # Training loop
+    for epoch in range(N_epochs):
+        for batch in train_loader:
+            batch_idx += 1
+            # Access data for each batch
+            pose_gt_batch = batch['pose_gt']
+            pose_inf_batch = batch['pose_inf']
+
+            # Creating tensors for input and output poses
+            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()  # batches/frames x cams, keypoints x 3
+            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+            # Forward pass through the model
+            pred_poses = model(inp_poses)
+
+            # Calculating MSE loss
+            loss = mse_loss(pred_poses, output_poses)
+
+            # Backward pass and optimization step
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            losses_mean.append(loss.item())
+
+
+        wandb.log({"loss": np.mean(losses_mean)})
+        prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
+        ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
+        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
+        plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
+        plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
+        plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
+        plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
+        wandb.log({"epoch": epoch})
+
+        # Saving the model after each epoch
+        print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
+        if np.mean(losses_mean) < last_loss_mean:
+            last_loss_mean = np.mean(losses_mean)
+            torch.save(model, 'models/model_skeleton_morph_par4_mediapipe.pt')
+
+        losses_mean = []
+
+    # Training complete
+    print('done')
 
