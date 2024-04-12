@@ -18,7 +18,81 @@ import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 import tensorflow as tf
 
-def print_all_data(datafolder: str):
+class NetworkTrainer:
+
+    @staticmethod
+    def train_model(model, train_loader, optimizer,  criterion, epochs = 10):
+        last_loss_mean = 100000
+        model.train()
+        # Training loop
+        losses_mean = []
+        for epoch in range(epochs):
+            for batch in train_loader:
+                # Access data for each batch
+                pose_gt_batch = batch['pose_gt']
+                pose_inf_batch = batch['pose_inf']
+
+                # Creating tensors for input and output poses
+                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()  # batches/frames x cams, keypoints x 3
+                output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+                # Forward pass through the model
+                pred_poses = model(inp_poses)
+
+                # Calculating MSE loss
+                loss = criterion(pred_poses, output_poses)
+                # Backward pass and optimization step
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                losses_mean.append(loss.item())
+
+
+            wandb.log({"loss": np.mean(losses_mean)})
+            prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
+            ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
+            hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
+            plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
+            plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
+            plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
+            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
+            wandb.log({"epoch": epoch})
+
+            # Saving the model after each epoch
+            print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
+            if np.mean(losses_mean) < last_loss_mean:
+                last_loss_mean = np.mean(losses_mean)
+                torch.save(model, f'models/model_skeleton_morph_par_{i}_mediapipe.pt')
+
+            losses_mean = []
+
+    @staticmethod
+    def test_model(model, test_loader, criterion):
+        model.eval()
+        mean_test_loss = []
+        for batch in test_loader:
+            # Access data for each batch
+            pose_gt_batch = batch['pose_gt']
+            pose_inf_batch = batch['pose_inf']
+
+            # Creating tensors for input and output poses
+            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
+                2)).cuda().float()  # batches/frames x cams, keypoints x 3
+            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+            # Forward pass through the model
+            pred_poses = model(inp_poses)
+
+            # Calculating MSE loss
+            loss = criterion(pred_poses, output_poses)
+            mean_test_loss.append(loss.detach().cpu().numpy())
+
+        print(f"Test Loss", np.mean(mean_test_loss))
+
+
+
+def print_all_data(data_folder: str):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     for i in range(11, 27):
         if i == 13:
@@ -36,6 +110,22 @@ def print_all_data(datafolder: str):
         print(train)
         print(test)
 
+def load_all_dataset(data_folder: str, pars = np.arange(10, 27)):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    dataset = None
+    for i in pars:
+        if i == 13:
+            continue
+        print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
+
+        par_dataset = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
+        if  dataset is None:
+            dataset = par_dataset 
+        else:
+            dataset = torch.utils.data.ConcatDataset([dataset, par_dataset])
+
+    return dataset
+
 def train(datapath: str):
     # Configuration settings using SimpleNamespace
     config = SimpleNamespace()
@@ -44,7 +134,7 @@ def train(datapath: str):
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
-    last_loss_mean = 100000
+
 
     # Sweep configuration
     sweep_config = {
@@ -101,12 +191,14 @@ def train(datapath: str):
     i = 12
     my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
     train, test = my_dataset1.get_train_test()
-
-
+    
+    pars = np.arange(10, 15)
+    dataset = load_all_dataset(data_folder, pars)
+    print(dataset)
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     print('Data loader created')
-
+    exit()
     # Initializing the model (Synthesizer) and moving it to GPU
     model = modelSkeletonMorphing.Synthesizer().cuda()
 
@@ -129,76 +221,17 @@ def train(datapath: str):
     torch.autograd.set_detect_anomaly(True)
 
     # Namespace to store losses during training
-    losses_mean = []
-    batch_idx = 0
 
-    model.train()
-    # Training loop
-    for epoch in range(N_epochs):
-        for batch in train_loader:
-            batch_idx += 1
-            # Access data for each batch
-            pose_gt_batch = batch['pose_gt']
-            pose_inf_batch = batch['pose_inf']
-
-            # Creating tensors for input and output poses
-            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()  # batches/frames x cams, keypoints x 3
-            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-            # Forward pass through the model
-            pred_poses = model(inp_poses)
-
-            # Calculating MSE loss
-            loss = mse_loss(pred_poses, output_poses)
-            print(loss)
-
-            # Backward pass and optimization step
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            losses_mean.append(loss.item())
+    NetworkTrainer.train_model(model = model,
+                               train_loader = train_loader,
+                               optimizer = optimizer,
+                               criterion = mse_loss,
+                               epochs = N_epochs)
 
 
-        wandb.log({"loss": np.mean(losses_mean)})
-        prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
-        ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
-        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
-        plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
-        plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
-        plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
-        plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
-        wandb.log({"epoch": epoch})
-
-        # Saving the model after each epoch
-        print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
-        if np.mean(losses_mean) < last_loss_mean:
-            last_loss_mean = np.mean(losses_mean)
-            torch.save(model, f'models/model_skeleton_morph_par_{i}_mediapipe.pt')
-
-        losses_mean = []
+    NetworkTrainer.test_model(model = model, test_loader = test_loader, criterion = mse_loss)
 
     mean_test_loss = []
-    model.eval()
-    for batch in test_loader:
-        # Access data for each batch
-        pose_gt_batch = batch['pose_gt']
-        pose_inf_batch = batch['pose_inf']
-
-        # Creating tensors for input and output poses
-        inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
-            2)).cuda().float()  # batches/frames x cams, keypoints x 3
-        output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-        # Forward pass through the model
-        pred_poses = model(inp_poses)
-
-        # Calculating MSE loss
-        loss = mse_loss(pred_poses, output_poses)
-        mean_test_loss.append(loss.detach().cpu().numpy())
-
-    print(f"Test Loss", np.mean(mean_test_loss))
-
-    # Training complete
+        # Training complete
     print('done')
 
