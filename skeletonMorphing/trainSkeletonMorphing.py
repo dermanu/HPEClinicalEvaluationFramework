@@ -44,7 +44,7 @@ class NetworkTrainer:
 
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
-                print(loss)
+                #print(loss)
                 # Backward pass and optimization step
                 optimizer.zero_grad()
                 loss.backward()
@@ -122,7 +122,7 @@ def train(datapath: str):
     # Configuration settings using SimpleNamespace
     config = SimpleNamespace()
     config.learning_rate = 0.0001
-    config.BATCH_SIZE = 1024
+    config.BATCH_SIZE = 32
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
@@ -171,6 +171,9 @@ def train(datapath: str):
 
     ## Somethign wrong with 10 and 26
     pars = np.arange(10, 27)
+    #Male: 12, 14
+    # Female: 15, 16
+    pars = np.array([12, 14, 15, 16])
     start_time = time.time()
     train, test = load_train_test_all(data_folder, pars)
     print('Data loaded in')
