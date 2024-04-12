@@ -17,11 +17,12 @@ import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 import tensorflow as tf
+from skeletonMorphing.loadMorphDatasets import all_participants 
 
 class NetworkTrainer:
 
     @staticmethod
-    def train_model(model, train_loader, optimizer,  criterion, epochs = 10):
+    def train_model(model, train_loader, optimizer,  criterion, epochs = 10, pars = np.arange(10, 27)):
         last_loss_mean = 100000
         model.train()
         # Training loop
@@ -63,6 +64,7 @@ class NetworkTrainer:
             print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
             if np.mean(losses_mean) < last_loss_mean:
                 last_loss_mean = np.mean(losses_mean)
+                _, i = all_participants(pars)
                 torch.save(model, f'models/model_skeleton_morph_par_{i}_mediapipe.pt')
 
             losses_mean = []
@@ -110,21 +112,24 @@ def print_all_data(data_folder: str):
         print(train)
         print(test)
 
-def load_all_dataset(data_folder: str, pars = np.arange(10, 27)):
+def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    dataset = None
+    train_dataset = None
+    test_dataset = None
     for i in pars:
         if i == 13:
             continue
         print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
 
         par_dataset = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
-        if  dataset is None:
-            dataset = par_dataset 
+        if  train_dataset is None:
+            train_dataset, test_dataset = par_dataset.get_train_test()
         else:
-            dataset = torch.utils.data.ConcatDataset([dataset, par_dataset])
+            train, test = par_dataset.get_train_test()
+            train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
+            test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
 
-    return dataset
+    return train_dataset, test_dataset
 
 def train(datapath: str):
     # Configuration settings using SimpleNamespace
@@ -189,12 +194,12 @@ def train(datapath: str):
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     i = 12
-    my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
-    train, test = my_dataset1.get_train_test()
+    #my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
+    #train, test = my_dataset1.get_train_test()
     
     pars = np.arange(10, 15)
-    dataset = load_all_dataset(data_folder, pars)
-    print(dataset)
+    train, test = load_train_test_all(data_folder, pars)
+    print('Data loaded')
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     print('Data loader created')
@@ -226,7 +231,8 @@ def train(datapath: str):
                                train_loader = train_loader,
                                optimizer = optimizer,
                                criterion = mse_loss,
-                               epochs = N_epochs)
+                               epochs = N_epochs,
+                               pars = pars)
 
 
     NetworkTrainer.test_model(model = model, test_loader = test_loader, criterion = mse_loss)
