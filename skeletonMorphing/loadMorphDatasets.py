@@ -47,7 +47,7 @@ def run_load(datapath: str):
     # Assuming you have a list of participant folders
     #par = [14]
     par_full, par = all_participants(data_folder)
-    par = [11, 19, 20, 21, 22, 23, 24, 25, 26]
+    par = [10, 26]
 
     # Read the dataset for the current participant
     for p in par:

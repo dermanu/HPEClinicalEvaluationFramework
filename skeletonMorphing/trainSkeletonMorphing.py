@@ -18,6 +18,8 @@ import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 import tensorflow as tf
 from skeletonMorphing.loadMorphDatasets import list_to_file_name
+import time
+import os
 
 class NetworkTrainer:
 
@@ -42,6 +44,7 @@ class NetworkTrainer:
 
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
+                print(loss)
                 # Backward pass and optimization step
                 optimizer.zero_grad()
                 loss.backward()
@@ -92,26 +95,6 @@ class NetworkTrainer:
 
         print(f"Test Loss", np.mean(mean_test_loss))
 
-
-
-def print_all_data(data_folder: str):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    for i in range(11, 27):
-        if i == 13:
-            continue
-        print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
-
-        my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
-        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-        #my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
-
-
-        train, test = my_dataset1.get_train_test()
-        print(my_dataset1)
-        print(train)
-        print(test)
-
 def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_dataset = None
@@ -139,11 +122,11 @@ def train(datapath: str):
     # Configuration settings using SimpleNamespace
     config = SimpleNamespace()
     config.learning_rate = 0.0001
-    config.BATCH_SIZE = 32
+    config.BATCH_SIZE = 1024
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
-
+    mode = "online"
 
     # Sweep configuration
     sweep_config = {
@@ -169,7 +152,7 @@ def train(datapath: str):
         }
     }
 
-    mode = "disabled"
+
     # WandB – Initialize a new run
     wandb.init(project="skeleton-morphing", config=config, mode=mode)
 
@@ -186,24 +169,25 @@ def train(datapath: str):
     model_type = 'mediapipe'
     num_cam = 6
 
-    # Data file for training
-    # config.datafile = data_folder + 'h36m_train_mpi_skeleton_pred.pickle'
-
-    # Creating dataset and data loader
-    #print('Creating dataset of participant' + str(par) + '...')
-    #my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
-    #torch.save(my_dataset, 'par4_mediapipe_test2.pth')
-    #print('done')
-    #print_all_data(data_folder)
-
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    i = 12
-    #my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
-    #train, test = my_dataset1.get_train_test()
-    
-    pars = np.arange(11, 15)
+    ## Somethign wrong with 10 and 26
+    pars = np.arange(10, 27)
+    start_time = time.time()
     train, test = load_train_test_all(data_folder, pars)
-    print('Data loaded')
+    print('Data loaded in')
+    print("--- %s seconds ---" % (time.time() - start_time))
+    if not os.path.exists(data_folder + "/all_par_train.pth"):
+        start_time = time.time()
+        print("Saving Train")
+        torch.save(train, data_folder + "/all_par_train.pth")
+        print('Train saved in')
+        print("--- %s seconds ---" % (time.time() - start_time))
+    if not os.path.exists(data_folder + "/all_par_test.pth"):
+        start_time = time.time()
+        print("Saving Test")
+        torch.save(test, data_folder + "/all_par_test.pth")
+        print('Test saved in')
+        print("--- %s seconds ---" % (time.time() - start_time))
+
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     print('Data loader created')
@@ -214,9 +198,6 @@ def train(datapath: str):
 
     # Mean Squared Error Loss
     mse_loss = nn.MSELoss()
-
-    # Number of epochs
-    N_epochs = 1
 
     # Parameters for optimization
     params = list(model.parameters())  # + list(dec.parameters())
@@ -234,13 +215,11 @@ def train(datapath: str):
                                train_loader = train_loader,
                                optimizer = optimizer,
                                criterion = mse_loss,
-                               epochs = N_epochs,
+                               epochs = config.N_epochs,
                                pars = pars)
 
 
     NetworkTrainer.test_model(model = model, test_loader = test_loader, criterion = mse_loss)
 
-    mean_test_loss = []
-        # Training complete
     print('done')
 
