@@ -25,6 +25,16 @@ class NetworkTrainer:
 
     @staticmethod
     def train_model(model, train_loader, optimizer,  criterion, epochs = 10, pars = np.arange(10, 27)):
+        """
+        Method to train model
+        :param model:
+        :param train_loader:
+        :param optimizer:
+        :param criterion:
+        :param epochs:
+        :param pars:
+        :return:
+        """
         last_loss_mean = 100000
         model.train()
         # Training loop
@@ -74,6 +84,14 @@ class NetworkTrainer:
 
     @staticmethod
     def test_model(model, test_loader, criterion):
+        """
+        Method to test model
+        :param model:
+        :param test_loader:
+        :param criterion:
+        :return:
+        """
+
         model.eval()
         mean_test_loss = []
         for batch in test_loader:
@@ -96,6 +114,12 @@ class NetworkTrainer:
         print(f"Test Loss", np.mean(mean_test_loss))
 
 def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
+    """
+    Method to load all training and test data from participants [pars]
+    :param data_folder:
+    :param pars:
+    :return:
+    """
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_dataset = None
     test_dataset = None

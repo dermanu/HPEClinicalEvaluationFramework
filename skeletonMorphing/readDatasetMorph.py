@@ -95,6 +95,10 @@ class ReadDatasetFiles(Dataset):
 
 
     def get_train_test(self):
+        """
+        Using threads, get train and test data stored in all SingleCSVFileDataset in this class
+        :return:
+        """
 
         with multiprocessing.Pool(processes=10) as pool:
             train = pool.map(self.get_single_train, self.datasets)
@@ -150,6 +154,13 @@ class SingleCSVFileDataset(Dataset):
         return csv_data
 
     def get_dataset(self, train=True):
+        """
+        Get dataset from csv path
+        Creates a new SingleCSVFileDataset (init false to not load data from file again)
+        Sets values of the new dataset if it should use train or test data from the real dataset
+        :param train:
+        :return:
+        """
         dataset = SingleCSVFileDataset(self.csv_file_path, self.model_type, init=False)
         csv_data, pose_inf, confidences_inf = self.get_training_data() if train else self.get_test_data()
         dataset.csv_data = csv_data
@@ -169,6 +180,13 @@ class SingleCSVFileDataset(Dataset):
         return training, test
 
     def get_split_indexes(self, csv_data, split=[0.8,0.2]):
+        """
+        Splits data into train/test based on 80/20 split and keeps track by indexes stored in class
+        Splits repetitions of movements into 80/20
+        :param csv_data:
+        :param split:
+        :return:
+        """
         # Drop NaN values in Iteration column
         iteration_values = csv_data['Iteration'].dropna().unique()
 

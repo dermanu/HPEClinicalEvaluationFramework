@@ -30,6 +30,13 @@ Needed due to how multiprocessing works in windows (Ok without in Linux)
 """
 
 def run_load(datapath: str):
+    """
+    Method to load all data and store as pytorch datasets to file. Datapath should contain path to folder
+    where /segmented folder is stored. Data will be stored in datapath under /morphed
+    :param datapath:
+    :return:
+    """
+
     # Define the path to the folder containing the segmented data
     #data_folder = '/home/emanu/Desktop/SegmentedData'
     data_folder = datapath + '/segmented'
