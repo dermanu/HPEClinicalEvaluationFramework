@@ -29,10 +29,10 @@ def list_to_file_name(lst):
 Needed due to how multiprocessing works in windows (Ok without in Linux)
 """
 
-def run_load():
+def run_load(datapath: str):
     # Define the path to the folder containing the segmented data
     #data_folder = '/home/emanu/Desktop/SegmentedData'
-    data_folder = 'E:\MoCap\segmented'
+    data_folder = datapath + '/segmented'
 
     # Assuming you have a model type
     model_type = 'mediapipe'
@@ -57,6 +57,6 @@ def run_load():
         # Save the dataset to a .pth file named after the participant
 
         print("Saving Dataset")
-        file_name = f"E:\MoCap\morph_dataset\par_{list_to_file_name(p)}_{model_type}_dataset.pth"
+        file_name = f"{datapath}/morph_dataset/par_{list_to_file_name(p)}_{model_type}_dataset.pth"
         torch.save(my_dataset, file_name)
 

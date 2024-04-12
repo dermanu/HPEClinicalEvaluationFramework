@@ -17,7 +17,7 @@ import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 
-def train():
+def train(datapath: str):
     # Configuration settings using SimpleNamespace
     config = SimpleNamespace()
     config.learning_rate = 0.0001
@@ -58,7 +58,7 @@ def train():
 
     # Folder containing data
     #data_folder = '/home/emanu/Desktop/SegmentedData'
-    data_folder = '/media/ofplarsen/LaCie/MoCap/segmented'
+    data_folder = datapath + '/morph_dataset'
 
     # Parameters for training
     par = [5]
@@ -75,17 +75,21 @@ def train():
     #my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
     #torch.save(my_dataset, 'par4_mediapipe_test2.pth')
     #print('done')
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    for i in range(11, 27):
+        print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
 
-    my_dataset1 = torch.load('morph_dataset/par_12_mediapipe_dataset.pth')
-    #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-    #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-    #my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
+        my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
+        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+        #my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
 
 
-    train, test = my_dataset1.get_train_test()
-    print(my_dataset1)
-    print(train)
-    print(test)
+        train, test = my_dataset1.get_train_test()
+        print(my_dataset1)
+        print(train)
+        print(test)
+    exit()
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     print('Data loader created')
