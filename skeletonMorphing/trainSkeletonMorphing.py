@@ -17,7 +17,7 @@ import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 import tensorflow as tf
-from skeletonMorphing.loadMorphDatasets import all_participants 
+from skeletonMorphing.loadMorphDatasets import list_to_file_name
 
 class NetworkTrainer:
 
@@ -61,11 +61,11 @@ class NetworkTrainer:
             wandb.log({"epoch": epoch})
 
             # Saving the model after each epoch
-            print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
+            print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses_mean)))
             if np.mean(losses_mean) < last_loss_mean:
                 last_loss_mean = np.mean(losses_mean)
-                _, i = all_participants(pars)
-                torch.save(model, f'models/model_skeleton_morph_par_{i}_mediapipe.pt')
+                i = list_to_file_name(pars)
+                torch.save(model, f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pt')
 
             losses_mean = []
 
@@ -122,12 +122,16 @@ def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
         print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
 
         par_dataset = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
-        if  train_dataset is None:
-            train_dataset, test_dataset = par_dataset.get_train_test()
-        else:
-            train, test = par_dataset.get_train_test()
-            train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
-            test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
+        try:
+            if  train_dataset is None:
+                train_dataset, test_dataset = par_dataset.get_train_test()
+            else:
+                train, test = par_dataset.get_train_test()
+                train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
+                test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
+
+        except Exception as e:
+            print(e)
 
     return train_dataset, test_dataset
 
@@ -197,13 +201,12 @@ def train(datapath: str):
     #my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
     #train, test = my_dataset1.get_train_test()
     
-    pars = np.arange(10, 15)
+    pars = np.arange(11, 15)
     train, test = load_train_test_all(data_folder, pars)
     print('Data loaded')
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     print('Data loader created')
-    exit()
     # Initializing the model (Synthesizer) and moving it to GPU
     model = modelSkeletonMorphing.Synthesizer().cuda()
 
