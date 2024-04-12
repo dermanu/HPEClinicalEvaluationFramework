@@ -16,6 +16,25 @@ import torch.nn as nn
 import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
+import tensorflow as tf
+
+def print_all_data(datafolder: str):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    for i in range(11, 27):
+        if i == 13:
+            continue
+        print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
+
+        my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
+        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
+        #my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
+
+
+        train, test = my_dataset1.get_train_test()
+        print(my_dataset1)
+        print(train)
+        print(test)
 
 def train(datapath: str):
     # Configuration settings using SimpleNamespace
@@ -55,7 +74,8 @@ def train(datapath: str):
     # WandB – Initialize a new run
     wandb.init(project="skeleton-morphing", config=config, mode=mode)
 
-
+    ## Remove all the depricated warnings caused by pip packages
+    tf.get_logger().setLevel("ERROR")
     # Folder containing data
     #data_folder = '/home/emanu/Desktop/SegmentedData'
     data_folder = datapath + '/morph_dataset'
@@ -75,21 +95,14 @@ def train(datapath: str):
     #my_dataset = ReadDatasetFiles(data_folder, par, mov, cam, model_type)
     #torch.save(my_dataset, 'par4_mediapipe_test2.pth')
     #print('done')
+    #print_all_data(data_folder)
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    for i in range(11, 27):
-        print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
-
-        my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
-        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-        #my_dataset2 = torch.load('morph_dataset/par5_mediapipe_test.pth')
-        #my_dataset = torch.utils.data.ConcatDataset([my_dataset1, my_dataset2])
+    i = 12
+    my_dataset1 = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
+    train, test = my_dataset1.get_train_test()
 
 
-        train, test = my_dataset1.get_train_test()
-        print(my_dataset1)
-        print(train)
-        print(test)
-    exit()
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     print('Data loader created')
@@ -103,7 +116,7 @@ def train(datapath: str):
     mse_loss = nn.MSELoss()
 
     # Number of epochs
-    N_epochs = 100
+    N_epochs = 1
 
     # Parameters for optimization
     params = list(model.parameters())  # + list(dec.parameters())
@@ -119,6 +132,7 @@ def train(datapath: str):
     losses_mean = []
     batch_idx = 0
 
+    model.train()
     # Training loop
     for epoch in range(N_epochs):
         for batch in train_loader:
@@ -136,6 +150,7 @@ def train(datapath: str):
 
             # Calculating MSE loss
             loss = mse_loss(pred_poses, output_poses)
+            print(loss)
 
             # Backward pass and optimization step
             optimizer.zero_grad()
@@ -159,9 +174,30 @@ def train(datapath: str):
         print('Finished epoch ' + str(epoch) + ' of ' + str(N_epochs) + ' with loss ' + str(np.mean(losses_mean)))
         if np.mean(losses_mean) < last_loss_mean:
             last_loss_mean = np.mean(losses_mean)
-            torch.save(model, 'models/model_skeleton_morph_par4_mediapipe.pt')
+            torch.save(model, f'models/model_skeleton_morph_par_{i}_mediapipe.pt')
 
         losses_mean = []
+
+    mean_test_loss = []
+    model.eval()
+    for batch in test_loader:
+        # Access data for each batch
+        pose_gt_batch = batch['pose_gt']
+        pose_inf_batch = batch['pose_inf']
+
+        # Creating tensors for input and output poses
+        inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
+            2)).cuda().float()  # batches/frames x cams, keypoints x 3
+        output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+        # Forward pass through the model
+        pred_poses = model(inp_poses)
+
+        # Calculating MSE loss
+        loss = mse_loss(pred_poses, output_poses)
+        mean_test_loss.append(loss.detach().cpu().numpy())
+
+    print(f"Test Loss", np.mean(mean_test_loss))
 
     # Training complete
     print('done')
