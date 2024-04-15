@@ -150,6 +150,7 @@ def train(datapath: str):
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
+    # online/disabled for wandb
     mode = "online"
 
     # Sweep configuration
@@ -197,11 +198,13 @@ def train(datapath: str):
     pars = np.arange(10, 27)
     #Male: 12, 14
     # Female: 15, 16
-    pars = np.array([12, 14, 15, 16])
+    #pars = np.array([12, 14, 15, 16])
+    pars = np.array([12])
     start_time = time.time()
     train, test = load_train_test_all(data_folder, pars)
     print('Data loaded in')
     print("--- %s seconds ---" % (time.time() - start_time))
+
     if not os.path.exists(data_folder + "/all_par_train.pth"):
         start_time = time.time()
         print("Saving Train")
@@ -245,7 +248,8 @@ def train(datapath: str):
                                epochs = config.N_epochs,
                                pars = pars)
 
-
+    i = list_to_file_name(pars)
+    model = torch.load(f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pt') 
     NetworkTrainer.test_model(model = model, test_loader = test_loader, criterion = mse_loss)
 
     print('done')

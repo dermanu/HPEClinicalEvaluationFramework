@@ -41,16 +41,21 @@ def plot_3d_keypoints(keypoints, model_name, wandb_name, epoch):
             zaxis=dict(title='Z', range=[min_value, max_value])
         )
     )
-
+    #fig.show()
     # Log the 3D scatter plot using WandB
-    if wandb_name == 'morphed':
-        wandb.log({'Model Output: Morphed Keypoints': fig, "epoch": epoch+1})
-    elif wandb_name == 'ground_truth':
-        wandb.log({'Ground Truth: Vizlab Dataset Keypoints': fig, "epoch": epoch+1})
-    elif wandb_name == 'hpe_truth':
-        wandb.log({'Model Input: HPE Keypoints': fig, "epoch": epoch+1})
-    else:
-        raise ValueError(f"Invalid wandb_name: {wandb_name}")
+    try:
+        if wandb_name == 'morphed':
+            wandb.log({'Model Output: Morphed Keypoints': wandb.Plotly(fig), "epoch": epoch+1})
+            #wandb.log({'Test': fig})
+        elif wandb_name == 'ground_truth':
+            wandb.log({'Ground Truth: Vizlab Dataset Keypoints': fig, "epoch": epoch+1})
+        elif wandb_name == 'hpe_truth':
+            wandb.log({'Model Input: HPE Keypoints': fig, "epoch": epoch+1})
+        else:
+            raise ValueError(f"Invalid wandb_name: {wandb_name}")
+    except Exception as e:
+        print("Wandb bug :PPPPPP")
+        print(e)
 
 def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_hpe_truth, model_name, epoch):
     colors = ['red', 'green', 'blue']
