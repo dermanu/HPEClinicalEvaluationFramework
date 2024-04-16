@@ -24,6 +24,43 @@ import os
 class NetworkTrainer:
 
     @staticmethod
+    def validation(model, validation_loader):
+        """
+        Validation of the model
+        :param model: Morphing model to train
+        :param validation_loader: training data loader
+        :return: Average loss of the model
+        """
+        # Iterate through batches
+        with torch.no_grad():
+            losses = 0
+            for step, batch in enumerate(tqdm.tqdm(validation_loader, desc="Validation progress", leave=False)):
+                # Access data for each batch
+                pose_gt_batch = batch['pose_gt']
+                pose_inf_batch = batch['pose_inf']
+
+                # Creating tensors for input and output poses
+                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
+                    2)).cuda().float()  # batches/frames x cams, keypoints x 3
+                output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+                # Forward pass through the model
+                pred_poses = model(inp_poses)
+
+                # Calculating MSE loss
+                loss = nn.functional.mse_loss(pred_poses, output_poses)
+
+                print(loss.item())
+
+                # Append loss
+                losses += (loss.item())
+
+                # Log the loss of each batch
+                wandb.log({"batch_loss": loss.item(), "batch": step + 1})
+
+        return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
+
+    @staticmethod
     def train_model(model, train_loader, optimizer,  criterion, epochs = 10, pars = np.arange(10, 27)):
         """
         Method to train model
@@ -63,7 +100,7 @@ class NetworkTrainer:
                 losses_mean.append(loss.item())
 
 
-            wandb.log({"loss": np.mean(losses_mean)})
+            wandb.log({"loss": np.sqrt(np.mean(losses_mean))})
             prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
             ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
             hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
@@ -74,11 +111,12 @@ class NetworkTrainer:
             wandb.log({"epoch": epoch})
 
             # Saving the model after each epoch
-            print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses_mean)))
+            print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.sqrt(np.mean(losses_mean))))
+
             if np.mean(losses_mean) < last_loss_mean:
                 last_loss_mean = np.mean(losses_mean)
                 i = list_to_file_name(pars)
-                torch.save(model, f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pt')
+                torch.save(model.state_dict(), f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pth')
 
             losses_mean = []
 
@@ -111,7 +149,7 @@ class NetworkTrainer:
             loss = criterion(pred_poses, output_poses)
             mean_test_loss.append(loss.detach().cpu().numpy())
 
-        print(f"Test Loss", np.mean(mean_test_loss))
+        print(f"Test Loss", np.sqrt(np.mean(mean_test_loss)))
 
 def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
     """
@@ -249,7 +287,7 @@ def train(datapath: str):
                                pars = pars)
 
     i = list_to_file_name(pars)
-    model = torch.load(f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pt') 
+    model = model.load_state_dict(torch.load(f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pth'))
     NetworkTrainer.test_model(model = model, test_loader = test_loader, criterion = mse_loss)
 
     print('done')
