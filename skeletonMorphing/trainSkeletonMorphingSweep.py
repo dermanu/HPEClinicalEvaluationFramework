@@ -16,6 +16,7 @@ import torch.nn as nn
 import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
+from skeletonMorphing.trainSkeletonMorphing import NetworkTrainer, RMSELoss
 import tqdm
 
 
@@ -23,7 +24,7 @@ import tqdm
 sweep_config = {
     'method': 'bayes',
     'metric': {
-        'name': 'epoch_loss',
+        'name': 'validation_loss',
         'goal': 'minimize'
     },
     'parameters': {
@@ -99,75 +100,6 @@ def validation_data_loader(data_config):
     return validation_loader
 
 
-def train(model, train_loader, optimizer):
-    """
-    Training the model
-    :param model: Morphing model to train
-    :param train_loader: training data loader
-    :param optimizer: optimizer for the model
-    :return: Average loss of the model
-    """
-    # Iterate through batches
-    losses = 0
-    for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
-        # Access data for each batch
-        pose_gt_batch = batch['pose_gt']
-        pose_inf_batch = batch['pose_inf']
-
-        # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
-        inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()
-        output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-        # Forward pass through the model
-        pred_poses = model(inp_poses)
-
-        # Calculating MSE loss
-        loss = nn.functional.mse_loss(pred_poses, output_poses)
-
-        # Backward pass and optimization step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-
-def validation(model, validation_loader):
-    """
-    Validation of the model
-    :param model: Morphing model to train
-    :param validation_loader: training data loader
-    :return: Average loss of the model
-    """
-    # Iterate through batches
-    with torch.no_grad():
-        losses = 0
-        for step, batch in enumerate(tqdm.tqdm(validation_loader, desc="Validation progress", leave=False)):
-            # Access data for each batch
-            pose_gt_batch = batch['pose_gt']
-            pose_inf_batch = batch['pose_inf']
-
-            # Creating tensors for input and output poses
-            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
-                2)).cuda().float()  # batches/frames x cams, keypoints x 3
-            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-            # Forward pass through the model
-            pred_poses = model(inp_poses)
-
-            # Calculating MSE loss
-            loss = nn.functional.mse_loss(pred_poses, output_poses)
-
-            print(loss.item())
-
-            # Append loss
-            losses += (loss.item())
-
-            # Log the loss of each batch
-            wandb.log({"batch_loss": loss.item(), "batch": step+1})
-
-
-    return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
-
-
 def main(config=None):
     """
     Initialize a new wandb run
@@ -185,6 +117,7 @@ def main(config=None):
         # Parameters for optimization
         params = list(model.parameters())  # + list(dec.parameters())
 
+        criterion = RMSELoss()
         # Setting anomaly detection for autograd
         optimizer = optim.AdamW(params, lr=config.learning_rate, weight_decay=config.weight_decay,
                                amsgrad=True, foreach=True)
@@ -203,20 +136,10 @@ def main(config=None):
         for epoch in range(config.epochs):
             time.sleep(15)
             # Training the model
-            train(model, train_dataset, optimizer)
-            losses, pred_poses, pose_gt_batch, pose_inf_batch = validation(model, validation_dataset)
+            train_loss = NetworkTrainer.train(model, train_dataset, optimizer, criterion)
+            losses, pred_poses, pose_gt_batch, pose_inf_batch = NetworkTrainer.validation(model, validation_dataset, criterion)
 
-            # Logging the loss and epoch
-            wandb.log({"epoch_loss": np.sqrt(np.mean(losses)), "epoch": epoch+1})
-
-            # Plotting the keypoints and logging them
-            prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
-            ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
-            hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
-            plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
-            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, config.model_type, epoch)
+            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch)
 
             # Print loss and epoch
             print('Finished epoch ' + str(epoch+1) + ' of ' + str(config.epochs) + ' with loss ' + str(np.sqrt(np.mean(losses))))
@@ -233,8 +156,9 @@ def main(config=None):
         wandb.log_artifact(artifact)
 
 
-
-# Start sweep job.
-wandb.agent(sweep_id, function=main, count=2)
-# Training complete
-print('done')
+if __name__ == '__main__':
+    datapath = "E:\MoCap"
+    # Start sweep job.
+    wandb.agent(sweep_id, function=main, count=2)
+    # Training complete
+    print('done')

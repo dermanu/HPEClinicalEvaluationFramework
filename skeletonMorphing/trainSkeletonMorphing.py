@@ -10,6 +10,8 @@ https://arxiv.org/pdf/2011.14679.pdf).
 import torch.optim
 from torch.utils import data
 import torch.optim as optim
+import tqdm
+
 import skeletonMorphing.modelSkeletonMorphing as modelSkeletonMorphing
 from types import SimpleNamespace
 import torch.nn as nn
@@ -21,12 +23,116 @@ from skeletonMorphing.loadMorphDatasets import list_to_file_name
 import time
 import os
 
+
+class RMSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+
+    def forward(self, yhat, y):
+        return torch.sqrt(self.mse(yhat, y))
+
+class MPJPELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, yhat, y):
+        joint_error = torch.sqrt(torch.sum((yhat-y)**2, dim=1))
+        return torch.mean(joint_error)
+
+
 class NetworkTrainer:
+    @staticmethod
+    def validation(model, validation_loader, criterion):
+        """
+        Validation of the model
+        :param criterion:
+        :param model: Morphing model to train
+        :param validation_loader: training data loader
+        :return: Average loss of the model
+        """
+        # Iterate through batches
+        model.eval()
+        with torch.no_grad():
+            losses = 0
+            for step, batch in enumerate(tqdm.tqdm(validation_loader, desc="Validation progress", leave=False)):
+                # Access data for each batch
+                pose_gt_batch = batch['pose_gt']
+                pose_inf_batch = batch['pose_inf']
+
+                # Creating tensors for input and output poses
+                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
+                    2)).cuda().float()  # batches/frames x cams, keypoints x 3
+                output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+                # Forward pass through the model
+                pred_poses = model(inp_poses)
+
+                # Calculating MSE loss
+                loss = criterion(pred_poses, output_poses)
+
+                #print(loss.item())
+
+                # Append loss
+                losses += (loss.item())
+
+                # Log the loss of each batch
+                wandb.log({"batch_loss": loss.item(), "batch": step + 1})
+
+        return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
 
     @staticmethod
-    def train_model(model, train_loader, optimizer,  criterion, epochs = 10, pars = np.arange(10, 27)):
+    def train(model, train_loader, optimizer, criterion):
+        """
+        Training the model
+        :param criterion:
+        :param model: Morphing model to train
+        :param train_loader: training data loader
+        :param optimizer: optimizer for the model
+        :return: Average loss of the model
+        """
+        # Iterate through batches
+        model.train()
+        losses = []
+        for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
+            # Access data for each batch
+            pose_gt_batch = batch['pose_gt']
+            pose_inf_batch = batch['pose_inf']
+
+            # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
+            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()
+            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+
+            # Forward pass through the model
+            pred_poses = model(inp_poses)
+
+            # Calculating MSE loss
+            loss = criterion(pred_poses, output_poses)
+
+            # Backward pass and optimization step
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            losses.append(loss.detach().cpu().numpy().item())
+
+        return losses
+
+    @staticmethod
+    def log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch):
+        wandb.log({"train_loss": np.mean(train_loss), "validation_loss": losses, "epoch": epoch + 1})
+        prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
+        ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
+        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
+        plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
+        plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
+        plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
+        plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
+
+    @staticmethod
+    def train_model(model, train_loader, validation_loader, optimizer, criterion, epochs=10, pars=np.arange(10, 27), config = None):
         """
         Method to train model
+        :param validation_loader:
         :param model:
         :param train_loader:
         :param optimizer:
@@ -36,52 +142,24 @@ class NetworkTrainer:
         :return:
         """
         last_loss_mean = 100000
-        model.train()
         # Training loop
-        losses_mean = []
         for epoch in range(epochs):
-            for batch in train_loader:
-                # Access data for each batch
-                pose_gt_batch = batch['pose_gt']
-                pose_inf_batch = batch['pose_inf']
+            #time.sleep(15) #??
+            train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion)
+            losses, pred_poses, pose_gt_batch, pose_inf_batch = NetworkTrainer.validation(model, validation_loader,
+                                                                                          criterion)
+            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch)
 
-                # Creating tensors for input and output poses
-                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()  # batches/frames x cams, keypoints x 3
-                output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-                # Forward pass through the model
-                pred_poses = model(inp_poses)
-
-                # Calculating MSE loss
-                loss = criterion(pred_poses, output_poses)
-                #print(loss)
-                # Backward pass and optimization step
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                losses_mean.append(loss.item())
-
-
-            wandb.log({"loss": np.sqrt(np.mean(losses_mean))})
-            prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
-            ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
-            hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
-            plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
-            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
-            wandb.log({"epoch": epoch})
+            # wandb.log({"epoch": epoch})
+            print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses)))
 
             # Saving the model after each epoch
-            print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.sqrt(np.mean(losses_mean))))
 
-            if np.mean(losses_mean) < last_loss_mean:
-                last_loss_mean = np.mean(losses_mean)
+            if np.mean(losses) < last_loss_mean:
+                last_loss_mean = np.mean(losses)
                 i = list_to_file_name(pars)
-                torch.save(model.state_dict(), f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pth')
+                torch.save(model.state_dict(), f'models/trained/model_skeleton_morph_{config.model_type}_par_{i}_mediapipe.pth')
 
-            losses_mean = []
 
     @staticmethod
     def test_model(model, test_loader, criterion):
@@ -114,7 +192,8 @@ class NetworkTrainer:
 
         print(f"Test Loss", np.sqrt(np.mean(mean_test_loss)))
 
-def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
+
+def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     """
     Method to load all training and test data from participants [pars]
     :param data_folder:
@@ -131,7 +210,7 @@ def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
 
         par_dataset = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
         try:
-            if  train_dataset is None:
+            if train_dataset is None:
                 train_dataset, test_dataset = par_dataset.get_train_test()
             else:
                 train, test = par_dataset.get_train_test()
@@ -143,66 +222,87 @@ def load_train_test_all(data_folder: str, pars = np.arange(10, 27)):
 
     return train_dataset, test_dataset
 
+
 def train(datapath: str):
     # Configuration settings using SimpleNamespace
+    #config = SimpleNamespace()
+    #config.learning_rate = 0.0001
+    #config.BATCH_SIZE = 32
+    #config.N_epochs = 100
+    #config.log_interval = 100
+    #config.weight_decay = 1e-5
+    # online/disabled for wandb
+    mode = "online"
+
+    # Sweep configuration
+    init_config = {
+        'method': 'bayes',
+        'metric': {
+            'name': 'validation_loss',
+            'goal': 'minimize'
+        },
+        'parameters': {
+            'learning_rate': {
+                'value': 0.0001  # Learning rate: 1e-4 0.000
+            },
+            'BATCH_SIZE': {
+                'value': 32  # Batch size: 32
+            },
+            'weight_decay': {
+                'value': 1e-5  # Weight decay: 1e-5
+            },
+            'epochs': {
+                'value': 100
+            },
+            'datafolder': {
+                'value': datapath
+            },
+            'pars': {
+                'value': np.array([12])
+            },
+            'model_type': {
+                'value': 'mediapipe'
+            },
+            'N_epochs' : {
+                'value' : 100
+            }
+        },
+        'early_terminate': {
+            'type': 'hyperband',
+            'min_iter': 7,
+            'eta': 3
+        }
+    }
+
+
+
+    # WandB – Initialize a new run
+    wandb.init(project="skeleton-morphing", config=init_config, mode=mode)
+    #config = wandb.config['parameters']
+
     config = SimpleNamespace()
     config.learning_rate = 0.0001
     config.BATCH_SIZE = 32
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
-    # online/disabled for wandb
-    mode = "online"
-
-    # Sweep configuration
-    sweep_config = {
-        'method': 'bayes',
-        'metric': {
-            'name': 'loss',
-            'goal': 'minimize'
-        },
-        'parameters': {
-            'learning_rate': {
-                'values': [0.0001, 0.00001]
-            },
-            'BATCH_SIZE': {
-                'values': [8, 16, 32]
-            },
-            'weight_decay': {
-                'values': [1e-4, 1e-5, 1e-6]
-            }
-        },
-        'early_terminate': {
-            'type': 'hyperband',
-            'min_iter': 10
-        }
-    }
+    config.pars = np.array([12])
+    config.model_type = "mediapipe"
 
 
-    # WandB – Initialize a new run
-    wandb.init(project="skeleton-morphing", config=config, mode=mode)
-
-    ## Remove all the depricated warnings caused by pip packages
-    tf.get_logger().setLevel("ERROR")
     # Folder containing data
-    #data_folder = '/home/emanu/Desktop/SegmentedData'
+    # data_folder = '/home/emanu/Desktop/SegmentedData'
     data_folder = datapath + '/morph_dataset'
 
-    # Parameters for training
-    par = [5]
-    mov = list(range(1, 18))
-    cam = list(range(0, 6))
-    model_type = 'mediapipe'
-    num_cam = 6
-
     ## Somethign wrong with 10 and 26
-    pars = np.arange(10, 27)
-    #Male: 12, 14
+    #pars = np.arange(10, 27)
+    # Male: 12, 14
     # Female: 15, 16
-    #pars = np.array([12, 14, 15, 16])
+    # pars = np.array([12, 14, 15, 16])
     pars = np.array([12])
+
     start_time = time.time()
-    train, test = load_train_test_all(data_folder, pars)
+    train, test = load_train_test_all(data_folder, config.pars)
     print('Data loaded in')
     print("--- %s seconds ---" % (time.time() - start_time))
 
@@ -228,7 +328,9 @@ def train(datapath: str):
     wandb.watch(model, log_freq=100)
 
     # Mean Squared Error Loss
-    mse_loss = nn.MSELoss()
+    # mse_loss = nn.MSELoss()
+    #criterion = RMSELoss()
+    criterion = MPJPELoss()
 
     # Parameters for optimization
     params = list(model.parameters())  # + list(dec.parameters())
@@ -242,16 +344,13 @@ def train(datapath: str):
 
     # Namespace to store losses during training
 
-    NetworkTrainer.train_model(model = model,
-                               train_loader = train_loader,
-                               optimizer = optimizer,
-                               criterion = mse_loss,
-                               epochs = config.N_epochs,
-                               pars = pars)
-
-    i = list_to_file_name(pars)
-    model = model.load_state_dict(torch.load(f'models/trained/model_skeleton_morph_par_{i}_mediapipe.pth'))
-    NetworkTrainer.test_model(model = model, test_loader = test_loader, criterion = mse_loss)
+    NetworkTrainer.train_model(model=model,
+                               train_loader=train_loader,
+                               validation_loader=test_loader,
+                               optimizer=optimizer,
+                               criterion=criterion,
+                               epochs=config.N_epochs,
+                               pars=config.pars,
+                               config = config)
 
     print('done')
-
