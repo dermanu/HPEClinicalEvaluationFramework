@@ -20,6 +20,7 @@ import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
 import tensorflow as tf
 from skeletonMorphing.loadMorphDatasets import list_to_file_name
+from utils.metrics import torch_calculate_mpjpe
 import time
 import os
 
@@ -37,8 +38,10 @@ class MPJPELoss(nn.Module):
         super().__init__()
 
     def forward(self, yhat, y):
-        joint_error = torch.sqrt(torch.sum((yhat-y)**2, dim=1))
-        return torch.mean(joint_error)
+        mean, std = torch_calculate_mpjpe(yhat, y)
+        return mean
+        #joint_error = torch.sqrt(torch.sum((yhat-y)**2, dim=1))
+        #return torch.mean(joint_error)
 
 
 class NetworkTrainer:
@@ -158,7 +161,7 @@ class NetworkTrainer:
             if np.mean(losses) < last_loss_mean:
                 last_loss_mean = np.mean(losses)
                 i = list_to_file_name(pars)
-                torch.save(model.state_dict(), f'models/trained/model_skeleton_morph_{config.model_type}_par_{i}_mediapipe.pth')
+                torch.save(model.state_dict(), f'models/trained/model_skeleton_morph_{config.model_type}_par_{i}_mediapipe_mpjpe.pth')
 
 
     @staticmethod
@@ -206,9 +209,9 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     for i in pars:
         if i == 13:
             continue
-        print(f'{data_folder}/par_{i}_mediapipe_dataset.pth')
+        print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
-        par_dataset = torch.load(f'{data_folder}/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
+        par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
         try:
             if train_dataset is None:
                 train_dataset, test_dataset = par_dataset.get_train_test()
@@ -223,7 +226,7 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     return train_dataset, test_dataset
 
 
-def train(datapath: str):
+def train(datapath: str, pars):
     # Configuration settings using SimpleNamespace
     #config = SimpleNamespace()
     #config.learning_rate = 0.0001
@@ -258,7 +261,7 @@ def train(datapath: str):
                 'value': datapath
             },
             'pars': {
-                'value': np.array([12])
+                'value': pars
             },
             'model_type': {
                 'value': 'mediapipe'
@@ -286,8 +289,10 @@ def train(datapath: str):
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
-    config.pars = np.array([12])
+    #config.pars = np.array([12])
+    config.pars = pars
     config.model_type = "mediapipe"
+    print("PAR", pars)
 
 
     # Folder containing data
@@ -299,10 +304,9 @@ def train(datapath: str):
     # Male: 12, 14
     # Female: 15, 16
     # pars = np.array([12, 14, 15, 16])
-    pars = np.array([12])
 
     start_time = time.time()
-    train, test = load_train_test_all(data_folder, config.pars)
+    train, test = load_train_test_all(datapath, config.pars)
     print('Data loaded in')
     print("--- %s seconds ---" % (time.time() - start_time))
 

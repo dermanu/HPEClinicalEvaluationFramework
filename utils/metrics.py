@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import signal, stats
 from sklearn.metrics import auc
-
+import torch
 
 def align_by_pelvis(joints):
     """
@@ -30,6 +30,20 @@ def calculate_mpjpe(target, prediction):
 
     return mean, std
 
+def torch_calculate_mpjpe(prediction, target):
+    """
+    Mean per-joint position error (MPJPE)
+    :param target: Ground truth 3D joint positions
+    :param prediction: Predicted 3D joint positions
+    :return: Mean and standard deviation of the MPJPE
+    """
+    assert prediction.shape == target.shape
+
+    mpjpe = torch.linalg.norm(prediction - target, dim=1)
+    mean = torch.mean(mpjpe)
+    std = torch.std(mpjpe)
+
+    return mean, std
 
 def align_procrustes(target, prediction):
     """

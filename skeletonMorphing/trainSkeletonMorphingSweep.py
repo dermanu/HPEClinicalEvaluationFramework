@@ -16,7 +16,7 @@ import torch.nn as nn
 import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
-from skeletonMorphing.trainSkeletonMorphing import NetworkTrainer, RMSELoss
+from skeletonMorphing.trainSkeletonMorphing import NetworkTrainer, MPJPELoss, load_train_test_all
 import tqdm
 
 
@@ -41,10 +41,10 @@ sweep_config = {
             'value': 100
         },
         'datafolder': {
-            'value': '/home/emanu/Desktop/SegmentedData'
+            'value': "E:\MoCap"
         },
-        'par': {
-            'value': [4]
+        'pars': {
+            'values': [11, 25]
         },
         'mov': {
             'value': list(range(1, 18))
@@ -100,6 +100,7 @@ def validation_data_loader(data_config):
     return validation_loader
 
 
+
 def main(config=None):
     """
     Initialize a new wandb run
@@ -109,7 +110,7 @@ def main(config=None):
         # If called by wandb.agent, as below,
         # this config will be set by Sweep Controller
         config = wandb.config
-
+        train, test = load_train_test_all(config.datafolder, config.pars)
         # Load model
         model = modelSkeletonMorphing.Synthesizer().cuda()
         # wandb.watch(model, log_freq=1000)
@@ -117,7 +118,7 @@ def main(config=None):
         # Parameters for optimization
         params = list(model.parameters())  # + list(dec.parameters())
 
-        criterion = RMSELoss()
+        criterion = MPJPELoss()
         # Setting anomaly detection for autograd
         optimizer = optim.AdamW(params, lr=config.learning_rate, weight_decay=config.weight_decay,
                                amsgrad=True, foreach=True)
@@ -126,8 +127,9 @@ def main(config=None):
         torch.autograd.set_detect_anomaly(True)
 
         # Load dataset
-        train_dataset = train_data_loader(config)
-        validation_dataset = validation_data_loader(config)
+        train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8,
+                                       pin_memory=True)
+        test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
 
         # Start loss
         last_loss = 1000000
@@ -136,8 +138,8 @@ def main(config=None):
         for epoch in range(config.epochs):
             time.sleep(15)
             # Training the model
-            train_loss = NetworkTrainer.train(model, train_dataset, optimizer, criterion)
-            losses, pred_poses, pose_gt_batch, pose_inf_batch = NetworkTrainer.validation(model, validation_dataset, criterion)
+            train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion)
+            losses, pred_poses, pose_gt_batch, pose_inf_batch = NetworkTrainer.validation(model, test_loader, criterion)
 
             NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch)
 
