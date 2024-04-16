@@ -24,43 +24,6 @@ import os
 class NetworkTrainer:
 
     @staticmethod
-    def validation(model, validation_loader):
-        """
-        Validation of the model
-        :param model: Morphing model to train
-        :param validation_loader: training data loader
-        :return: Average loss of the model
-        """
-        # Iterate through batches
-        with torch.no_grad():
-            losses = 0
-            for step, batch in enumerate(tqdm.tqdm(validation_loader, desc="Validation progress", leave=False)):
-                # Access data for each batch
-                pose_gt_batch = batch['pose_gt']
-                pose_inf_batch = batch['pose_inf']
-
-                # Creating tensors for input and output poses
-                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
-                    2)).cuda().float()  # batches/frames x cams, keypoints x 3
-                output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-                # Forward pass through the model
-                pred_poses = model(inp_poses)
-
-                # Calculating MSE loss
-                loss = nn.functional.mse_loss(pred_poses, output_poses)
-
-                print(loss.item())
-
-                # Append loss
-                losses += (loss.item())
-
-                # Log the loss of each batch
-                wandb.log({"batch_loss": loss.item(), "batch": step + 1})
-
-        return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
-
-    @staticmethod
     def train_model(model, train_loader, optimizer,  criterion, epochs = 10, pars = np.arange(10, 27)):
         """
         Method to train model
