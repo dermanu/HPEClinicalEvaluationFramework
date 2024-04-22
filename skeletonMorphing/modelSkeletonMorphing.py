@@ -26,19 +26,19 @@ class Synthesizer(nn.Module):
         self.pose_morph = nn.Linear(2304, 48)
 
         # Dropout layer for regularization
-        self.dropout = nn.Dropout(p=0.20)  # Add dropout layer with probability 0.20
+        #self.dropout = nn.Dropout(p=0.20)  # Add dropout layer with probability 0.20
 
     def forward(self, x):
         # Upscaling the input
         xu = self.upscale(x)
 
         # Pose processing path
-        #xp = nn.LeakyReLU()(self.res_pose1(xu))
-        #xp = nn.LeakyReLU()(self.res_pose2(xp))
-        #xp = nn.LeakyReLU()(self.res_pose3(xp))
-        xp = self.dropout(nn.LeakyReLU()(self.res_pose1(xu)))
-        xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
-        xp = self.dropout(nn.LeakyReLU()(self.res_pose3(xp)))
+        xp = nn.LeakyReLU()(self.res_pose1(xu))
+        xp = nn.LeakyReLU()(self.res_pose2(xp))
+        xp = nn.LeakyReLU()(self.res_pose3(xp))
+        #xp = self.dropout(nn.LeakyReLU()(self.res_pose1(xu)))
+        #xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
+        #xp = self.dropout(nn.LeakyReLU()(self.res_pose3(xp)))
 
         # Adding morphed pose information back to the input
         #print(x.shape)
@@ -62,22 +62,22 @@ class ResBlock(nn.Module):
         self.l3 = nn.Linear(2304, 2304)
 
         # Dropout layer for regularization
-        self.dropout = nn.Dropout(p=0.20)  # Add dropout layer with probability 0.20
+        #self.dropout = nn.Dropout(p=0.20)  # Add dropout layer with probability 0.20
 
     def forward(self, x):
         inp = x
 
         # Leaky ReLU activation for the first linear layer
-        #x = nn.LeakyReLU()(self.l1(x))
-        x = self.dropout(nn.LeakyReLU()(self.l1(x)))
+        x = nn.LeakyReLU()(self.l1(x))
+        #x = self.dropout(nn.LeakyReLU()(self.l1(x)))
 
         # Leaky ReLU activation for the second linear layer
-        #x = nn.LeakyReLU()(self.l2(x))
-        x = self.dropout(nn.LeakyReLU()(self.l2(x)))
+        x = nn.LeakyReLU()(self.l2(x))
+        #x = self.dropout(nn.LeakyReLU()(self.l2(x)))
 
         # Leaky ReLU activation for the third linear layer
-        #x = nn.LeakyReLU()(self.l3(x))
-        x = self.dropout(nn.LeakyReLU()(self.l3(x)))
+        x = nn.LeakyReLU()(self.l3(x))
+        #x = self.dropout(nn.LeakyReLU()(self.l3(x)))
 
         # Adding the residual connection
         x += inp
