@@ -11,6 +11,7 @@ import torch.optim
 from torch.utils import data
 import torch.optim as optim
 import tqdm
+import pickle
 
 import skeletonMorphing.modelSkeletonMorphing as modelSkeletonMorphing
 from types import SimpleNamespace
@@ -24,6 +25,168 @@ from utils.metrics import torch_calculate_mpjpe
 import time
 import os
 
+class Normalize():
+    def __init__(self):
+        """
+        Initialize the dictionary with the std and mean of the training data
+        """
+        self.dict = {}
+
+    def add_key(self, key, mins, maxs):
+        """
+        Add a key to the dictionary (training data)
+        :param key:
+        :param mean:
+        :param std:
+        :return:
+        """
+        if key in self.dict:
+            c_mins, c_maxs = self.dict[key]
+            if c_mins > mins:
+                c_mins = mins
+            if c_maxs < maxs:
+                c_maxs = maxs
+
+            self.dict[key] = (c_mins, c_maxs)
+        else:
+            self.dict[key] = (mins, maxs)
+    def add_key_from_vector(self, vector, key):
+        """
+        Add a key to the dictionary (training data) using a vector
+        :param vector:
+        :param key:
+        :return:
+        """
+
+        if vector.size == 0:
+            return
+        self.add_key(key, np.min(vector), np.max(vector))
+
+    def scale(self, vector, key):
+        """
+        Standardize the vector using the mean and std from the dictionary
+        :param vector:
+        :param key:
+        :return:
+        """
+        mins, maxs = self.dict[key]
+
+        #print(mins, maxs)
+        normalized = (vector - mins) / (maxs - mins)
+        #print("Standardized value range: ", key, np.min(normalized), np.max(normalized))
+        return normalized
+
+    def descale(self, vector, key):
+        """
+        Destandardize the vector using the mean and std from the dictionary
+        :param vector:
+        :param key:
+        :return:
+        """
+        return vector * (self.dict[key][1] - self.dict[key][0]) + self.dict[key][0]
+
+    def save(self, path):
+        """
+        Save the dictionary to a file
+        :param path:
+        :return:
+        """
+        with open(path, 'wb') as f:
+            pickle.dump(self.dict, f)
+
+    @staticmethod
+    def load(path):
+        """
+        Load the dictionary from a file
+        :param path:
+        :return:
+        """
+        normalize = Standardize()
+        with open(path, 'rb') as f:
+            normalize.dict = pickle.load(f)
+        return normalize
+
+class Standardize(object):
+    """
+    Class for standardizing the data using mean and standard deviation
+    """
+
+    def __init__(self):
+        """
+        Initialize the dictionary with the std and mean of the training data
+        """
+        self.dict = {}
+
+    def add_key(self, key, mean, std):
+        """
+        Add a key to the dictionary (training data)
+        :param key:
+        :param mean:
+        :param std:
+        :return:
+        """
+        if key in self.dict:
+            self.dict[key] = (np.mean(mean, self.dict[key][0]), np.mean(std, self.dict[key][1]))
+        else:
+            self.dict[key] = (mean, std)
+
+    def add_key_from_vector(self, vector, key):
+        """
+        Add a key to the dictionary (training data) using a vector
+        :param vector:
+        :param key:
+        :return:
+        """
+        self.add_key(key, np.mean(vector), np.std(vector))
+
+    def standardize(self, vector, key):
+        """
+        Standardize the vector using the mean and std from the dictionary
+        :param vector:
+        :param key:
+        :return:
+        """
+        mean, std = self.dict[key]
+        print(mean, std)
+        print(vector)
+        print("Value range: ", key, np.min(vector), np.max(vector))
+        normalized = (vector - mean) / std
+        print("Standardized value range: ", key, np.min(normalized), np.max(normalized))
+        return normalized
+
+    def __call__(self, vector, key):
+        return self.standardize(vector, key)
+
+    def destandardize(self, vector, key):
+        """
+        Destandardize the vector using the mean and std from the dictionary
+        :param vector:
+        :param key:
+        :return:
+        """
+        return vector * self.dict[key][1] + self.dict[key][0]
+
+    def save(self, path):
+        """
+        Save the dictionary to a file
+        :param path:
+        :return:
+        """
+        with open(path, 'wb') as f:
+            pickle.dump(self.dict, f)
+
+    @staticmethod
+    def load(path):
+        """
+        Load the dictionary from a file
+        :param path:
+        :return:
+        """
+        normalize = Standardize()
+        with open(path, 'rb') as f:
+            normalize.dict = pickle.load(f)
+        return normalize
+
 
 class RMSELoss(nn.Module):
     def __init__(self):
@@ -33,6 +196,7 @@ class RMSELoss(nn.Module):
     def forward(self, yhat, y):
         return torch.sqrt(self.mse(yhat, y))
 
+
 class MPJPELoss(nn.Module):
     def __init__(self):
         super().__init__()
@@ -40,13 +204,13 @@ class MPJPELoss(nn.Module):
     def forward(self, yhat, y):
         mean, std = torch_calculate_mpjpe(yhat, y)
         return mean
-        #joint_error = torch.sqrt(torch.sum((yhat-y)**2, dim=1))
-        #return torch.mean(joint_error)
+        # joint_error = torch.sqrt(torch.sum((yhat-y)**2, dim=1))
+        # return torch.mean(joint_error)
 
 
 class NetworkTrainer:
     @staticmethod
-    def validation(model, validation_loader, criterion):
+    def validation(model, validation_loader, criterion, scaler):
         """
         Validation of the model
         :param criterion:
@@ -63,18 +227,22 @@ class NetworkTrainer:
                 pose_gt_batch = batch['pose_gt']
                 pose_inf_batch = batch['pose_inf']
 
-                # Creating tensors for input and output poses
-                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
-                    2)).cuda().float()  # batches/frames x cams, keypoints x 3
-                output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+                # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
+                inp_poses = pose_inf_batch.view(-1,
+                                                pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float().clone()
+                output_poses = pose_gt_batch.view(-1,
+                                                  pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
                 # Forward pass through the model
                 pred_poses = model(inp_poses)
 
+                pred_poses = scaler.descale(pred_poses, "pose_gt")
+                output_poses = scaler.descale(output_poses, "pose_gt")
+
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
 
-                #print(loss.item())
+                # print(loss.item())
 
                 # Append loss
                 losses += (loss.item())
@@ -85,7 +253,7 @@ class NetworkTrainer:
         return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
 
     @staticmethod
-    def train(model, train_loader, optimizer, criterion):
+    def train(model, train_loader, optimizer, criterion, scaler):
         """
         Training the model
         :param criterion:
@@ -99,15 +267,19 @@ class NetworkTrainer:
         losses = []
         for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
             # Access data for each batch
+
             pose_gt_batch = batch['pose_gt']
             pose_inf_batch = batch['pose_inf']
 
             # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
-            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()
-            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
+            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float().clone()
+            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
             # Forward pass through the model
             pred_poses = model(inp_poses)
+
+            pred_poses = scaler.descale(pred_poses, "pose_gt")
+            output_poses = scaler.descale(output_poses, "pose_gt")
 
             # Calculating MSE loss
             loss = criterion(pred_poses, output_poses)
@@ -132,7 +304,8 @@ class NetworkTrainer:
         plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
 
     @staticmethod
-    def train_model(model, train_loader, validation_loader, optimizer, criterion, epochs=10, pars=np.arange(10, 27), config = None):
+    def train_model(model, train_loader, validation_loader, optimizer, criterion, epochs=10, pars=np.arange(10, 27),
+                    config=None, scaler=None):
         """
         Method to train model
         :param validation_loader:
@@ -144,13 +317,19 @@ class NetworkTrainer:
         :param pars:
         :return:
         """
+        scaler_train, scaler_test = scaler
         last_loss_mean = 100000
         # Training loop
         for epoch in range(epochs):
-            #time.sleep(15) #??
-            train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion)
+            # time.sleep(15) #??
+            train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler_train)
             losses, pred_poses, pose_gt_batch, pose_inf_batch = NetworkTrainer.validation(model, validation_loader,
-                                                                                          criterion)
+                                                                                          criterion, scaler_test)
+
+            pose_gt_batch = scaler_test.descale(pose_gt_batch, "pose_gt")
+            pose_inf_batch = scaler_test.descale(pose_inf_batch, "pose_inf")
+            #pred_poses = scaler_test.descale(pred_poses, "pose_gt")
+
             NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch)
 
             # wandb.log({"epoch": epoch})
@@ -161,8 +340,8 @@ class NetworkTrainer:
             if np.mean(losses) < last_loss_mean:
                 last_loss_mean = np.mean(losses)
                 i = list_to_file_name(pars)
-                torch.save(model.state_dict(), f'models/trained/model_skeleton_morph_{config.model_type}_par_{i}_mediapipe_mpjpe.pth')
-
+                torch.save(model.state_dict(),
+                           f'models/trained/model_skeleton_morph_{config.model_type}_par_{i}_mediapipe_mpjpe.pth')
 
     @staticmethod
     def test_model(model, test_loader, criterion):
@@ -203,6 +382,9 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     :param pars:
     :return:
     """
+
+    scaler_train = Normalize()
+    scaler_test = Normalize()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_dataset = None
     test_dataset = None
@@ -211,29 +393,60 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
             continue
         print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
-        par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth', map_location=torch.device(device))
+        par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
+                                 map_location=torch.device(device))
         try:
             if train_dataset is None:
                 train_dataset, test_dataset = par_dataset.get_train_test()
+                print(train_dataset.datasets[0].csv_data.shape)
+                print(train_dataset.datasets[0].pose_inf.shape)
+                for i in train_dataset.datasets:
+                    scaler_train.add_key_from_vector(i.csv_data, "pose_gt")
+                    scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
+
+                print(test_dataset)
+                for i in test_dataset.datasets:
+                    print("Added")
+                    scaler_test.add_key_from_vector(i.csv_data, "pose_gt")
+                    scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
             else:
                 train, test = par_dataset.get_train_test()
+                print(train.datasets[0].get_training_data().shape)
                 train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
                 test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
-
         except Exception as e:
             print(e)
 
-    return train_dataset, test_dataset
+
+
+
+    for i, d in enumerate(train_dataset.datasets):
+        if d.csv_data.size == 0:
+            continue
+
+        train_dataset.datasets[i].csv_data = scaler_train.scale(d.csv_data, "pose_gt")
+
+        train_dataset.datasets[i].pose_inf = scaler_train.scale(d.pose_inf, "pose_inf")
+
+
+    for i, d in enumerate(test_dataset.datasets):
+        if d.csv_data.size == 0:
+            continue
+        test_dataset.datasets[i].csv_data = scaler_test.scale(d.csv_data, "pose_gt")
+        test_dataset.datasets[i].pose_inf = scaler_test.scale(d.pose_inf, "pose_inf")
+
+    #scaler.save("standardizer")
+    return train_dataset, test_dataset, scaler_train, scaler_test
 
 
 def train(datapath: str, pars):
     # Configuration settings using SimpleNamespace
-    #config = SimpleNamespace()
-    #config.learning_rate = 0.0001
-    #config.BATCH_SIZE = 32
-    #config.N_epochs = 100
-    #config.log_interval = 100
-    #config.weight_decay = 1e-5
+    # config = SimpleNamespace()
+    # config.learning_rate = 0.0001
+    # config.BATCH_SIZE = 32
+    # config.N_epochs = 100
+    # config.log_interval = 100
+    # config.weight_decay = 1e-5
     # online/disabled for wandb
     mode = "online"
 
@@ -266,8 +479,8 @@ def train(datapath: str, pars):
             'model_type': {
                 'value': 'mediapipe'
             },
-            'N_epochs' : {
-                'value' : 100
+            'N_epochs': {
+                'value': 100
             }
         },
         'early_terminate': {
@@ -277,11 +490,9 @@ def train(datapath: str, pars):
         }
     }
 
-
-
     # WandB – Initialize a new run
     wandb.init(project="skeleton-morphing", config=init_config, mode=mode)
-    #config = wandb.config['parameters']
+    # config = wandb.config['parameters']
 
     config = SimpleNamespace()
     config.learning_rate = 0.0001
@@ -289,24 +500,24 @@ def train(datapath: str, pars):
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
-    #config.pars = np.array([12])
+    # config.pars = np.array([12])
     config.pars = pars
     config.model_type = "mediapipe"
     print("PAR", pars)
-
 
     # Folder containing data
     # data_folder = '/home/emanu/Desktop/SegmentedData'
     data_folder = datapath + '/morph_dataset'
 
     ## Somethign wrong with 10 and 26
-    #pars = np.arange(10, 27)
+    # pars = np.arange(10, 27)
     # Male: 12, 14
     # Female: 15, 16
     # pars = np.array([12, 14, 15, 16])
 
     start_time = time.time()
-    train, test = load_train_test_all(datapath, config.pars)
+    train, test, scaler_train, scaler_test = load_train_test_all(datapath, config.pars)
+
     print('Data loaded in')
     print("--- %s seconds ---" % (time.time() - start_time))
 
@@ -333,7 +544,7 @@ def train(datapath: str, pars):
 
     # Mean Squared Error Loss
     # mse_loss = nn.MSELoss()
-    #criterion = RMSELoss()
+    # criterion = RMSELoss()
     criterion = MPJPELoss()
 
     # Parameters for optimization
@@ -355,6 +566,7 @@ def train(datapath: str, pars):
                                criterion=criterion,
                                epochs=config.N_epochs,
                                pars=config.pars,
-                               config = config)
+                               config=config,
+                               scaler=(scaler_train, scaler_test))
 
     print('done')

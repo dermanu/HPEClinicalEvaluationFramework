@@ -110,7 +110,7 @@ def main(config=None):
         # If called by wandb.agent, as below,
         # this config will be set by Sweep Controller
         config = wandb.config
-        train, test = load_train_test_all(config.datafolder, config.pars)
+        train, test, standardizer = load_train_test_all(config.datafolder, config.pars)
         # Load model
         model = modelSkeletonMorphing.Synthesizer().cuda()
         # wandb.watch(model, log_freq=1000)
