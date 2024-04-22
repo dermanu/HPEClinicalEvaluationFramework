@@ -54,7 +54,7 @@ def run_load(datapath: str):
     # Assuming you have a list of participant folders
     #par = [14]
     par_full, par = all_participants(data_folder)
-    par = [10, 26]
+    par = [12, 14, 15, 16]
 
     # Read the dataset for the current participant
     for p in par:
@@ -64,6 +64,7 @@ def run_load(datapath: str):
         # Save the dataset to a .pth file named after the participant
 
         print("Saving Dataset")
+        #file_name = f"{datapath}/morph_dataset/par_{list_to_file_name(p)}_{model_type}_cam_{list_to_file_name(cam)}_onehot_dataset.pth"
         file_name = f"{datapath}/morph_dataset/par_{list_to_file_name(p)}_{model_type}_dataset.pth"
         torch.save(my_dataset, file_name)
 

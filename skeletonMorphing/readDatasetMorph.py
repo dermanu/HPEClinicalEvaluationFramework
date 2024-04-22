@@ -141,6 +141,8 @@ class SingleCSVFileDataset(Dataset):
             self.csv_data, self.train_frames, self.test_frames = self.load_csv_data()
             self.pose_inf, self.confidences_inf = self.load_video_data()
 
+    def get_camera(self):
+        return int(self.csv_file_path[-5])
 
     def _get_csv_data(self, csv_data : pd.DataFrame):
         """
@@ -297,9 +299,16 @@ class SingleCSVFileDataset(Dataset):
         cap = cv2.VideoCapture(avi_file_path)
 
         if self.model_type == 'mediapipe':
+
             pose_keypoints = MediaPipe.inference_video(cap)
             confidences = pose_keypoints[0][:, self.selected_columns, 0]
             pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
+            category = np.full((pose_keypoints.shape[0], 1), self.get_camera())
+            one_hot = np.eye(6)[category.squeeze()]
+            one_hot = np.expand_dims(one_hot, axis = 1)
+            one_hot = np.repeat(one_hot, 16, axis=1)
+            pose_keypoints = np.concatenate([pose_keypoints, one_hot], axis = -1)
+            #print(one_hot)
         else:
             raise ValueError(f"Invalid model_name: {self.model_type}")
         print('Finished loading video data' + self.csv_file_path.replace('.csv', '.avi') + '...')

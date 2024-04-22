@@ -101,92 +101,10 @@ class Normalize():
         :param path:
         :return:
         """
-        normalize = Standardize()
+        normalize = Normalize()
         with open(path, 'rb') as f:
             normalize.dict = pickle.load(f)
         return normalize
-
-class Standardize(object):
-    """
-    Class for standardizing the data using mean and standard deviation
-    """
-
-    def __init__(self):
-        """
-        Initialize the dictionary with the std and mean of the training data
-        """
-        self.dict = {}
-
-    def add_key(self, key, mean, std):
-        """
-        Add a key to the dictionary (training data)
-        :param key:
-        :param mean:
-        :param std:
-        :return:
-        """
-        if key in self.dict:
-            self.dict[key] = (np.mean(mean, self.dict[key][0]), np.mean(std, self.dict[key][1]))
-        else:
-            self.dict[key] = (mean, std)
-
-    def add_key_from_vector(self, vector, key):
-        """
-        Add a key to the dictionary (training data) using a vector
-        :param vector:
-        :param key:
-        :return:
-        """
-        self.add_key(key, np.mean(vector), np.std(vector))
-
-    def standardize(self, vector, key):
-        """
-        Standardize the vector using the mean and std from the dictionary
-        :param vector:
-        :param key:
-        :return:
-        """
-        mean, std = self.dict[key]
-        print(mean, std)
-        print(vector)
-        print("Value range: ", key, np.min(vector), np.max(vector))
-        normalized = (vector - mean) / std
-        print("Standardized value range: ", key, np.min(normalized), np.max(normalized))
-        return normalized
-
-    def __call__(self, vector, key):
-        return self.standardize(vector, key)
-
-    def destandardize(self, vector, key):
-        """
-        Destandardize the vector using the mean and std from the dictionary
-        :param vector:
-        :param key:
-        :return:
-        """
-        return vector * self.dict[key][1] + self.dict[key][0]
-
-    def save(self, path):
-        """
-        Save the dictionary to a file
-        :param path:
-        :return:
-        """
-        with open(path, 'wb') as f:
-            pickle.dump(self.dict, f)
-
-    @staticmethod
-    def load(path):
-        """
-        Load the dictionary from a file
-        :param path:
-        :return:
-        """
-        normalize = Standardize()
-        with open(path, 'rb') as f:
-            normalize.dict = pickle.load(f)
-        return normalize
-
 
 class RMSELoss(nn.Module):
     def __init__(self):
@@ -297,7 +215,8 @@ class NetworkTrainer:
         wandb.log({"train_loss": np.mean(train_loss), "validation_loss": losses, "epoch": epoch + 1})
         prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
         ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
-        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
+        print(pose_inf_batch.cpu().detach().numpy()[0].shape)
+        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0][:, 0:3]
         plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
         plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
         plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
@@ -327,7 +246,7 @@ class NetworkTrainer:
                                                                                           criterion, scaler_test)
 
             pose_gt_batch = scaler_test.descale(pose_gt_batch, "pose_gt")
-            pose_inf_batch = scaler_test.descale(pose_inf_batch, "pose_inf")
+            #pose_inf_batch = scaler_test.descale(pose_inf_batch, "pose_inf")
             #pred_poses = scaler_test.descale(pred_poses, "pose_gt")
 
             NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch)
@@ -393,8 +312,12 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
             continue
         print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
-        par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
+        if False:
+            par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_cam_0_dataset.pth',
                                  map_location=torch.device(device))
+        else:
+            par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
+                                     map_location=torch.device(device))
         try:
             if train_dataset is None:
                 train_dataset, test_dataset = par_dataset.get_train_test()
@@ -402,13 +325,12 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
                 print(train_dataset.datasets[0].pose_inf.shape)
                 for i in train_dataset.datasets:
                     scaler_train.add_key_from_vector(i.csv_data, "pose_gt")
-                    scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
+                    #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
 
                 print(test_dataset)
                 for i in test_dataset.datasets:
-                    print("Added")
                     scaler_test.add_key_from_vector(i.csv_data, "pose_gt")
-                    scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
+                    #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
             else:
                 train, test = par_dataset.get_train_test()
                 print(train.datasets[0].get_training_data().shape)
@@ -426,14 +348,14 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
 
         train_dataset.datasets[i].csv_data = scaler_train.scale(d.csv_data, "pose_gt")
 
-        train_dataset.datasets[i].pose_inf = scaler_train.scale(d.pose_inf, "pose_inf")
-
+        #print(d.pose_inf[:, 0:3])
+        #train_dataset.datasets[i].pose_inf[:, :, 0:3] = scaler_train.scale(d.pose_inf[:, :, 0:3], "pose_inf")
 
     for i, d in enumerate(test_dataset.datasets):
         if d.csv_data.size == 0:
             continue
         test_dataset.datasets[i].csv_data = scaler_test.scale(d.csv_data, "pose_gt")
-        test_dataset.datasets[i].pose_inf = scaler_test.scale(d.pose_inf, "pose_inf")
+        #test_dataset.datasets[i].pose_inf[:, :, 0:3] = scaler_test.scale(d.pose_inf[:, :, 0:3], "pose_inf")
 
     #scaler.save("standardizer")
     return train_dataset, test_dataset, scaler_train, scaler_test
@@ -544,8 +466,9 @@ def train(datapath: str, pars):
 
     # Mean Squared Error Loss
     # mse_loss = nn.MSELoss()
-    # criterion = RMSELoss()
     criterion = MPJPELoss()
+    criterion = RMSELoss()
+    criterion = nn.MSELoss()
 
     # Parameters for optimization
     params = list(model.parameters())  # + list(dec.parameters())
