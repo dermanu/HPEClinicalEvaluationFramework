@@ -154,8 +154,13 @@ class NetworkTrainer:
                 # Forward pass through the model
                 pred_poses = model(inp_poses)
 
+                #print(pred_poses)
                 pred_poses = scaler.descale(pred_poses, "pose_gt")
+                #print(pred_poses)
+                #print("_____________________________________________________________________________")
+                #print(output_poses)
                 output_poses = scaler.descale(output_poses, "pose_gt")
+                ##print()
 
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
@@ -303,7 +308,8 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     """
 
     scaler_train = Normalize()
-    scaler_test = Normalize()
+    #scaler_test = Normalize()
+    scaler_test = scaler_train
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_dataset = None
     test_dataset = None
@@ -341,7 +347,7 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
 
 
 
-
+    #scaler_test = scaler_train
     for i, d in enumerate(train_dataset.datasets):
         if d.csv_data.size == 0:
             continue
