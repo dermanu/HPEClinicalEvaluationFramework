@@ -320,7 +320,257 @@ def angle_2p_3d(joint_a, joint_b, joint_c):
     return np.round(np.degrees(all_angles), 2)
 
 
+def angle_between_points(joint_a, joint_b, joint_c):
+    """
+    Calculate the angle between two segments in 3D
+    :param joint_a: [frames, joint, 3]
+    :param joint_b: [frames, joint, 3]
+    :param joint_c: [frames, joint, 3]
+    :return joint_angles: [frames, joint, 1]
+    """
+    all_angles = []
+    for i in range(joint_a.shape[0]):
+        AB = np.array(joint_b[i]) - np.array(joint_a[i])
+        BC = np.array(joint_c[i]) - np.array(joint_b[i])
+
+        dot_product = np.dot(AB, BC)
+
+        magnitude_AB = np.linalg.norm(AB)
+        magnitude_BC = np.linalg.norm(BC)
+
+        angle_rad = np.arccos(dot_product / (magnitude_AB * magnitude_BC))
+        angle_deg = np.degrees(angle_rad)
+        all_angles.append(angle_deg)
+    all_angles = np.concatenate(np.array(all_angles))
+    return all_angles
+
+
+def orthogonal_projection(A, B, n_c, n_d):
+    """
+    Calculate the orthogonal projection of vector AB onto the plane defined by the normal vector n
+    :param A:
+    :param B:
+    :param n_c:
+    :param n_d:
+    :return:
+    """
+    all_proj = []
+    for i in range(A.shape[0]):
+        AB = np.array(B[i]) - np.array(A[i])
+        n = np.array(n_c[i]) - np.array(n_d[i])
+        proj = AB - np.dot(AB, n) / np.dot(n, n) * n
+        all_proj.append(proj)
+    all_proj = np.concatenate(np.array(all_proj))
+    return all_proj
+
+
+def help_shoulder(hip_mid, shoulder_mid, shoulder_left, shoulder_right):
+    """
+    Calculate the help vector Ds = (hip_mid, shoulder_mid) x (shoulder_right, shoulder_left)
+    :param hip_center: Hip center
+    :param shoulder_mid: Shoulder center
+    :param shoulder_left: Left shoulder
+    :param shoulder_right: Right shoulder
+    :return: Help vector Ds
+    """
+    all_ds = []
+    for i in range(hip_mid.shape[0]):
+        _hip_mid = np.array(hip_mid[i])
+        _shoulder_mid = np.array(shoulder_mid[i])
+        _shoulder_left = np.array(shoulder_left[i])
+        _shoulder_right = np.array(shoulder_right[i])
+
+        ds = np.cross(_hip_mid - _shoulder_mid, _shoulder_right - _shoulder_left)
+        all_ds.append(ds)
+    all_ds = np.concatenate(np.array(all_ds))
+    return all_ds
+
+
+def help_hip(Y, hip_left, hip_right):
+    """
+    Calculate the help vector Dh = Y x (hip_right, hip_left)
+    :param Y: Y vector
+    :param hip_left: Left hip
+    :param hip_right: Right hip
+    :return: Help vector Dh
+    """
+    all_dh = []
+    for i in range(Y.shape[0]):
+        _Y = np.array(Y[i])
+        _hip_left = np.array(hip_left[i])
+        _hip_right = np.array(hip_right[i])
+
+        dh = np.cross(_Y, _hip_right - _hip_left)
+        all_dh.append(dh)
+    all_dh = np.concatenate(np.array(all_dh))
+    return all_dh
+
+
+def shoulder_mid(shoulder_left, shoulder_right):
+    """
+    Calculate the shoulder mid point
+    :param shoulder_left: Left shoulder
+    :param shoulder_right: Right shoulder
+    :return: Shoulder mid point
+    """
+    all_shoulder_mid = []
+    for i in range(shoulder_right.shape[0]):
+        _shoulder_left = np.array(shoulder_left[i])
+        _shoulder_right = np.array(shoulder_right[i])
+
+        shoulder_mid = (_shoulder_right + _shoulder_left) / 2
+        all_shoulder_mid.append(shoulder_mid)
+    all_shoulder_mid = np.concatenate(np.array(all_shoulder_mid))
+    return all_shoulder_mid
+
+
+def hip_mid(hip_left, hip_right):
+    """
+    Calculate the hip mid point
+    :param hip_left: Left hip
+    :param hip_right: Right hip
+    :return: Hip mid point
+    """
+    all_hip_mid = []
+    for i in range(hip_left.shape[0]):
+        _hip_left = np.array(hip_left[i])
+        _hip_right = np.array(hip_right[i])
+
+        hip_mid = (_hip_right + _hip_left) / 2
+        all_hip_mid.append(hip_mid)
+    all_hip_mid = np.concatenate(np.array(all_hip_mid))
+    return all_hip_mid
+
+
+def trunk_angle(hip_mid, shoulder_mid, Ds):
+    """
+    Calculate the trunk angle
+    :param hip_mid: Hip mid point
+    :param shoulder_mid: Shoulder mid point
+    :return: Trunk angle
+    """
+    all_trunk_angle = []
+    for i in range(hip_mid.shape[0]):
+        _hip_mid = np.array(hip_mid[i])
+        _shoulder_mid = np.array(shoulder_mid[i])
+        _Ds = np.array(Ds[i])
+
+        trunk_angle = 90 - angle_between_points(_hip_mid, _shoulder_mid, _Ds)
+        all_trunk_angle.append(trunk_angle)
+    all_trunk_angle = np.concatenate(np.array(all_trunk_angle))
+    return all_trunk_angle
+
+
+def trunk_twist(hip_left, hip_right, shoulder_left, shoulder_right):
+    """
+    Calculate the trunk twist
+    :param hip_left: Left hip
+    :param hip_right: Right hip
+    :param shoulder_left: Left shoulder
+    :param shoulder_right: Right shoulder
+    :return: Trunk twist
+    """
+    all_trunk_twist = []
+    for i in range(hip_mid.shape[0]):
+        _hip_left = np.array(hip_left[i])
+        _hip_right = np.array(hip_right[i])
+        _shoulder_left = np.array(shoulder_left[i])
+        _shoulder_right = np.array(shoulder_right[i])
+
+        _shoulder_mid = shoulder_mid(_shoulder_left, _shoulder_right)
+        _hip_mid = hip_mid(_hip_left, _hip_right)
+
+        trunk_twist = angle_between_points(orthogonal_projection(_hip_left, _hip_right, _hip_mid, _shoulder_mid),
+                                           orthogonal_projection(_shoulder_left, _shoulder_right, _hip_mid, _shoulder_mid))
+
+        all_trunk_twist.append(trunk_twist)
+    all_trunk_twist = np.concatenate(np.array(all_trunk_twist))
+    return all_trunk_twist
+
+
+def trunk_bending(Y, hip_mid, hip_left, hip_right):
+    """
+    Calculate the trunk bending
+    :param Y: Y vector
+    :param hip_mid: Hip mid point
+    :param hip_left: Left hip
+    :return: Trunk bending
+    """
+    all_trunk_bending = []
+    for i in range(Y.shape[0]):
+        _Y = np.array(Y[i])
+        _hip_mid = np.array(hip_mid[i])
+        _shoulder_mid = np.array(shoulder_mid[i])
+        _helper_hip = np.array(help_hip(_Y, hip_left[i], hip_right[i]))
+
+        trunk_bending = angle_between_points(_Y, orthogonal_projection(_hip_mid, _shoulder_mid, _helper_hip))
+        all_trunk_bending.append(trunk_bending)
+    all_trunk_bending = np.concatenate(np.array(all_trunk_bending))
+    return all_trunk_bending
+
+
+def knee_angle(hip_left, hip_knee, knee_left):
+    """
+    Calculate the knee angle
+    :param hip_left: Left hip
+    :param hip_knee: Left knee
+    :param knee_ankle: Left ankle
+    :return: Knee angle
+    """
+    all_knee_angle = []
+    for i in range(hip_left.shape[0]):
+        _hip_left = np.array(hip_left[i])
+        _hip_knee = np.array(hip_knee[i])
+        _knee_ankle = np.array(knee_left[i])
+
+        knee_angle = angle_between_points(_hip_left, _hip_knee, _knee_ankle)
+        all_knee_angle.append(knee_angle)
+    all_knee_angle = np.concatenate(np.array(all_knee_angle))
+    return all_knee_angle
+
+####################################################################
+### Adjust according to https://www.mdpi.com/1424-8220/22/5/1729 ###
+####################################################################
 def calculate_mpsae(target, prediction, joint_segments):
+    """
+    Calculate the mean per segment angle error. Target and prediction are dictionaries with the same keys segments is a list of lists of segment names.
+    :param target: [frames, joint, 3]
+    :param prediction: [frames, joint, 3]
+    :param segments: list of segment names and their indexes
+    :return: mean, std, segment_errors_mean, segment_errors_std
+    """
+
+    assert len(prediction.shape) == len(target.shape)
+
+    angle_errors = []
+    segment_errors_mean = {}
+    segment_errors_std = {}
+    for segment_name, segment_array in joint_segments.items():
+        angle_target = angle_2p_3d(target[:, segment_array[0]], target[:, segment_array[1]],
+                                   target[:, segment_array[2]])  # batch, 1
+        angle_prediction = angle_2p_3d(prediction[:, segment_array[0]], prediction[:, segment_array[1]],
+                                       prediction[:, segment_array[2]])
+        angle_err = np.abs(np.array(angle_target) - np.array(angle_prediction))
+        angle_err = np.round(angle_err, 2)
+        angle_errors.append(angle_err)  # segments, batch, 1
+        segment_errors_mean[segment_name] = np.mean(angle_err)
+        segment_errors_std[segment_name] = np.std(angle_err)
+    single_segment_err = np.mean(np.array(angle_errors), axis=1)
+
+    # Help Vector Ds = (hip_mid, shoulder_mid) x (shoulder_right, shoulder_left)
+    # Help Vector Dh = Y x (hip_right, hip_left)
+    # Trunk angle: 90degree - angle((hip_mid, shoulder_mid), Dh)
+    # Trunk twist: angle(project((hip_left, hip_right), (hip_mid, shoulder_mid), project((shouler_left, shoulder_right), (hip_mid, shoulder_mid)))
+    # Trunk bending: angle(Y, project((hip_mid, hip_left), Dh))
+    # Knee angle: angle(hip_left, hip_k, left_ankle)
+    # Shoulder angle: angle(project(((ellbow_left, shoulder_left), Ds x (hip_mid, shoulder_mid)), (hip_mid, shoulder_mid)) * sgn((shoulder_left, ellbow_left, Ds)
+    # Elbow angle: angle(shoulder_left, ellbow_left, wrist_left)
+    # Ankle angle:
+
+    return np.mean(single_segment_err), np.std(single_segment_err), segment_errors_mean, segment_errors_std
+
+
+def calculate_mpsae_old(target, prediction, joint_segments):
     """
     Calculate the mean per segment angle error. Target and prediction are dictionaries with the same keys segments is a list of lists of segment names.
     :param target: [frames, joint, 3]

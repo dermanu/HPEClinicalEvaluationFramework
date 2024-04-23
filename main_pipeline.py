@@ -151,6 +151,9 @@ class Framework:
         velocity_error = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
         acceleration_error = metrics.mean_acceleration_error(gt_keypoints, pred_keypoints)
         cps = metrics.compute_CPS(gt_keypoints, pred_keypoints)
+        ####################################################################
+        ### Adjust angular error according to https://www.mdpi.com/1424-8220/22/5/1729 ###
+        ####################################################################
         angular_error = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
         cmc = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
 
