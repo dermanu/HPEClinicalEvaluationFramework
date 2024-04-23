@@ -12,7 +12,7 @@ class Synthesizer(nn.Module):
         super(Synthesizer, self).__init__()
 
         # Upscaling layer to transform input of size 48 to 2304
-        self.upscale = nn.Linear(144, 2304)
+        self.upscale = nn.Linear(3*16*6, 2304)
 
         # Residual blocks for common features
         self.res_common = ResBlock()
@@ -23,13 +23,14 @@ class Synthesizer(nn.Module):
         self.res_pose3 = ResBlock()
 
         # Linear layer for morphing pose information back to 48 dimensions
-        self.pose_morph = nn.Linear(2304, 48)
+        self.pose_morph = nn.Linear(2304, 3*16)
 
         # Dropout layer for regularization
         #self.dropout = nn.Dropout(p=0.20)  # Add dropout layer with probability 0.20
 
     def forward(self, x):
         # Upscaling the input
+        print(x.shape)
         xu = self.upscale(x)
 
         # Pose processing path
@@ -46,7 +47,7 @@ class Synthesizer(nn.Module):
         #print(x.view(-1, 9)[:, 0:3])
         #print(x.view(-1, 9)[:, 0:3].reshape(-1, 48))
         #print(x.view(-1, 9)[:, 0:3].reshape(-1, 48).shape)
-        x_pose = x.view(-1, 9)[:, 0:3].reshape(-1, 48) + self.pose_morph(xp)
+        x_pose = x.reshape(-1, 48) + self.pose_morph(xp)
 
 
         return x_pose

@@ -36,7 +36,8 @@ class ReadDatasetFiles(Dataset):
 
         # Convert to strings and add prefixes
         participants = ['par' + str(participant) for participant in self.participant_list]
-        cameras = ['_Cam' + str(camera) + "." for camera in self.camera_list]
+        #cameras = ['_Cam' + str(camera) + "." for camera in self.camera_list]
+        cameras = ['_Cam' + str(camera) + "." for camera in [0, 0, 0, 0, 0, 0]]
         movements = ['_Mov' + str(movement) + '_' for movement in self.movement_list]
 
         # Lists to store file paths
@@ -54,6 +55,12 @@ class ReadDatasetFiles(Dataset):
                 # Check if the file is a CSV file
                 if file_name.endswith('.csv') and any(camera in file_name for camera in cameras) and any(
                         movement in file_name for movement in movements):
+
+
+                    if file_path in csv_file_paths:
+                        print(file_path)
+                        continue
+
                     csv_file_paths.append(file_path)
 
         print('All csv files paths are read')
@@ -216,15 +223,29 @@ class SingleCSVFileDataset(Dataset):
 
     def load_csv_data(self):
         # Load CSV data
-        csv_data = pd.read_csv(self.csv_file_path)
+        data = []
+        train_index = None
+        #for i in range(6):
+        path = self.csv_file_path
+        #path.replace(f"Cam{(i-1) if i > 0 else 0}", f"Cam{i}")
+        #path[-5] = str(i)
+        csv_data = pd.read_csv(path)
+        print(path)
 
-        train_index, test_index = self.get_split_indexes(csv_data)
-        
+        if train_index is None:
+            train_index, test_index = self.get_split_indexes(csv_data)
+
         # Drop irrelevant columns
         csv_data.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
 
         # Align the columns (you may need to modify this part based on your needs)
         csv_data = self._get_csv_data(csv_data)
+        #data.append(csv_data)
+
+        #csv_data = np.array(data)
+        #csv_data = np.swapaxes(csv_data, 0, 1)
+
+        print(csv_data.shape)
 
         return csv_data, train_index, test_index
 
@@ -294,26 +315,39 @@ class SingleCSVFileDataset(Dataset):
 
     def load_video_data(self):
         # Load video data
-        print('Start loading video data' + self.csv_file_path.replace('.csv', '.avi') + '...')
+        data_key = []
+        data_conf = []
         avi_file_path = self.csv_file_path.replace('.csv', '.avi')
-        cap = cv2.VideoCapture(avi_file_path)
+        for i in range(6):
 
-        if self.model_type == 'mediapipe':
 
-            pose_keypoints = MediaPipe.inference_video(cap)
-            confidences = pose_keypoints[0][:, self.selected_columns, 0]
-            pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
-            category = np.full((pose_keypoints.shape[0], 1), self.get_camera())
-            one_hot = np.eye(6)[category.squeeze()]
-            one_hot = np.expand_dims(one_hot, axis = 1)
-            one_hot = np.repeat(one_hot, 16, axis=1)
-            pose_keypoints = np.concatenate([pose_keypoints, one_hot], axis = -1)
-            #print(one_hot)
-        else:
-            raise ValueError(f"Invalid model_name: {self.model_type}")
-        print('Finished loading video data' + self.csv_file_path.replace('.csv', '.avi') + '...')
+            avi_file_path = avi_file_path.replace(f"Cam{(i-1) if i > 0 else 0}", f"Cam{i}")
+            print('Start loading video data' + avi_file_path + '...')
+            cap = cv2.VideoCapture(avi_file_path)
+
+            if self.model_type == 'mediapipe':
+
+                pose_keypoints = MediaPipe.inference_video(cap)
+                confidences = pose_keypoints[0][:, self.selected_columns, 0]
+                pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
+                #category = np.full((pose_keypoints.shape[0], 1), self.get_camera())
+                #one_hot = np.eye(6)[category.squeeze()]
+                #one_hot = np.expand_dims(one_hot, axis = 1)
+                #one_hot = np.repeat(one_hot, 16, axis=1)
+                #pose_keypoints = np.concatenate([pose_keypoints, one_hot], axis = -1)
+                #print(one_hot)
+            else:
+                raise ValueError(f"Invalid model_name: {self.model_type}")
+            print('Finished loading video data' + avi_file_path + '...')
+
+            data_key.append(pose_keypoints)
+            data_conf.append(confidences)
+
+        pose_keypoints = np.array(data_key)
+        confidences = np.array(data_conf)
+        pose_keypoints = np.swapaxes(pose_keypoints, 0, 1)
+        confidences = np.swapaxes(confidences, 0, 1)
         print(pose_keypoints.shape, confidences.shape)
-
         return pose_keypoints, confidences
 
     def __len__(self):

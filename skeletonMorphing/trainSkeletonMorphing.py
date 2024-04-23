@@ -195,9 +195,11 @@ class NetworkTrainer:
             pose_inf_batch = batch['pose_inf']
 
             # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
-            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float().clone()
+            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
             output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
+            #print(inp_poses.shape)
+            #print(output_poses.shape)
             # Forward pass through the model
             pred_poses = model(inp_poses)
 
@@ -344,6 +346,9 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
                 test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
         except Exception as e:
             print(e)
+    print("NORM RESULTS")
+    print(scaler_train.dict['pose_gt'])
+    print(scaler_test.dict['pose_gt'])
 
 
 
