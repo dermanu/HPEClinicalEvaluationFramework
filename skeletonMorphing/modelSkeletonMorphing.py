@@ -3,7 +3,7 @@ The function modelSkeletonMorphing is a trainable model to morph keypoints of on
 different algorithms.
 It is based on the work of Bastian Wandt (https://github.com/bastianwandt/CanonPose/tree/main).
 """
-
+import torch
 import torch.nn as nn
 
 
@@ -30,7 +30,7 @@ class Synthesizer(nn.Module):
 
     def forward(self, x):
         # Upscaling the input
-        print(x.shape)
+        #print(x.shape)
         xu = self.upscale(x)
 
         # Pose processing path
@@ -47,7 +47,14 @@ class Synthesizer(nn.Module):
         #print(x.view(-1, 9)[:, 0:3])
         #print(x.view(-1, 9)[:, 0:3].reshape(-1, 48))
         #print(x.view(-1, 9)[:, 0:3].reshape(-1, 48).shape)
-        x_pose = x.reshape(-1, 48) + self.pose_morph(xp)
+        #print()
+        x = x.view(-1, 6, 48)
+        #print(torch.mean(x, dim=1, keepdim=False).shape)
+        #print(torch.mean(x, dim=0, keepdim=False).shape)
+        #print(torch.mean(x, dim=2, keepdim=False).shape)
+
+
+        x_pose = torch.mean(x, dim=1, keepdim=False).reshape(-1, 48) + self.pose_morph(xp)
 
 
         return x_pose

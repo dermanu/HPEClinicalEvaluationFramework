@@ -146,8 +146,7 @@ class NetworkTrainer:
                 pose_inf_batch = batch['pose_inf']
 
                 # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
-                inp_poses = pose_inf_batch.view(-1,
-                                                pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float().clone()
+                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
                 output_poses = pose_gt_batch.view(-1,
                                                   pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
@@ -222,10 +221,11 @@ class NetworkTrainer:
         wandb.log({"train_loss": np.mean(train_loss), "validation_loss": losses, "epoch": epoch + 1})
         prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
         ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
-        print(pose_inf_batch.cpu().detach().numpy()[0].shape)
-        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0][:, 0:3]
+        print(pose_inf_batch.cpu().detach().numpy()[0][0].shape)
+        print(pose_gt_batch.cpu().detach().numpy()[0].shape)
+        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0][0][:, 0:3]
         plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
-        plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
+        plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch)
         plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
         plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch)
 
@@ -287,8 +287,7 @@ class NetworkTrainer:
             pose_inf_batch = batch['pose_inf']
 
             # Creating tensors for input and output poses
-            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
-                2)).cuda().float()  # batches/frames x cams, keypoints x 3
+            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()  # batches/frames x cams, keypoints x 3
             output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
 
             # Forward pass through the model
