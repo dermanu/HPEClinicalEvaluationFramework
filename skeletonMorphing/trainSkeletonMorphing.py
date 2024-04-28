@@ -144,6 +144,7 @@ class NetworkTrainer:
                 # Access data for each batch
                 pose_gt_batch = batch['pose_gt']
                 pose_inf_batch = batch['pose_inf']
+                par = batch['par']
 
                 # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
                 inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
@@ -154,12 +155,16 @@ class NetworkTrainer:
                 pred_poses = model(inp_poses)
 
                 #print(pred_poses)
-                pred_poses = scaler.descale(pred_poses, "pose_gt")
+                #pred_poses = scaler.descale(pred_poses, "pose_gt")
                 #print(pred_poses)
                 #print("_____________________________________________________________________________")
                 #print(output_poses)
-                output_poses = scaler.descale(output_poses, "pose_gt")
+                #output_poses = scaler.descale(output_poses, "pose_gt")
                 ##print()
+
+                for i, p in enumerate(par):
+                    pred_poses[i] = scaler.descale(pred_poses[i], f"pose_gt_{p}")
+                    output_poses[i] = scaler.descale(output_poses[i], f"pose_gt_{p}")
 
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
@@ -172,7 +177,7 @@ class NetworkTrainer:
                 # Log the loss of each batch
                 wandb.log({"batch_loss": loss.item(), "batch": step + 1})
 
-        return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
+        return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch, par
 
     @staticmethod
     def train(model, train_loader, optimizer, criterion, scaler):
@@ -189,9 +194,10 @@ class NetworkTrainer:
         losses = []
         for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
             # Access data for each batch
-
+            #print(batch)
             pose_gt_batch = batch['pose_gt']
             pose_inf_batch = batch['pose_inf']
+            par = batch['par']
 
             # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
             inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
@@ -201,10 +207,13 @@ class NetworkTrainer:
             #print(output_poses.shape)
             # Forward pass through the model
             pred_poses = model(inp_poses)
+            #print(pred_poses)
 
-            pred_poses = scaler.descale(pred_poses, "pose_gt")
-            output_poses = scaler.descale(output_poses, "pose_gt")
+            for i, p in enumerate(par):
+                pred_poses[i] = scaler.descale(pred_poses[i], f"pose_gt_{p}")
+                output_poses[i] = scaler.descale(output_poses[i], f"pose_gt_{p}")
 
+            #print(pred_poses)
             # Calculating MSE loss
             loss = criterion(pred_poses, output_poses)
 
@@ -249,17 +258,20 @@ class NetworkTrainer:
         for epoch in range(epochs):
             # time.sleep(15) #??
             train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler_train)
-            losses, pred_poses, pose_gt_batch, pose_inf_batch = NetworkTrainer.validation(model, validation_loader,
+            losses, pred_poses, pose_gt_batch, pose_inf_batch, par = NetworkTrainer.validation(model, validation_loader,
                                                                                           criterion, scaler_test)
+            print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses)))
+            for i, p in enumerate(par):
+                pose_gt_batch[i] = scaler_test.descale(pose_gt_batch[i], f"pose_gt_{p}")
 
-            pose_gt_batch = scaler_test.descale(pose_gt_batch, "pose_gt")
+            #pose_gt_batch = scaler_test.descale(pose_gt_batch, "pose_gt")
             #pose_inf_batch = scaler_test.descale(pose_inf_batch, "pose_inf")
             #pred_poses = scaler_test.descale(pred_poses, "pose_gt")
 
             NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch)
 
             # wandb.log({"epoch": epoch})
-            print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses)))
+            #print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses)))
 
             # Saving the model after each epoch
 
@@ -319,53 +331,73 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
             continue
         print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
-        if False:
-            par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_cam_0_dataset.pth',
+
+        par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
                                  map_location=torch.device(device))
+
+        if train_dataset is None:
+            train_dataset, test_dataset = par_dataset.get_train_test()
+            print(train_dataset.datasets[0].csv_data.shape)
+            print(train_dataset.datasets[0].pose_inf.shape)
+            for d in train_dataset.datasets:
+
+                scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
+                #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
+
+            print(test_dataset)
+            for d in test_dataset.datasets:
+                scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
+                #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
+
+            # scaler_test = scaler_train
+            for _, d in enumerate(train_dataset.datasets):
+                if d.csv_data.size == 0:
+                    continue
+
+                train_dataset.datasets[_].csv_data = scaler_train.scale(d.csv_data,  f"pose_gt_{i}")
+                train_dataset.datasets[_].par = i
+
+            for _, d in enumerate(test_dataset.datasets):
+                if d.csv_data.size == 0:
+                    continue
+                test_dataset.datasets[_].csv_data = scaler_test.scale(d.csv_data,  f"pose_gt_{i}")
+                test_dataset.datasets[_].par = i
+
+
         else:
-            par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
-                                     map_location=torch.device(device))
-        try:
-            if train_dataset is None:
-                train_dataset, test_dataset = par_dataset.get_train_test()
-                print(train_dataset.datasets[0].csv_data.shape)
-                print(train_dataset.datasets[0].pose_inf.shape)
-                for i in train_dataset.datasets:
-                    scaler_train.add_key_from_vector(i.csv_data, "pose_gt")
-                    #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
+            train, test = par_dataset.get_train_test()
+            for d in train.datasets:
+                scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
+                #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
 
-                print(test_dataset)
-                for i in test_dataset.datasets:
-                    scaler_test.add_key_from_vector(i.csv_data, "pose_gt")
-                    #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
-            else:
-                train, test = par_dataset.get_train_test()
-                print(train.datasets[0].get_training_data().shape)
-                train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
-                test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
-        except Exception as e:
-            print(e)
-    print("NORM RESULTS")
-    print(scaler_train.dict['pose_gt'])
-    print(scaler_test.dict['pose_gt'])
+            for d in test.datasets:
+                scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
+
+            for _, d in enumerate(train.datasets):
+                if d.csv_data.size == 0:
+                    continue
+
+                train.datasets[_].csv_data = scaler_train.scale(d.csv_data,  f"pose_gt_{i}")
+                train.datasets[_].par = i
+
+            for _, d in enumerate(test.datasets):
+                if d.csv_data.size == 0:
+                    continue
+                test.datasets[_].csv_data = scaler_test.scale(d.csv_data,  f"pose_gt_{i}")
+                test.datasets[_].par = i
+
+            #print(train.datasets[0].get_training_data().shape)
+            #train_dataset.datasets.append(train.datasets)
+            #test_dataset.datasets.append(test.datasets)
+            train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
+            test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
+
+        print("NORM RESULTS")
+        print(scaler_train.dict[f'pose_gt_{i}'])
+        print(scaler_test.dict[f'pose_gt_{i}'])
 
 
-
-    #scaler_test = scaler_train
-    for i, d in enumerate(train_dataset.datasets):
-        if d.csv_data.size == 0:
-            continue
-
-        train_dataset.datasets[i].csv_data = scaler_train.scale(d.csv_data, "pose_gt")
-
-        #print(d.pose_inf[:, 0:3])
-        #train_dataset.datasets[i].pose_inf[:, :, 0:3] = scaler_train.scale(d.pose_inf[:, :, 0:3], "pose_inf")
-
-    for i, d in enumerate(test_dataset.datasets):
-        if d.csv_data.size == 0:
-            continue
-        test_dataset.datasets[i].csv_data = scaler_test.scale(d.csv_data, "pose_gt")
-        #test_dataset.datasets[i].pose_inf[:, :, 0:3] = scaler_test.scale(d.pose_inf[:, :, 0:3], "pose_inf")
+    print(len(train_dataset))
 
     #scaler.save("standardizer")
     return train_dataset, test_dataset, scaler_train, scaler_test
@@ -467,6 +499,7 @@ def train(datapath: str, pars):
         print("--- %s seconds ---" % (time.time() - start_time))
 
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+    print(train_loader)
     test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
     print('Data loader created')
     # Initializing the model (Synthesizer) and moving it to GPU

@@ -15,4 +15,5 @@ if __name__ == '__main__':
         run_load(datapath)
 
     pars = np.array([args.par])
+    pars = np.array([12, 14, 15, 16])
     train(datapath, pars)

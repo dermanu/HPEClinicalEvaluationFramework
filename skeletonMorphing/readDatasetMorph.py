@@ -142,6 +142,7 @@ class SingleCSVFileDataset(Dataset):
         self.pose_inf = None
         self.confidences_inf = None
         self.selected_columns = None
+        self.par = None
 
         # Add any additional initialization for your SingleCSVFileDataset
         if init:
@@ -366,7 +367,8 @@ class SingleCSVFileDataset(Dataset):
 
         # Combine CSV and video data into a single dictionary
         combined_data = {'pose_gt': self.csv_data[idx], 'pose_inf': self.pose_inf[idx],
-                         'confidences_inf': self.confidences_inf[idx]}
+                         'confidences_inf': self.confidences_inf[idx], "par": self.par}
+
 
         return combined_data
 
