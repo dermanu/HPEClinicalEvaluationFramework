@@ -331,12 +331,6 @@ class SingleCSVFileDataset(Dataset):
                 pose_keypoints = MediaPipe.inference_video(cap)
                 confidences = pose_keypoints[0][:, self.selected_columns, 0]
                 pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
-                #category = np.full((pose_keypoints.shape[0], 1), self.get_camera())
-                #one_hot = np.eye(6)[category.squeeze()]
-                #one_hot = np.expand_dims(one_hot, axis = 1)
-                #one_hot = np.repeat(one_hot, 16, axis=1)
-                #pose_keypoints = np.concatenate([pose_keypoints, one_hot], axis = -1)
-                #print(one_hot)
             else:
                 raise ValueError(f"Invalid model_name: {self.model_type}")
             print('Finished loading video data' + avi_file_path + '...')
