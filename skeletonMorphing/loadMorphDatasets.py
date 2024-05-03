@@ -42,7 +42,7 @@ def run_load(datapath: str):
     data_folder = datapath + '/segmented'
 
     # Assuming you have a model type
-    model_type = 'mediapipe'
+    model_type = 'openpose'
 
     cam = [0, 1, 2, 3, 4, 5]
     #cam = [0]

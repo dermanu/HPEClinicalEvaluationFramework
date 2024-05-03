@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from torch.utils.data import Dataset
 import models.mediapipeMono as MediaPipe
+#import models.openposeMono as OpenPose
 import multiprocessing
 
 
@@ -293,8 +294,39 @@ class SingleCSVFileDataset(Dataset):
             self.selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
 
         elif self.model_type == 'openpose':
-            self.column_mapping = [1, 3, 2]
-            self.selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
+            openpose_keypoints = {
+                "Nose": "RBAK",
+                "Neck": "CLAV",
+                "RShoulder": "RSHO",
+                "RElbow": "RELB",
+                "RWrist": "RWRA",
+                "LShoulder": "LSHO",
+                "LElbow": "LELB",
+                "LWrist": "LWRA",
+                "RHip": "RASI",
+                "RKnee": "RKNE",
+                "RAnkle": "RANK",
+                "LHip": "LASI",
+                "LKnee": "LKNE",
+                "LAnkle": "LANK",
+                "REye": "REJC",
+                "LEye": "LEJC",
+                "REar": "RHEE",
+                "LEar": "LHEE",
+                "Background": "STRN",
+                "RBigToe": "RTOE",
+                "RSmallToe": "RTOE",
+                "RHeel": "RHEE",
+                "LBigToe": "LTOE",
+                "LSmallToe": "LTOE",
+                "LHeel": "LHEE"
+            }
+            indexes = []
+            for i in openpose_keypoints.values():
+                indexes.append(keypoints_org_names.index(i))
+
+            #self.column_mapping = [1, 3, 2]
+            self.selected_columns = indexes
         else:
             raise ValueError(f"Invalid model_name: {self.model_type }")
 
@@ -331,10 +363,14 @@ class SingleCSVFileDataset(Dataset):
                 pose_keypoints = MediaPipe.inference_video(cap)
                 confidences = pose_keypoints[0][:, self.selected_columns, 0]
                 pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
+            elif self.model_type == 'openpose':
+                #pose_keypoints = OpenPose.process_video_openpose(cap)
+                confidences = pose_keypoints[0][:, self.selected_columns, 0]
+                pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
             else:
                 raise ValueError(f"Invalid model_name: {self.model_type}")
             print('Finished loading video data' + avi_file_path + '...')
-
+            print(pose_keypoints.shape)
             data_key.append(pose_keypoints)
             data_conf.append(confidences)
 

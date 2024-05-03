@@ -403,104 +403,53 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     #scaler.save("standardizer")
     return train_dataset, test_dataset, scaler_train, scaler_test
 
-def load_train_test_2(data_folder: str, pars=np.arange(10, 27)):
+def load_train_test_2(data_folder: str, pars = np.arange(10, 27)):
     """
     Method to load all training and test data from participants [pars]
     :param data_folder:
     :param pars:
     :return:
     """
-
+    import random
     scaler_train = Normalize()
-    #scaler_test = Normalize()
     scaler_test = scaler_train
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    train_dataset = None
-    test_dataset = None
-    import random
+    train_dataset = []
+    test_dataset = []
+
     random.seed(42)
+
     for i in pars:
         if i == 13:
             continue
-        print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
-
 
         par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
                                  map_location=torch.device(device))
 
-        #data = [i for ]
-
         indexes = list(range(len(par_dataset)))
         random.shuffle(indexes)
-        par_dataset.train_frames = indexes[:int(0.8*len(indexes))]
-        par_dataset.test_frames = indexes[int(0.8*len(indexes)):]
-        if train_dataset is None:
+        train_frames = indexes[:int(0.8 * len(indexes))]
+        test_frames = indexes[int(0.8 * len(indexes)):]
+        par_dataset.train_frames = train_frames
+        par_dataset.test_frames = test_frames
 
-            train_dataset, test_dataset = par_dataset.get_train_test()
+        train_data, test_data = par_dataset.get_train_test()
 
-            print(train_dataset.datasets[0].csv_data.shape)
-            print(train_dataset.datasets[0].pose_inf.shape)
-            for d in train_dataset.datasets:
+        for d in train_data.datasets:
+            scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
+        for d in test_data.datasets:
+            scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
 
-                scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-                #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
+        for d in train_data.datasets:
+            d.csv_data = scaler_train.scale(d.csv_data, f"pose_gt_{i}")
+            d.par = i
+        for d in test_data.datasets:
+            d.csv_data = scaler_test.scale(d.csv_data, f"pose_gt_{i}")
+            d.par = i
 
-            print(test_dataset)
-            for d in test_dataset.datasets:
-                scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-                #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
+        train_dataset.extend(train_data)
+        test_dataset.extend(test_data)
 
-            # scaler_test = scaler_train
-            for _, d in enumerate(train_dataset.datasets):
-                if d.csv_data.size == 0:
-                    continue
-
-                train_dataset.datasets[_].csv_data = scaler_train.scale(d.csv_data,  f"pose_gt_{i}")
-                train_dataset.datasets[_].par = i
-
-            for _, d in enumerate(test_dataset.datasets):
-                if d.csv_data.size == 0:
-                    continue
-                test_dataset.datasets[_].csv_data = scaler_test.scale(d.csv_data,  f"pose_gt_{i}")
-                test_dataset.datasets[_].par = i
-
-
-        else:
-            train, test = par_dataset.get_train_test()
-            for d in train.datasets:
-                scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-                #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
-
-            for d in test.datasets:
-                scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-
-            for _, d in enumerate(train.datasets):
-                if d.csv_data.size == 0:
-                    continue
-
-                train.datasets[_].csv_data = scaler_train.scale(d.csv_data,  f"pose_gt_{i}")
-                train.datasets[_].par = i
-
-            for _, d in enumerate(test.datasets):
-                if d.csv_data.size == 0:
-                    continue
-                test.datasets[_].csv_data = scaler_test.scale(d.csv_data,  f"pose_gt_{i}")
-                test.datasets[_].par = i
-
-            #print(train.datasets[0].get_training_data().shape)
-            #train_dataset.datasets.append(train.datasets)
-            #test_dataset.datasets.append(test.datasets)
-            train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
-            test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
-
-        print("NORM RESULTS")
-        print(scaler_train.dict[f'pose_gt_{i}'])
-        print(scaler_test.dict[f'pose_gt_{i}'])
-
-
-    print(len(train_dataset))
-
-    #scaler.save("standardizer")
     return train_dataset, test_dataset, scaler_train, scaler_test
 
 def train(datapath: str, pars, rand):

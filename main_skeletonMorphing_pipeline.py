@@ -17,5 +17,5 @@ if __name__ == '__main__':
 
     rnd = args.random
     pars = np.array([args.par])
-    pars = np.array([12])
+    pars = np.array([12, 14, 15, 16])
     train(datapath, pars, rnd)

@@ -9,7 +9,7 @@ try:
     dir_path = os.path.dirname(os.path.realpath(__file__))
     try:
         # Change these variables to point to the correct folder (Release/x64 etc.)
-        sys.path.append('../../python');
+        sys.path.append('../../python')
         # If you run `make install` (default path is `/usr/local/python` for Ubuntu), you can also access the OpenPose/python module from there. This will install OpenPose and the python library at your desired installation path. Ensure that this is in your python path in order to use it.
         # sys.path.append('/usr/local/python')
         from openpose import pyopenpose as op
@@ -34,7 +34,7 @@ opWrapper.configure(params)
 opWrapper.start()
 
 
-def process_video_openpose(input_video_path, output_npy_path):
+def process_video_openpose(input_video_path):
     # Open video file
     cap = cv2.VideoCapture(input_video_path)
 
@@ -64,11 +64,13 @@ def process_video_openpose(input_video_path, output_npy_path):
         inference_time.append(end_time - start_time)
         keypoints_data.append(keypoints_frame)
 
+    cap.release()
     # Save keypoints data to NumPy array
+
     return np.array(keypoints_data), np.array(inference_time)
 
     # Release resources
-    cap.release()
+
 
 
 def convert_openpose_to_mediapipe(openpose_keypoints):

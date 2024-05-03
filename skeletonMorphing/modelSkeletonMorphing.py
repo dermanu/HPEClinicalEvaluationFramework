@@ -22,7 +22,7 @@ class Synthesizer(nn.Module):
         self.bn1 = nn.BatchNorm1d(2304)
         self.res_pose2 = ResBlock()
         self.bn2 = nn.BatchNorm1d(2304)
-        self.res_pose3 = ResBlock()
+        #self.res_pose3 = ResBlock()
 
         # Linear layer for morphing pose information back to 48 dimensions
         self.pose_morph = nn.Linear(1024, 3*16)
@@ -43,7 +43,7 @@ class Synthesizer(nn.Module):
         #xp = self.bn1(xp)
         xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
         #xp = self.bn2(xp)
-        xp = self.dropout(nn.LeakyReLU()(self.res_pose3(xp)))
+        #xp = self.dropout(nn.LeakyReLU()(self.res_pose3(xp)))
 
         # Adding morphed pose information back to the input
         x = x.view(-1, 6, 48)
@@ -63,9 +63,9 @@ class ResBlock(nn.Module):
         super(ResBlock, self).__init__()
 
         # Two linear layers for the residual block
-        self.l1 = nn.Linear(1024, 1024)
-        self.l2 = nn.Linear(1024, 1024)
-        self.l3 = nn.Linear(1024, 1024)
+        self.l1 = nn.Linear(1024, 2048)
+        self.l2 = nn.Linear(2048, 2048)
+        self.l3 = nn.Linear(2048, 1024)
         #self.l4 =  nn.Linear(2304, 2304)
         # Dropout layer for regularization
         self.dropout = nn.Dropout(p=0.00)  # Add dropout layer with probability 0.20
