@@ -10,7 +10,8 @@ if __name__ == '__main__':
     parser.add_argument('--par', default=12, type=int, help='foo help')
     parser.add_argument('--load', default=False, type=bool, help='foo help')
     parser.add_argument('--random', default=False, type=bool, help='foo help')
-    datapath = "E:\MoCap"
+    parser.add_argument('--wandb', default=True, type=bool, help='foo help')
+    datapath = "D:\MoCap"
     args = parser.parse_args()
     if args.load:
         run_load(datapath)
@@ -18,4 +19,5 @@ if __name__ == '__main__':
     rnd = args.random
     pars = np.array([args.par])
     pars = np.array([12, 14, 15, 16])
-    train(datapath, pars, rnd)
+    wandb = args.wandb
+    train(datapath, pars, rnd, wandb)
