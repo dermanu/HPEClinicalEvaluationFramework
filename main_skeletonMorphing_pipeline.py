@@ -11,13 +11,13 @@ if __name__ == '__main__':
     parser.add_argument('--load', default=False, type=bool, help='foo help')
     parser.add_argument('--random', default=False, type=bool, help='foo help')
     parser.add_argument('--wandb', default=True, type=bool, help='foo help')
-    datapath = "D:\MoCap"
+    datapath = "E:\MoCap"
     args = parser.parse_args()
     if args.load:
         run_load(datapath)
 
     rnd = args.random
     pars = np.array([args.par])
-    pars = np.array([12, 14, 15, 16])
+    pars = np.array([14])
     wandb = args.wandb
     train(datapath, pars, rnd, wandb)
