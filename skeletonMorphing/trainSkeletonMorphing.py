@@ -276,8 +276,6 @@ class NetworkTrainer:
 
         prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[idx]
         ground_truth = pose_gt_batch.cpu().detach().numpy()[idx]
-        #print(pose_inf_batch.cpu().detach().numpy()[idx][0].shape)
-        #print(pose_gt_batch.cpu().detach().numpy()[idx].shape)
         hpe_truth = pose_inf_batch.cpu().detach().numpy()[idx][random.randint(0,5)][:, 0:3]
         plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
         plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch)
