@@ -360,13 +360,16 @@ class SingleCSVFileDataset(Dataset):
 
             if self.model_type == 'mediapipe':
 
-                pose_keypoints = MediaPipe.inference_video(cap)
-                confidences = pose_keypoints[0][:, self.selected_columns, 0]
-                pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
+                pose_keypoints, _, _, confidences = MediaPipe.inference_video(cap)
+
+                confidences = confidences[:, self.selected_columns]
+                print("Confidences:", confidences.shape)
+                #print(confidences)
+                pose_keypoints = pose_keypoints[:, self.selected_columns, 1:]
             elif self.model_type == 'openpose':
                 #pose_keypoints = OpenPose.process_video_openpose(cap)
-                confidences = pose_keypoints[0][:, self.selected_columns, 0]
-                pose_keypoints = pose_keypoints[0][:, self.selected_columns, 1:]
+                confidences = confidences[:, self.selected_columns, 0]
+                pose_keypoints = pose_keypoints[:, self.selected_columns, 0:]
             else:
                 raise ValueError(f"Invalid model_name: {self.model_type}")
             print('Finished loading video data' + avi_file_path + '...')

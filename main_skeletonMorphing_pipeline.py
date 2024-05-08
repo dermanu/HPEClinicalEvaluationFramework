@@ -16,6 +16,8 @@ if __name__ == '__main__':
     if args.load:
         run_load(datapath)
 
+        exit()
+
     rnd = args.random
     pars = np.array([args.par])
     pars = np.array([12, 14, 15, 16])

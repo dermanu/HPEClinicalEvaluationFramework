@@ -18,6 +18,7 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
                         min_tracking_confidence=0.5)
 
     keypoints_data = []
+    confidence_data = []  # List to store confidence scores
     inference_time = []
 
     frame_number = 0
@@ -55,6 +56,8 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
                 frame_data = np.array([[i, landmark.x, landmark.y] for i, landmark in
                                        enumerate(results.pose_landmarks.landmark)])
             keypoints_data.append(frame_data)
+            confidences = [landmark.visibility for landmark in results.pose_landmarks.landmark]
+            confidence_data.append(confidences)
 
         frame_number += 1
 
@@ -62,4 +65,4 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
     cap.release()
 
     # Return keypoints data to NumPy array, save last frame for logging
-    return np.array(keypoints_data), np.array(inference_time), rgb_frame
+    return np.array(keypoints_data), np.array(inference_time), rgb_frame, np.array(confidence_data)
