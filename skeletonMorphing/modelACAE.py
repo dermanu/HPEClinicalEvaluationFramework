@@ -65,10 +65,9 @@ def procrustes(X, Y, scaling=True, reflection='best'):
 def normalize_and_align(data):
     # Updated error handling
     try:
-        reference_shape = data[0]
         aligned_data = []
         for x in data:
-            _, Z = procrustes(reference_shape, x.numpy(), scaling=True)
+            _, Z = procrustes(data[0].numpy(), data[1].numpy(), scaling=True)   # data[0] is the VizLab data
             aligned_data.append(torch.tensor(Z, dtype=torch.float32))
         return torch.stack(aligned_data)
     except Exception as e:
