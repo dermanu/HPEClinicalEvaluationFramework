@@ -29,8 +29,38 @@ class ACAE(nn.Module):
         return torch.norm(self.Wenc, p=1) + torch.norm(self.Wdec, p=1)
 
 def procrustes(X, Y, scaling=True, reflection='best'):
-    # Similar to before but with potential for handling batches if necessary
-    # (omitting for brevity)
+    n, m = X.shape
+    ny, my = Y.shape
+
+    muX = X.mean(0)
+    muY = Y.mean(0)
+
+    X0 = X - muX
+    Y0 = Y - muY
+
+    ssX = (X0**2.).sum()
+    ssY = (Y0**2.).sum()
+
+    normX = np.sqrt(ssX)
+    normY = np.sqrt(ssY)
+
+    A = np.dot(X0.T, Y0)
+    U, s, Vt = np.linalg.svd(A, full_matrices=False)
+    V = Vt.T
+    T = np.dot(V, U.T)
+
+    traceTA = s.sum()
+
+    if scaling:
+        b = traceTA * normX / normY
+    else:
+        b = 1
+
+    d = 1 - traceTA**2
+    c = muX - b * np.dot(muY, T)
+
+    Z = b * np.dot(Y0, T) + muX
+    return d, Z
 
 def normalize_and_align(data):
     # Updated error handling
