@@ -114,7 +114,7 @@ def align_procrustes(target, prediction):
 
 def calculate_pmpjpe(target, prediction):
     """
-    Procrustes MJPE: MPJPE after rigid alignment (scale, rotation, and translation),
+    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers.
     :param target: Ground truth 3D joint positions
     :param prediction: Predicted 3D joint positions
@@ -129,7 +129,7 @@ def calculate_pmpjpe(target, prediction):
 
 
 def calculate_pck(target, prediction, threshold=100.0,
-                  joints_to_use=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], procrustes=False):
+                  joints_to_use=None, procrustes=False):
     """
     Calculate percentage of correct keypoints (PCK) in [%] (https://arxiv.org/pdf/1611.09813.pdf)
     :param target: Ground truth 3D joint positions
@@ -140,6 +140,8 @@ def calculate_pck(target, prediction, threshold=100.0,
     :return: PCK in [%]
     """
 
+    if joints_to_use is None:
+        joints_to_use = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     assert len(prediction.shape) == len(target.shape)
 
     if procrustes:
@@ -190,7 +192,6 @@ def mean_acceleration_error(prediction, target, procrustes=True):
     if procrustes:
         target, prediction, err = align_procrustes(target, prediction)
 
-
     acceleration_predicted = np.diff(np.diff(prediction, axis=0), axis=0)
     acceleration_target = np.diff(np.diff(target, axis=0), axis=0)
 
@@ -199,7 +200,7 @@ def mean_acceleration_error(prediction, target, procrustes=True):
     return mean, std
 
 
-def calculate_cmc(target, prediction, axes_to_use=[0, 1, 2], procrustes=False):
+def calculate_cmc(target, prediction, axes_to_use=None, procrustes=False):
     """
     Calculate coefficient of multiple correlation (CMC) for all joints and axes
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -210,6 +211,9 @@ def calculate_cmc(target, prediction, axes_to_use=[0, 1, 2], procrustes=False):
     :return: CMC
     :return: P-value
     """
+
+    if axes_to_use is None:
+        axes_to_use = [0, 1, 2]
 
     assert len(prediction) == len(target)
 
@@ -229,14 +233,14 @@ def calculate_cmc(target, prediction, axes_to_use=[0, 1, 2], procrustes=False):
             pred_norm = np.linalg.norm(pred)
             gt = gt / gt_norm
             pred = pred / pred_norm
-            cmc, pvalue = stats.pearsonr(gt, pred) # ValueError: array must not contain infs or NaNs
+            cmc, pvalue = stats.pearsonr(gt, pred)  # ValueError: array must not contain infs or NaNs
             cmc_all.append(cmc)
             pvalues_all.append(pvalue)
 
     return np.mean(cmc_all), np.mean(pvalues_all)
 
 
-def compute_CP(target, prediction, threshold=180, joints_to_use=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]):
+def compute_CP(target, prediction, threshold=180, joints_to_use=None):
     """
     Compute the number of correct poses
     :param target: Ground truth 3D joint positions
@@ -245,6 +249,9 @@ def compute_CP(target, prediction, threshold=180, joints_to_use=[0, 1, 2, 3, 4, 
     :param joints_to_use: List of joints to use for CP calculation
     :return: Number of correct poses
     """
+    if joints_to_use is None:
+        joints_to_use = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
     assert len(target.shape) == len(prediction.shape)
 
     distances = np.linalg.norm(target[:, joints_to_use, :] - prediction[:, joints_to_use, :], axis=2)
@@ -254,7 +261,7 @@ def compute_CP(target, prediction, threshold=180, joints_to_use=[0, 1, 2, 3, 4, 
 
 
 def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
-                joints_to_use=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], procrustes=False):
+                joints_to_use=None, procrustes=False):
     """
     Compute the correct pose score (CPS) according to (https://arxiv.org/abs/2011.14679) for different thresholds
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -267,6 +274,9 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
     :return: CPS
     :return: idx of best CPS
     """
+
+    if joints_to_use is None:
+        joints_to_use = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
     assert len(prediction.shape) == len(target.shape)
 
@@ -328,62 +338,41 @@ def angle_between_points(joint_a, joint_b, joint_c):
     :param joint_c: [frames, joint, 3]
     :return joint_angles: [frames, joint, 1]
     """
-    all_angles = []
-    for i in range(joint_a.shape[0]):
-        AB = np.array(joint_b[i]) - np.array(joint_a[i])
-        BC = np.array(joint_c[i]) - np.array(joint_b[i])
+    AB = np.array(joint_b) - np.array(joint_a)
+    BC = np.array(joint_c) - np.array(joint_b)
 
-        dot_product = np.dot(AB, BC)
+    dot_product = np.einsum('...i,...i', AB, BC)
 
-        magnitude_AB = np.linalg.norm(AB)
-        magnitude_BC = np.linalg.norm(BC)
+    magnitude_AB = np.linalg.norm(AB, axis=-1)
+    magnitude_BC = np.linalg.norm(BC, axis=-1)
 
-        angle_rad = np.arccos(dot_product / (magnitude_AB * magnitude_BC))
-        angle_deg = np.degrees(angle_rad)
-        all_angles.append(angle_deg)
-    all_angles = np.concatenate(np.array(all_angles))
-    return all_angles
+    angle_rad = np.arccos(dot_product / (magnitude_AB * magnitude_BC))
+    angle_deg = np.degrees(angle_rad)
+
+    return angle_deg
 
 
-def orthogonal_projection(A, B, n_c, n_d):
+def orthogonal_projection(vector, normal):
     """
-    Calculate the orthogonal projection of vector AB onto the plane defined by the normal vector n
-    :param A:
-    :param B:
-    :param n_c:
-    :param n_d:
+    :param vector:
+    :param normal:
     :return:
     """
-    all_proj = []
-    for i in range(A.shape[0]):
-        AB = np.array(B[i]) - np.array(A[i])
-        n = np.array(n_c[i]) - np.array(n_d[i])
-        proj = AB - np.dot(AB, n) / np.dot(n, n) * n
-        all_proj.append(proj)
-    all_proj = np.concatenate(np.array(all_proj))
-    return all_proj
+    proj = vector - np.dot(vector, normal) / np.dot(normal, normal) * normal
+    return proj
 
 
 def help_shoulder(hip_mid, shoulder_mid, shoulder_left, shoulder_right):
     """
     Calculate the help vector Ds = (hip_mid, shoulder_mid) x (shoulder_right, shoulder_left)
-    :param hip_center: Hip center
+    :param hip_mid: ip center
     :param shoulder_mid: Shoulder center
     :param shoulder_left: Left shoulder
     :param shoulder_right: Right shoulder
     :return: Help vector Ds
     """
-    all_ds = []
-    for i in range(hip_mid.shape[0]):
-        _hip_mid = np.array(hip_mid[i])
-        _shoulder_mid = np.array(shoulder_mid[i])
-        _shoulder_left = np.array(shoulder_left[i])
-        _shoulder_right = np.array(shoulder_right[i])
-
-        ds = np.cross(_hip_mid - _shoulder_mid, _shoulder_right - _shoulder_left)
-        all_ds.append(ds)
-    all_ds = np.concatenate(np.array(all_ds))
-    return all_ds
+    ds = np.cross(hip_mid - shoulder_mid, shoulder_right - shoulder_left)
+    return ds
 
 
 def help_hip(Y, hip_left, hip_right):
@@ -394,71 +383,41 @@ def help_hip(Y, hip_left, hip_right):
     :param hip_right: Right hip
     :return: Help vector Dh
     """
-    all_dh = []
-    for i in range(Y.shape[0]):
-        _Y = np.array(Y[i])
-        _hip_left = np.array(hip_left[i])
-        _hip_right = np.array(hip_right[i])
-
-        dh = np.cross(_Y, _hip_right - _hip_left)
-        all_dh.append(dh)
-    all_dh = np.concatenate(np.array(all_dh))
-    return all_dh
+    dh = np.cross(Y, hip_right - hip_left)
+    return dh
 
 
 def shoulder_mid(shoulder_left, shoulder_right):
     """
-    Calculate the shoulder mid point
+    Calculate the shoulder mid-point
     :param shoulder_left: Left shoulder
     :param shoulder_right: Right shoulder
-    :return: Shoulder mid point
+    :return: Shoulder mid-point
     """
-    all_shoulder_mid = []
-    for i in range(shoulder_right.shape[0]):
-        _shoulder_left = np.array(shoulder_left[i])
-        _shoulder_right = np.array(shoulder_right[i])
-
-        shoulder_mid = (_shoulder_right + _shoulder_left) / 2
-        all_shoulder_mid.append(shoulder_mid)
-    all_shoulder_mid = np.concatenate(np.array(all_shoulder_mid))
-    return all_shoulder_mid
+    shoulder_mid_point = (shoulder_right + shoulder_left) / 2
+    return shoulder_mid_point
 
 
 def hip_mid(hip_left, hip_right):
     """
-    Calculate the hip mid point
+    Calculate the hip mid-point
     :param hip_left: Left hip
     :param hip_right: Right hip
-    :return: Hip mid point
+    :return: Hip mid-point
     """
-    all_hip_mid = []
-    for i in range(hip_left.shape[0]):
-        _hip_left = np.array(hip_left[i])
-        _hip_right = np.array(hip_right[i])
-
-        hip_mid = (_hip_right + _hip_left) / 2
-        all_hip_mid.append(hip_mid)
-    all_hip_mid = np.concatenate(np.array(all_hip_mid))
-    return all_hip_mid
+    hip_mid_point = (hip_right + hip_left) / 2
+    return hip_mid_point
 
 
 def trunk_angle(hip_mid, shoulder_mid, Ds):
     """
     Calculate the trunk angle
-    :param hip_mid: Hip mid point
-    :param shoulder_mid: Shoulder mid point
+    :param hip_mid: Hip mid-point
+    :param shoulder_mid: Shoulder mid-point
     :return: Trunk angle
     """
-    all_trunk_angle = []
-    for i in range(hip_mid.shape[0]):
-        _hip_mid = np.array(hip_mid[i])
-        _shoulder_mid = np.array(shoulder_mid[i])
-        _Ds = np.array(Ds[i])
-
-        trunk_angle = 90 - angle_between_points(_hip_mid, _shoulder_mid, _Ds)
-        all_trunk_angle.append(trunk_angle)
-    all_trunk_angle = np.concatenate(np.array(all_trunk_angle))
-    return all_trunk_angle
+    trunk_angle_angle = 90 - angle_between_points(hip_mid, shoulder_mid, Ds)
+    return trunk_angle_angle
 
 
 def trunk_twist(hip_left, hip_right, shoulder_left, shoulder_right):
@@ -470,104 +429,196 @@ def trunk_twist(hip_left, hip_right, shoulder_left, shoulder_right):
     :param shoulder_right: Right shoulder
     :return: Trunk twist
     """
-    all_trunk_twist = []
-    for i in range(hip_mid.shape[0]):
-        _hip_left = np.array(hip_left[i])
-        _hip_right = np.array(hip_right[i])
-        _shoulder_left = np.array(shoulder_left[i])
-        _shoulder_right = np.array(shoulder_right[i])
+    shoulder_mid_point = shoulder_mid(shoulder_left, shoulder_right)
+    hip_mid_point = hip_mid(hip_left, hip_right)
 
-        _shoulder_mid = shoulder_mid(_shoulder_left, _shoulder_right)
-        _hip_mid = hip_mid(_hip_left, _hip_right)
+    HH = hip_right - hip_left
+    CB = shoulder_mid_point - hip_mid_point
+    SS = shoulder_right - shoulder_left
 
-        trunk_twist = angle_between_points(orthogonal_projection(_hip_left, _hip_right, _hip_mid, _shoulder_mid),
-                                           orthogonal_projection(_shoulder_left, _shoulder_right, _hip_mid, _shoulder_mid))
-
-        all_trunk_twist.append(trunk_twist)
-    all_trunk_twist = np.concatenate(np.array(all_trunk_twist))
-    return all_trunk_twist
+    trunk_twist_angle = angle_between_points(orthogonal_projection(HH, CB), orthogonal_projection(SS, CB))
+    return trunk_twist_angle
 
 
-def trunk_bending(Y, hip_mid, hip_left, hip_right):
+def trunk_bending(Y, CB, Dh):
     """
     Calculate the trunk bending
     :param Y: Y vector
-    :param hip_mid: Hip mid point
-    :param hip_left: Left hip
+    :param CB: CB vector
+    :param Dh: Dh vector
     :return: Trunk bending
     """
-    all_trunk_bending = []
-    for i in range(Y.shape[0]):
-        _Y = np.array(Y[i])
-        _hip_mid = np.array(hip_mid[i])
-        _shoulder_mid = np.array(shoulder_mid[i])
-        _helper_hip = np.array(help_hip(_Y, hip_left[i], hip_right[i]))
-
-        trunk_bending = angle_between_points(_Y, orthogonal_projection(_hip_mid, _shoulder_mid, _helper_hip))
-        all_trunk_bending.append(trunk_bending)
-    all_trunk_bending = np.concatenate(np.array(all_trunk_bending))
-    return all_trunk_bending
+    trunk_bending_angle = angle_between_points(Y, orthogonal_projection(CB, Dh))
+    return trunk_bending_angle
 
 
-def knee_angle(hip_left, hip_knee, knee_left):
+def knee_angle(hip_left, knee_left, ankle_left):
     """
     Calculate the knee angle
     :param hip_left: Left hip
-    :param hip_knee: Left knee
-    :param knee_ankle: Left ankle
+    :param knee_left: Left knee
+    :param ankle_left: Left ankle
     :return: Knee angle
     """
-    all_knee_angle = []
-    for i in range(hip_left.shape[0]):
-        _hip_left = np.array(hip_left[i])
-        _hip_knee = np.array(hip_knee[i])
-        _knee_ankle = np.array(knee_left[i])
+    knee_angle_angle = angle_between_points(hip_left, knee_left, ankle_left)
+    return knee_angle_angle
 
-        knee_angle = angle_between_points(_hip_left, _hip_knee, _knee_ankle)
-        all_knee_angle.append(knee_angle)
-    all_knee_angle = np.concatenate(np.array(all_knee_angle))
-    return all_knee_angle
+
+def shoulder_angle(elbow_left, shoulder_left, Ds, CB):
+    """
+    Calculate the shoulder angle
+    :param elbow_left: Left elbow
+    :param shoulder_left: Left shoulder
+    :param Ds: Help vector Ds
+    :return: Shoulder angle
+    """
+    ES = shoulder_left - elbow_left
+    SE = elbow_left - shoulder_left
+
+    shoulder_angle_angle = angle_between_points(orthogonal_projection(ES, np.cross(Ds, CB)),
+                                          np.sign(SE * Ds))
+    return shoulder_angle_angle
+
+
+def elbow_angle(shoulder_left, elbow_left, wrist_left):
+    """
+    Calculate the elbow angle
+    :param shoulder_left: Left shoulder
+    :param elbow_left: Left elbow
+    :param wrist_left: Left wrist
+    :return: Elbow angle
+    """
+    elbow_angle_angle = angle_between_points(shoulder_left, elbow_left, wrist_left)
+    return elbow_angle_angle
+
+
+def ankle_angle(knee_left, ankle_left, toe_left):
+    """
+    Calculate the ankle angle
+    :param knee_left: Left knee
+    :param ankle_left: Left ankle
+    :param toe_left: Left toe
+    :return: Ankle angle
+    """
+    ankle_angle = angle_between_points(knee_left, ankle_left, toe_left)
+    return ankle_angle
+
 
 ####################################################################
 ### Adjust according to https://www.mdpi.com/1424-8220/22/5/1729 ###
 ####################################################################
 def calculate_mpsae(target, prediction, joint_segments):
     """
-    Calculate the mean per segment angle error. Target and prediction are dictionaries with the same keys segments is a list of lists of segment names.
-    :param target: [frames, joint, 3]
-    :param prediction: [frames, joint, 3]
-    :param segments: list of segment names and their indexes
-    :return: mean, std, segment_errors_mean, segment_errors_std
+    Calculate the mean per segment angle error. Target and prediction are dictionaries with the same keys segments is a
+    list of lists of segment names.
+    :param target:
+    :param prediction:
+    :param joint_segments:
+    :return:
     """
 
-    assert len(prediction.shape) == len(target.shape)
+    assert len(prediction) == len(target)
 
-    angle_errors = []
-    segment_errors_mean = {}
-    segment_errors_std = {}
-    for segment_name, segment_array in joint_segments.items():
-        angle_target = angle_2p_3d(target[:, segment_array[0]], target[:, segment_array[1]],
-                                   target[:, segment_array[2]])  # batch, 1
-        angle_prediction = angle_2p_3d(prediction[:, segment_array[0]], prediction[:, segment_array[1]],
-                                       prediction[:, segment_array[2]])
-        angle_err = np.abs(np.array(angle_target) - np.array(angle_prediction))
-        angle_err = np.round(angle_err, 2)
-        angle_errors.append(angle_err)  # segments, batch, 1
-        segment_errors_mean[segment_name] = np.mean(angle_err)
-        segment_errors_std[segment_name] = np.std(angle_err)
-    single_segment_err = np.mean(np.array(angle_errors), axis=1)
+    target_Y = np.array([0, 1, 0])
+    prediction_Y = np.array([0, 1, 0])
 
-    # Help Vector Ds = (hip_mid, shoulder_mid) x (shoulder_right, shoulder_left)
-    # Help Vector Dh = Y x (hip_right, hip_left)
-    # Trunk angle: 90degree - angle((hip_mid, shoulder_mid), Dh)
-    # Trunk twist: angle(project((hip_left, hip_right), (hip_mid, shoulder_mid), project((shouler_left, shoulder_right), (hip_mid, shoulder_mid)))
-    # Trunk bending: angle(Y, project((hip_mid, hip_left), Dh))
-    # Knee angle: angle(hip_left, hip_k, left_ankle)
-    # Shoulder angle: angle(project(((ellbow_left, shoulder_left), Ds x (hip_mid, shoulder_mid)), (hip_mid, shoulder_mid)) * sgn((shoulder_left, ellbow_left, Ds)
-    # Elbow angle: angle(shoulder_left, ellbow_left, wrist_left)
-    # Ankle angle:
+    target_hip_mid = hip_mid(target['hip_left'], target['hip_right'])
+    prediction_hip_mid = hip_mid(prediction['hip_left'], prediction['hip_right'])
+    target_shoulder_mid = shoulder_mid(target['shoulder_left'], target['shoulder_right'])
+    prediction_shoulder_mid = shoulder_mid(prediction['shoulder_left'], prediction['shoulder_right'])
+    target_CB = target_shoulder_mid - target_hip_mid
+    prediction_CB = prediction_shoulder_mid - prediction_hip_mid
+    target_Ds = help_shoulder(target_hip_mid, target_shoulder_mid, target['shoulder_left'], target['shoulder_right'])
+    prediction_Ds = help_shoulder(prediction_hip_mid, prediction_shoulder_mid, prediction['shoulder_left'], prediction['shoulder_right'])
+    target_Dh = help_hip(target_Y, target['hip_left'], target['hip_right'])
+    prediction_Dh = help_hip(prediction_Y, prediction['hip_left'], prediction['hip_right'])
 
-    return np.mean(single_segment_err), np.std(single_segment_err), segment_errors_mean, segment_errors_std
+
+    trunk_twist_error = np.round(np.abs(
+        trunk_twist(target['hip_left'], target['hip_right'], target['shoulder_left'], target['shoulder_right']) -
+        trunk_twist(prediction['hip_left'], prediction['hip_right'], prediction['shoulder_left'],
+                    prediction['shoulder_right'])), 2)
+
+    trunk_bending_error = np.round(np.abs(
+        trunk_bending(target_Y, target_CB, target_Dh) -
+        trunk_bending(prediction_Y, prediction_CB, prediction_Dh)), 2)
+
+    trunk_angle_error = np.round(np.abs(
+        trunk_angle(target_hip_mid, target_shoulder_mid, target_Ds) -
+        trunk_angle(prediction_hip_mid, prediction_shoulder_mid, prediction_Ds)), 2)
+
+    knee_left_error = np.round(np.abs(
+        knee_angle(target['hip_left'], target['knee_left'], target['ankle_left']) -
+        knee_angle(prediction['hip_left'], prediction['knee_left'], prediction['ankle_left'])), 2)
+
+    knee_right_error = np.round(np.abs(
+        knee_angle(target['hip_right'], target['knee_right'], target['ankle_right']) -
+        knee_angle(prediction['hip_right'], prediction['knee_right'], prediction['ankle_right'])), 2)
+
+    shoulder_left_error = np.round(np.abs(
+        shoulder_angle(target['elbow_left'], target['shoulder_left'], target_Ds, target_CB) -
+        shoulder_angle(prediction['elbow_left'], prediction['shoulder_left'], prediction_Ds, prediction_CB)), 2)
+
+    shoulder_right_error = np.round(np.abs(
+        shoulder_angle(target['elbow_right'], target['shoulder_right'], target_Ds, target_CB) -
+        shoulder_angle(prediction['elbow_right'], prediction['shoulder_right'], prediction_Ds, prediction_CB)), 2)
+
+    elbow_left_error = np.round(np.abs(
+        elbow_angle(target['shoulder_left'], target['elbow_left'], target['wrist_left']) -
+        elbow_angle(prediction['shoulder_left'], prediction['elbow_left'], prediction['wrist_left'])), 2)
+
+    elbow_right_error = np.round(np.abs(
+        elbow_angle(target['shoulder_right'], target['elbow_right'], target['wrist_right']) -
+        elbow_angle(prediction['shoulder_right'], prediction['elbow_right'], prediction['wrist_right'])), 2)
+
+    ankle_left_error = np.round(np.abs(
+        ankle_angle(target['knee_left'], target['ankle_left'], target['toe_left']) -
+        ankle_angle(prediction['knee_left'], prediction['ankle_left'], prediction['toe_left'])), 2)
+
+    ankle_right_error = np.round(np.abs(
+        ankle_angle(target['knee_right'], target['ankle_right'], target['toe_right']) -
+        ankle_angle(prediction['knee_right'], prediction['ankle_right'], prediction['toe_right'])), 2)
+
+    single_segment_error = np.array(
+        [trunk_twist_error, trunk_bending_error, trunk_angle_error, knee_left_error, knee_right_error,
+         shoulder_left_error, shoulder_right_error, elbow_left_error, elbow_right_error, ankle_left_error,
+         ankle_right_error])
+    single_segment_mean_error = np.mean(single_segment_error, axis=0)
+    single_segment_std_error = np.std(single_segment_error, axis=0)
+    single_segment_r2 =
+
+
+    return single_segment_mean_error, single_segment_std_error, single_segment_error,
+
+
+def calculate_r2(target, predicted):
+    """
+    Calculate the coefficient of determination R^2
+    :param actual: Actual values
+    :param predicted: Predicted values
+    :return: R^2
+    """
+    ss_res = np.sum((target - predicted) ** 2)
+    ss_tot = np.sum((target - np.mean(target)) ** 2)
+    r2 = 1 - (ss_res / ss_tot)
+    return r2
+
+
+def plot_r2(values, segment_names):
+    """
+    Plot R^2 values for each segment
+    :param values: list of R^2 values
+    :param segment_names: names of the segments
+    """
+    plt.figure(figsize=(10, 5))
+    plt.bar(segment_names, values, color='skyblue')
+    plt.xlabel('Segment')
+    plt.ylabel('R^2 Value')
+    plt.title('R^2 for each Segment')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
 
 
 def calculate_mpsae_old(target, prediction, joint_segments):
@@ -628,6 +679,7 @@ def calculate_symmetry_error(prediction, bones, bone_pairs):
     std = np.std(single_bone_err)
 
     return mean, std, single_bone_err
+
 
 def wrap_to_pi(x):
     xwrap = np.remainder(x, 2 * np.pi)
