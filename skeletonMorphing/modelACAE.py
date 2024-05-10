@@ -17,10 +17,18 @@ class ACAE(nn.Module):
         nn.init.xavier_uniform_(self.Wdec)
 
     def forward(self, x):
-        self.Wenc_normalized = torch.softmax(self.Wenc, dim=1).unsqueeze(2).repeat(1, 1, 3)
-        self.Wdec_normalized = torch.softmax(self.Wdec, dim=1).unsqueeze(2).repeat(1, 1, 3)
-        latent = torch.bmm(self.Wenc_normalized, x)
-        reconstruction = torch.bmm(self.Wdec_normalized, latent)
+        # Normalize weights to ensure they sum to one and are used equally across coordinates
+        Wenc_normalized = torch.softmax(self.Wenc, dim=1).unsqueeze(2).repeat(1, 1, 3)
+        Wdec_normalized = torch.softmax(self.Wdec, dim=1).unsqueeze(2).repeat(1, 1, 3)
+
+        # Enforce chirality by mirroring weights
+        if self.symmetric_pairs:
+            for a, b in self.symmetric_pairs:
+                Wenc_normalized[:, b, :] = Wenc_normalized[:, a, :]
+                Wdec_normalized[b, :, :] = Wdec_normalized[a, :, :]
+
+        latent = torch.bmm(Wenc_normalized, x)
+        reconstruction = torch.bmm(Wdec_normalized, latent)
         return reconstruction, latent
 
     def reconstruction_loss(self, original, reconstructed):
@@ -30,15 +38,15 @@ class ACAE(nn.Module):
         return torch.norm(self.Wenc, p=1) + torch.norm(self.Wdec, p=1)
 
 
-def procrustes(X, Y, scaling=True, reflection='best'):
+def procrustes(X, Y, scaling=True):
     muX = X.mean(0)
     muY = Y.mean(0)
 
     X0 = X - muX
     Y0 = Y - muY
 
-    ssX = (X0 ** 2.).sum()
-    ssY = (Y0 ** 2.).sum()
+    ssX = (X0**2.).sum()
+    ssY = (Y0**2.).sum()
 
     normX = np.sqrt(ssX)
     normY = np.sqrt(ssY)
@@ -55,8 +63,7 @@ def procrustes(X, Y, scaling=True, reflection='best'):
     else:
         b = 1
 
-    d = 1 - traceTA ** 2
-    c = muX - b * np.dot(muY, T)
+    d = 1 - traceTA**2
 
     Z = b * np.dot(Y0, T) + muX
     return d, Z
@@ -98,7 +105,8 @@ def train_acae(acae, data_loader, optimizer, epochs=10, lambda_sparse=0.01):
 # Dummy example
 num_joints = 28  # total number of joints (dataset1 + dataset 2)
 num_latent = int(np.ceil(np.sqrt(num_joints) * 2))
-acae = ACAE(num_joints, num_latent)
+symmetric_pairs = [(1, 2), (3, 4)]
+acae = ACAE(num_joints, num_latent, symmetric_pairs)
 optimizer = torch.optim.Adam(acae.parameters(), lr=0.001)
 dummy_data_loader = [torch.randn(10, num_joints, 3) for _ in range(100)]  # Example data
 train_acae(acae, dummy_data_loader, optimizer)
