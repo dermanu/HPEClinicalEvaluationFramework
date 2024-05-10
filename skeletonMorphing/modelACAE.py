@@ -94,4 +94,10 @@ def train_acae(acae, data_loader, optimizer, epochs=10, lambda_sparse=0.01):
             total_loss += loss.item()
         print(f'Epoch {epoch + 1}, Loss: {total_loss / len(data_loader)}')
 
-# Example usage remains similar
+# Dummy example
+num_joints = 28 # total number of joints (dataset1 + dataset 2)
+num_latent = np.ceil(np.sqrt(num_joints)*2)
+acae = ACAE(num_joints, num_latent)
+optimizer = torch.optim.Adam(acae.parameters(), lr=0.001)
+dummy_data_loader = [torch.randn(10, num_joints, 3) for _ in range(100)]  # Example data
+train_acae(acae, dummy_data_loader, optimizer)
