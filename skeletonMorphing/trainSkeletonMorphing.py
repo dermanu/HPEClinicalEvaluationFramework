@@ -218,7 +218,7 @@ class NetworkTrainer:
             for i, k in enumerate(column_mapping.keys()):
                 wandb.log({f"{column_mapping[k]}": np.mean(joints, axis=1)[i]})
 
-        return losses, pred_poses, pose_gt_batch, pose_inf_batch, par, np.mean(np.mean(joints, axis=0))
+        return losses, pred_poses, pose_gt_batch, pose_inf_batch, par, np.mean(np.mean(joints, axis=0)), conf_inf
 
     @staticmethod
     def train(model, train_loader, optimizer, criterion, scaler):
@@ -270,22 +270,42 @@ class NetworkTrainer:
         return losses
 
     @staticmethod
-    def log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, mpjpe_loss):
+    def log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, mpjpe_loss, conf_inf):
         wandb.log({"train_loss": np.mean(train_loss), "validation_loss": np.mean(losses),
                    "validation_std" : np.std(losses), "mpjpe_loss" : mpjpe_loss, "rmse_loss" : np.sqrt(np.mean(losses)),
                    "epoch": epoch + 1})
         idx = random.randint(0,pose_gt_batch.size(0)-1)
 
+
         prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[idx]
         ground_truth = pose_gt_batch.cpu().detach().numpy()[idx]
-        print(pose_inf_batch.cpu().detach().numpy()[idx].shape)
-        print(np.mean(pose_inf_batch.cpu().detach().numpy()[idx], axis=0).shape)
-        print(np.mean(pose_inf_batch.cpu().detach().numpy()[idx], axis=1).shape)
+        hpe_truth = pose_inf_batch[idx].cpu().detach()
 
-        hpe_truth = np.mean(pose_inf_batch.cpu().detach().numpy()[idx], axis=0)[:, 0:3]
+        dist = conf_inf[idx]
+
+        normalized_confidences = torch.nn.functional.softmax(dist, dim=0).cpu().detach()
+
+        weighted_means = torch.zeros(16, 3)  # Initialize tensor to store the results
+        print(normalized_confidences.shape)
+        for camera in range(6):
+            # Extract the coordinates and normalized confidences for the current joint from all cameras
+            print(hpe_truth.shape)
+            print(normalized_confidences.shape)
+            joint_coordinates = hpe_truth[camera, :]
+            joint_confidences = normalized_confidences[camera]
+            # print(joint_coordinates.shape, joint_confidences.shape)
+
+            # Calculate the weighted mean for the current joint
+            for i in range(3):
+                weighted_means[:, i] += joint_coordinates.view(16, 3)[:, i] * joint_confidences[:]
+
+            print(weighted_means)
+
+        hpe_truth = weighted_means.numpy()
+
         plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
         plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch)
-        plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
+        plot_3d_keypoints(-hpe_truth, 'mediapipe', 'hpe_truth', epoch)
 
         plot_3d_keypoints_all(prediction, ground_truth, -hpe_truth, 'mediapipe', epoch)
 
@@ -310,7 +330,7 @@ class NetworkTrainer:
         for epoch in range(epochs):
             # time.sleep(15) #??
             train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler_train)
-            losses, pred_poses, pose_gt_batch, pose_inf_batch, par, mpjpe_loss = NetworkTrainer.validation(model, validation_loader,
+            losses, pred_poses, pose_gt_batch, pose_inf_batch, par, mpjpe_loss, conf_inf = NetworkTrainer.validation(model, validation_loader,
                                                                                           criterion, scaler_test)
             print('Finished epoch', epoch, 'of', epochs, 'with loss MSE:', np.mean(losses), ", ", np.std(losses),
                   "MPJPE: ", mpjpe_loss)
@@ -318,10 +338,10 @@ class NetworkTrainer:
 
             for i, p in enumerate(par):
                 pose_gt_batch[i] = scaler_test.descale(pose_gt_batch[i], f"pose_gt_{p}")
-                pose_inf_batch[i] = scaler_test.descale(pose_inf_batch[i], f"pose_gt_{p}")
+                #pose_inf_batch[i] = scaler_test.descale(pose_inf_batch[i], f"pose_gt_{p}")
 
 
-            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, mpjpe_loss)
+            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, mpjpe_loss, conf_inf)
 
             # wandb.log({"epoch": epoch})
             #print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses)))
@@ -393,12 +413,13 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
             print(train_dataset.datasets[0].csv_data.shape)
             print(train_dataset.datasets[0].pose_inf.shape)
             for d in train_dataset.datasets:
-
+                d.filter_data()
                 scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
                 #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
 
             print(test_dataset)
             for d in test_dataset.datasets:
+                d.filter_data()
                 scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
                 #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
 
@@ -420,10 +441,12 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
         else:
             train, test = par_dataset.get_train_test()
             for d in train.datasets:
+                d.filter_data()
                 scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
                 #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
 
             for d in test.datasets:
+                d.filter_data()
                 scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
 
             for _, d in enumerate(train.datasets):
@@ -594,7 +617,7 @@ def train(datapath: str, pars, rand, mode):
         print('Test saved in')
         print("--- %s seconds ---" % (time.time() - start_time))
 
-    n = 5  # For picking every 5th sample
+    n = 1  # For picking every 5th sample
     sampler = EveryNthSampler(train, n)
     # Create a SubsetRandomSampler to shuffle the indices generated by EveryNthSampler
     #print("HERE GAIAN", len(sampler))

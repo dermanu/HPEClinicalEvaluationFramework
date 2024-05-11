@@ -55,9 +55,17 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
             elif dimensions == 2:
                 frame_data = np.array([[i, landmark.x, landmark.y] for i, landmark in
                                        enumerate(results.pose_landmarks.landmark)])
-            keypoints_data.append(frame_data)
+
             confidences = [landmark.visibility for landmark in results.pose_landmarks.landmark]
+
+
+            print(np.mean(np.array(confidences), axis=0))
+            if np.mean(np.array(confidences), axis=0 < 0.8):
+                #print(np.mean(confidences, axis=0).shape)
+                frame_number += 1
+                continue
             confidence_data.append(confidences)
+            keypoints_data.append(frame_data)
 
         frame_number += 1
 

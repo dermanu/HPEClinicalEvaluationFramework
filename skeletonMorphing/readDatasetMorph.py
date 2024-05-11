@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import cv2
 import numpy as np
+import torch
 from torch.utils.data import Dataset
 import models.mediapipeMono as MediaPipe
 #import models.openposeMono as OpenPose
@@ -121,6 +122,8 @@ class ReadDatasetFiles(Dataset):
         total_length = sum(len(dataset) for dataset in self.datasets)
         return total_length
 
+
+
     def __getitem__(self, idx):
         # Determine which dataset the index corresponds to
         dataset_idx = 0
@@ -149,6 +152,8 @@ class SingleCSVFileDataset(Dataset):
         if init:
             self.csv_data, self.train_frames, self.test_frames = self.load_csv_data()
             self.pose_inf, self.confidences_inf = self.load_video_data()
+            assert len(self.csv_data) == len(self.pose_inf)
+
 
     def get_camera(self):
         return int(self.csv_file_path[-5])
@@ -387,6 +392,23 @@ class SingleCSVFileDataset(Dataset):
     def __len__(self):
         return len(self.csv_data)
 
+    def filter_data(self, threshold=0.7):
+        # Implement your filtering logic here
+        ids = []
+        for idx in range(self.__len__()):
+            #print(np.mean(self.__getitem__(idx)['confidences_inf'], axis=0))
+            if np.any(np.mean(self.__getitem__(idx)['confidences_inf'], axis=0) < threshold):
+                ids.append(idx)
+        #filtered_indices = [idx for idx, item in enumerate(range(self.__len__())) if torch.mean(item) >= 0.8]
+        #self.data = [self.data[idx] for idx in filtered_indices]
+        self.csv_data = np.array([item for idx, item in enumerate(self.csv_data) if idx not in ids])
+        self.pose_inf = np.array([item for idx, item in enumerate(self.pose_inf) if idx not in ids])
+        self.confidences_inf =  np.array([item for idx, item in enumerate(self.confidences_inf) if idx not in ids])
+        #print(len(ids))
+
+    #def drop_item(self, idx):
+
+
     def __getitem__(self, idx):
         # Get the data for the specified index
         csv_data = self.csv_data[idx]
@@ -401,7 +423,6 @@ class SingleCSVFileDataset(Dataset):
         # Combine CSV and video data into a single dictionary
         combined_data = {'pose_gt': self.csv_data[idx], 'pose_inf': self.pose_inf[idx],
                          'confidences_inf': self.confidences_inf[idx], "par": self.par}
-
 
         return combined_data
 
