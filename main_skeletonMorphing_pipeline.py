@@ -7,6 +7,7 @@ import numpy as np
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', default=False, type=bool, help='foo help')
     parser.add_argument('--par', default=12, type=int, help='foo help')
     parser.add_argument('--load', default=False, type=bool, help='foo help')
     parser.add_argument('--random', default=False, type=bool, help='foo help')
@@ -20,6 +21,7 @@ if __name__ == '__main__':
 
     rnd = args.random
     pars = np.array([args.par])
-    pars = np.array([12, 14, 15, 16])
+    pars = np.array([12])
+    debug = args.debug
     wandb = args.wandb
-    train(datapath, pars, rnd, wandb)
+    train(datapath, pars, rnd, wandb, debug)

@@ -171,6 +171,7 @@ class NetworkTrainer:
                 par = batch['par']
                 conf_inf = batch['confidences_inf'].cuda()
 
+                print(par)
                 for i, p in enumerate(par):
                     pose_inf_batch[i] = NetworkTrainer.align(pose_inf_batch[i], pose_gt_batch[i])
 
@@ -181,14 +182,16 @@ class NetworkTrainer:
 
                 # Forward pass through the model
                 pred_poses = model(inp_poses, conf_inf)
-                a = pred_poses.reshape(-1, 16, 3)
-                b = output_poses.reshape(-1, 16, 3)
-                joints = torch.abs(a - b)
+
 
                 for i, p in enumerate(par):
                     pred_poses[i] = scaler.descale(pred_poses[i], f"pose_gt_{p}")
                     output_poses[i] = scaler.descale(output_poses[i], f"pose_gt_{p}")
+                    a = pred_poses.reshape(-1, 16, 3)
+                    b = output_poses.reshape(-1, 16, 3)
+                    joints = torch.abs(a - b)
                     if debug:
+                        print("DEBUG")
                         wandb.log({f"loss_{p}": criterion(pred_poses[i], output_poses[i]).item(), "epoch": epoch + 1})
                         column_mapping = {
                             'RShoulder': 'RSJC', # 12 - 0
@@ -210,7 +213,7 @@ class NetworkTrainer:
                         }
                         joint = joints[i].detach().cpu().numpy()
                         for y, k in enumerate(column_mapping.keys()):
-                            wandb.log({f"{column_mapping[k]}_{p}": joint[y], "epoch": epoch + 1})
+                            wandb.log({f"{column_mapping[k]}_{p}": np.mean(joint[y]), "epoch": epoch + 1})
 
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
@@ -220,14 +223,15 @@ class NetworkTrainer:
                 # Log the loss of each batch
                 wandb.log({"batch_loss": loss.item(), "batch": step + 1})
                 losses.append(loss.detach().cpu().numpy().item())
+                print((pred_poses[0].shape, pose_gt_batch[0].shape, pose_inf_batch[0].shape, par[0], conf_inf[0].shape))
                 pose.append((pred_poses[0], pose_gt_batch[0], pose_inf_batch[0], par[0], conf_inf[0]))
 
-            joints = np.array(joints)
+            #joints = np.array(joints)
             #print("Joints", np.mean(joints, axis=1))
             #print("Joints MAE", np.mean(np.mean(joints, axis=0)))
             
 
-        return losses, pose[idx][0],pose[idx][1],pose[idx][2], pose[idx][3], np.mean(np.mean(joints, axis=0)), pose[idx][3]
+        return losses, pose[idx][0], pose[idx][1], pose[idx][2], pose[idx][3], pose[idx][4]
         #return losses, pred_poses, pose_gt_batch, pose_inf_batch, par, np.mean(np.mean(joints, axis=0)), conf_inf
     
     @staticmethod
@@ -266,12 +270,13 @@ class NetworkTrainer:
         # Updated error handling
         try:
             aligned_data = []
-            for x in data:
-                _, Z = NetworkTrainer.procrustes(pose_inf, pose_gt, scaling=False)  # data[0] is the VizLab data
+            for x in range(pose_inf.shape[0]):
+                _, Z = NetworkTrainer.procrustes(pose_inf[x], pose_gt, scaling=False)  # data[0] is the VizLab data
                 aligned_data.append(Z)
             return torch.stack(aligned_data)
         except Exception as e:
             print(f"Error in normalize_and_align: {e}")
+            raise e
             return data  # Fallback to original data
 
     @staticmethod
@@ -291,12 +296,14 @@ class NetworkTrainer:
         for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
             # Access data for each batch
             #print(batch)
-            pose_gt_batch = batch['pose_gt']
-            pose_inf_batch = batch['pose_inf']
+            pose_gt_batch = batch['pose_gt'].clone()
+            pose_inf_batch = batch['pose_inf'].clone()
             par = batch['par']
             conf_inf = batch['confidences_inf'].cuda()
             for i, p in enumerate(par):
+                #print(pose_inf_batch.shape)
                 pose_inf_batch[i] = NetworkTrainer.align(pose_inf_batch[i], pose_gt_batch[i])
+                #print(pose_inf_batch.shape)
 
             # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
             inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
@@ -326,19 +333,23 @@ class NetworkTrainer:
         return losses
 
     @staticmethod
-    def log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, mpjpe_loss, conf_inf):
+    def log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, conf_inf):
         wandb.log({"train_loss": np.mean(train_loss), "validation_loss": np.mean(losses),
-                   "validation_std" : np.std(losses), "mpjpe_loss" : mpjpe_loss, "rmse_loss" : np.sqrt(np.mean(losses)),
+                   "validation_std" : np.std(losses), "rmse_loss" : np.sqrt(np.mean(losses)),
                    "epoch": epoch + 1})
 
 
-        prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()
+        prediction = pred_poses.view(pose_gt_batch.size(0), pose_gt_batch.size(1)).cpu().detach().numpy()
         ground_truth = pose_gt_batch.cpu().detach().numpy()
-        hpe_truth = pose_inf_batch.cpu().detach()
-
+        hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
+        #conf_inf = conf_inf.cpu().detach().numpy()
+        print(pred_poses.shape)
+        print(hpe_truth.shape)
+        print(ground_truth.shape)
+        """
         dist = conf_inf
 
-        normalized_confidences = torch.nn.functional.softmax(dist, dim=0).cpu().detach()
+        normalized_confidences = torch.nn.functional.softmax(dist).cpu().detach()
 
         weighted_means = torch.zeros(16, 3)  # Initialize tensor to store the results
         print(normalized_confidences.shape)
@@ -357,7 +368,7 @@ class NetworkTrainer:
             print(weighted_means)
 
         hpe_truth = weighted_means.numpy()
-
+        """
         plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
         plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch)
         plot_3d_keypoints(-hpe_truth, 'mediapipe', 'hpe_truth', epoch)
@@ -367,7 +378,7 @@ class NetworkTrainer:
 
     @staticmethod
     def train_model(model, train_loader, validation_loader, optimizer, criterion, epochs=10, pars=np.arange(10, 27),
-                    config=None, scaler=None):
+                    config=None, scaler=None, debug = False):
         """
         Method to train model
         :param validation_loader:
@@ -385,18 +396,17 @@ class NetworkTrainer:
         for epoch in range(epochs):
             # time.sleep(15) #??
             train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler_train)
-            losses, pred_poses, pose_gt_batch, pose_inf_batch, par, mpjpe_loss, conf_inf = NetworkTrainer.validation(model, validation_loader,
-                                                                                          criterion, scaler_test, epoch, debug=True)
-            print('Finished epoch', epoch, 'of', epochs, 'with loss MSE:', np.mean(losses), ", ", np.std(losses),
-                  "MPJPE: ", mpjpe_loss)
+            losses, pred_poses, pose_gt_batch, pose_inf_batch, par,  conf_inf = NetworkTrainer.validation(model, validation_loader,
+                                                                                          criterion, scaler_test, epoch, debug=debug)
+            print('Finished epoch', epoch, 'of', epochs, 'with loss MSE:', np.mean(losses), ", ", np.std(losses))
             print(losses)
 
-            for i, p in enumerate(par):
-                pose_gt_batch[i] = scaler_test.descale(pose_gt_batch[i], f"pose_gt_{p}")
-                pose_inf_batch[i] = scaler_test.descale(pose_inf_batch[i], f"pose_gt_{p}")
+            for i, p in enumerate([par]):
+                pose_gt_batch = scaler_test.descale(pose_gt_batch, f"pose_gt_{p}")
+                pose_inf_batch = scaler_test.descale(pose_inf_batch, f"pose_gt_{p}")
 
 
-            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, mpjpe_loss, conf_inf)
+            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, conf_inf)
 
             # Saving the model after each epoch
 
@@ -576,7 +586,7 @@ def load_train_test_2(data_folder: str, pars = np.arange(10, 27)):
 
     return train_dataset, test_dataset, scaler_train, scaler_test
 
-def train(datapath: str, pars, rand, mode):
+def train(datapath: str, pars, rand, mode, debug = False):
     # Configuration settings using SimpleNamespace
     # config = SimpleNamespace()
     # config.learning_rate = 0.0001
@@ -628,7 +638,7 @@ def train(datapath: str, pars, rand, mode):
     }
 
     # WandB – Initialize a new run
-    wandb.init(project="vizlab_morph/skeleton-morphing--moved", config=init_config, mode=mode)
+    wandb.init(project="skeleton-morphing--moved", config=init_config, mode=mode)
     # config = wandb.config['parameters']
 
     config = SimpleNamespace()
@@ -717,6 +727,7 @@ def train(datapath: str, pars, rand, mode):
                                epochs=config.N_epochs,
                                pars=config.pars,
                                config=config,
-                               scaler=(scaler_train, scaler_test))
+                               scaler=(scaler_train, scaler_test),
+                               debug = debug)
 
     print('done')

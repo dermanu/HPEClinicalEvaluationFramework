@@ -32,7 +32,7 @@ class Synthesizer(nn.Module):
         self.pose_morph = nn.Linear(2048, 3*16)
 
         # Dropout layer for regularization
-        self.dropout = nn.Dropout(p=0.0)  # Add dropout layer with probability 0.20
+        self.dropout = nn.Dropout(p=0.2)  # Add dropout layer with probability 0.20
 
     def forward(self, x, dist):
         # Upscaling the input
