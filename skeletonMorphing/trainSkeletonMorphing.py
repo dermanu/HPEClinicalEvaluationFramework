@@ -146,8 +146,9 @@ class MPJPELoss(nn.Module):
         return overall_mae
 
 class NetworkTrainer:
+
     @staticmethod
-    def validation(model, validation_loader, criterion, scaler):
+    def validation(model, validation_loader, criterion, scaler, epoch = 0, debug = False):
         """
         Validation of the model
         :param criterion:
@@ -161,12 +162,18 @@ class NetworkTrainer:
             losses = 0
             joints = []
             losses = []
+            idx = 0
+            pose = []
             for step, batch in enumerate(tqdm.tqdm(validation_loader, desc="Validation progress", leave=False)):
                 # Access data for each batch
                 pose_gt_batch = batch['pose_gt']
                 pose_inf_batch = batch['pose_inf']
                 par = batch['par']
                 conf_inf = batch['confidences_inf'].cuda()
+
+                for i, p in enumerate(par):
+                    pose_inf_batch[i] = NetworkTrainer.align(pose_inf_batch[i], pose_gt_batch[i])
+
                 # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
                 inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
                 output_poses = pose_gt_batch.view(-1,
@@ -174,51 +181,98 @@ class NetworkTrainer:
 
                 # Forward pass through the model
                 pred_poses = model(inp_poses, conf_inf)
+                a = pred_poses.reshape(-1, 16, 3)
+                b = output_poses.reshape(-1, 16, 3)
+                joints = torch.abs(a - b)
 
                 for i, p in enumerate(par):
                     pred_poses[i] = scaler.descale(pred_poses[i], f"pose_gt_{p}")
                     output_poses[i] = scaler.descale(output_poses[i], f"pose_gt_{p}")
-
-                # print(pred_poses)
-                a = pred_poses.reshape(-1, 16, 3)
-                b = output_poses.reshape(-1, 16, 3)
-
-                # joints.append(torch.mean(torch.abs(output_poses - pred_poses), axis=1).detach().cpu().numpy())
-
-                for i in range(a.shape[0]):
-                    joints.append(torch.mean(torch.abs(a[i] - b[i]), axis=1).detach().cpu().numpy())
+                    if debug:
+                        wandb.log({f"loss_{p}": criterion(pred_poses[i], output_poses[i]).item(), "epoch": epoch + 1})
+                        column_mapping = {
+                            'RShoulder': 'RSJC', # 12 - 0
+                            'LShoulder': 'LSJC', # 11 - 1
+                            'RElbow': 'REJC', # 14 - 2
+                            'LElbow': 'LEJC', # 13 - 3
+                            'RWrist': 'RWJC', # 16 - 4
+                            'LWrist': 'LWJC', # 15 - 5
+                            'RHip': 'RHJC', # 24 - 6
+                            'LHip': 'LHJC', # 23 - 7
+                            'RKnee': 'RKJC', # 26 - 8
+                            'LKnee': 'LKJC', # 25  - 9
+                            'RAnkle': 'RAJC', # 28 - 10
+                            'LAnkle': 'LAJC', # 27 - 11
+                            'RHeel': 'RHEE', # 30 - 12
+                            'LHeel': 'LHEE', # 29 - 13
+                            'RFootIndex': 'RTOE', # 32 - 14
+                            'LFootIndex': 'LTOE', # 31 - 15
+                        }
+                        joint = joints[i].detach().cpu().numpy()
+                        for y, k in enumerate(column_mapping.keys()):
+                            wandb.log({f"{column_mapping[k]}_{p}": joint[y], "epoch": epoch + 1})
 
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
+                if len(losses) != 0 and loss > losses[idx]:
+                    idx = step
+
                 # Log the loss of each batch
                 wandb.log({"batch_loss": loss.item(), "batch": step + 1})
                 losses.append(loss.detach().cpu().numpy().item())
+                pose.append((pred_poses[0], pose_gt_batch[0], pose_inf_batch[0], par[0], conf_inf[0]))
 
             joints = np.array(joints)
             #print("Joints", np.mean(joints, axis=1))
             #print("Joints MAE", np.mean(np.mean(joints, axis=0)))
-            column_mapping = {
-                'RShoulder': 'RSJC', # 12 - 0
-                'LShoulder': 'LSJC', # 11 - 1
-                'RElbow': 'REJC', # 14 - 2
-                'LElbow': 'LEJC', # 13 - 3
-                'RWrist': 'RWJC', # 16 - 4
-                'LWrist': 'LWJC', # 15 - 5
-                'RHip': 'RHJC', # 24 - 6
-                'LHip': 'LHJC', # 23 - 7
-                'RKnee': 'RKJC', # 26 - 8
-                'LKnee': 'LKJC', # 25  - 9
-                'RAnkle': 'RAJC', # 28 - 10
-                'LAnkle': 'LAJC', # 27 - 11
-                'RHeel': 'RHEE', # 30 - 12
-                'LHeel': 'LHEE', # 29 - 13
-                'RFootIndex': 'RTOE', # 32 - 14
-                'LFootIndex': 'LTOE', # 31 - 15
-            }
-            for i, k in enumerate(column_mapping.keys()):
-                wandb.log({f"{column_mapping[k]}": np.mean(joints, axis=1)[i]})
+            
 
-        return losses, pred_poses, pose_gt_batch, pose_inf_batch, par, np.mean(np.mean(joints, axis=0)), conf_inf
+        return losses, pose[idx][0],pose[idx][1],pose[idx][2], pose[idx][3], np.mean(np.mean(joints, axis=0)), pose[idx][3]
+        #return losses, pred_poses, pose_gt_batch, pose_inf_batch, par, np.mean(np.mean(joints, axis=0)), conf_inf
+    
+    @staticmethod
+    def procrustes(X, Y, scaling=False):
+        muX = torch.mean(X, dim=0)
+        muY = torch.mean(Y, dim=0)
+
+        X0 = X - muX
+        Y0 = Y - muY
+
+        ssX = torch.sum(X0**2, dim=0)
+        ssY = torch.sum(Y0**2, dim=0)
+
+        normX = torch.sqrt(torch.sum(ssX))
+        normY = torch.sqrt(torch.sum(ssY))
+
+        A = torch.matmul(X0.t(), Y0)
+        U, s, Vt = torch.linalg.svd(A)
+        V = Vt.t()
+        T = torch.matmul(V, U.t())
+
+        traceTA = torch.sum(s)
+
+        if scaling:
+            b = traceTA * normX / normY
+        else:
+            b = 1
+
+        d = 1 - traceTA**2
+
+        Z = b * torch.matmul(Y0, T) + muX
+        return d, Z
+
+    @staticmethod
+    def align(pose_inf, pose_gt):
+        # Updated error handling
+        try:
+            aligned_data = []
+            for x in data:
+                _, Z = NetworkTrainer.procrustes(pose_inf, pose_gt, scaling=False)  # data[0] is the VizLab data
+                aligned_data.append(Z)
+            return torch.stack(aligned_data)
+        except Exception as e:
+            print(f"Error in normalize_and_align: {e}")
+            return data  # Fallback to original data
 
     @staticmethod
     def train(model, train_loader, optimizer, criterion, scaler):
@@ -241,6 +295,8 @@ class NetworkTrainer:
             pose_inf_batch = batch['pose_inf']
             par = batch['par']
             conf_inf = batch['confidences_inf'].cuda()
+            for i, p in enumerate(par):
+                pose_inf_batch[i] = NetworkTrainer.align(pose_inf_batch[i], pose_gt_batch[i])
 
             # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
             inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
@@ -274,14 +330,13 @@ class NetworkTrainer:
         wandb.log({"train_loss": np.mean(train_loss), "validation_loss": np.mean(losses),
                    "validation_std" : np.std(losses), "mpjpe_loss" : mpjpe_loss, "rmse_loss" : np.sqrt(np.mean(losses)),
                    "epoch": epoch + 1})
-        idx = random.randint(0,pose_gt_batch.size(0)-1)
 
 
-        prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[idx]
-        ground_truth = pose_gt_batch.cpu().detach().numpy()[idx]
-        hpe_truth = pose_inf_batch[idx].cpu().detach()
+        prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()
+        ground_truth = pose_gt_batch.cpu().detach().numpy()
+        hpe_truth = pose_inf_batch.cpu().detach()
 
-        dist = conf_inf[idx]
+        dist = conf_inf
 
         normalized_confidences = torch.nn.functional.softmax(dist, dim=0).cpu().detach()
 
@@ -331,20 +386,17 @@ class NetworkTrainer:
             # time.sleep(15) #??
             train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler_train)
             losses, pred_poses, pose_gt_batch, pose_inf_batch, par, mpjpe_loss, conf_inf = NetworkTrainer.validation(model, validation_loader,
-                                                                                          criterion, scaler_test)
+                                                                                          criterion, scaler_test, epoch, debug=True)
             print('Finished epoch', epoch, 'of', epochs, 'with loss MSE:', np.mean(losses), ", ", np.std(losses),
                   "MPJPE: ", mpjpe_loss)
             print(losses)
 
             for i, p in enumerate(par):
                 pose_gt_batch[i] = scaler_test.descale(pose_gt_batch[i], f"pose_gt_{p}")
-                #pose_inf_batch[i] = scaler_test.descale(pose_inf_batch[i], f"pose_gt_{p}")
+                pose_inf_batch[i] = scaler_test.descale(pose_inf_batch[i], f"pose_gt_{p}")
 
 
             NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, mpjpe_loss, conf_inf)
-
-            # wandb.log({"epoch": epoch})
-            #print('Finished epoch ' + str(epoch) + ' of ' + str(epochs) + ' with loss ' + str(np.mean(losses)))
 
             # Saving the model after each epoch
 
@@ -576,7 +628,7 @@ def train(datapath: str, pars, rand, mode):
     }
 
     # WandB – Initialize a new run
-    wandb.init(project="skeleton-morphing", config=init_config, mode=mode)
+    wandb.init(project="vizlab_morph/skeleton-morphing--moved", config=init_config, mode=mode)
     # config = wandb.config['parameters']
 
     config = SimpleNamespace()
@@ -630,7 +682,7 @@ def train(datapath: str, pars, rand, mode):
     wandb.log({"train_size": len(sampler), "test_size": len(sampler_test)})
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, num_workers=8, pin_memory=True, sampler=shuffled_sampler)
     print(train_loader)
-    test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
+    test_loader = data.DataLoader(test, batch_size=1, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
 
 
     print('Data loader created')
