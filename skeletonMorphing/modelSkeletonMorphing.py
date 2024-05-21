@@ -32,7 +32,7 @@ class Synthesizer(nn.Module):
         self.pose_morph = nn.Linear(2048, 3*16)
 
         # Dropout layer for regularization
-        self.dropout = nn.Dropout(p=0.2)  # Add dropout layer with probability 0.20
+        self.dropout = nn.Dropout(p=0.00)  # Add dropout layer with probability 0.20
 
     def forward(self, x, dist):
         # Upscaling the input
@@ -42,7 +42,7 @@ class Synthesizer(nn.Module):
         # Pose processing path
         xp = self.dropout(nn.LeakyReLU()(self.res_pose1(xu)))
         #xp = self.bn1(xp)
-        #xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
+        xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
         #xp = self.bn2(xp)
         #xp = self.dropout(nn.LeakyReLU()(self.res_pose3(xp)))
         #xp = self.bn3(xp)
@@ -62,7 +62,7 @@ class Synthesizer(nn.Module):
         weighted_means = torch.zeros(x.size(0),16, 3).cuda()  # Initialize tensor to store the results
         #print(torch.mean(dist, dim=2))
 
-        if torch.any(torch.mean(dist, dim=1) < 0.7):
+        if torch.any(torch.mean(dist, dim=1) < 0.0):
             print(dist)
             print(torch.mean(dist, dim=1))
             raise Exception("Not sure enough")

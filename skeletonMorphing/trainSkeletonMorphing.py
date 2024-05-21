@@ -171,7 +171,7 @@ class NetworkTrainer:
                 par = batch['par']
                 conf_inf = batch['confidences_inf'].cuda()
 
-                print(par)
+               # print(par)
                 for i, p in enumerate(par):
                     pose_inf_batch[i] = NetworkTrainer.align(pose_inf_batch[i], pose_gt_batch[i])
 
@@ -223,7 +223,7 @@ class NetworkTrainer:
                 # Log the loss of each batch
                 wandb.log({"batch_loss": loss.item(), "batch": step + 1})
                 losses.append(loss.detach().cpu().numpy().item())
-                print((pred_poses[0].shape, pose_gt_batch[0].shape, pose_inf_batch[0].shape, par[0], conf_inf[0].shape))
+                #print((pred_poses[0].shape, pose_gt_batch[0].shape, pose_inf_batch[0].shape, par[0], conf_inf[0].shape))
                 pose.append((pred_poses[0], pose_gt_batch[0], pose_inf_batch[0], par[0], conf_inf[0]))
 
             #joints = np.array(joints)
@@ -399,7 +399,7 @@ class NetworkTrainer:
             losses, pred_poses, pose_gt_batch, pose_inf_batch, par,  conf_inf = NetworkTrainer.validation(model, validation_loader,
                                                                                           criterion, scaler_test, epoch, debug=debug)
             print('Finished epoch', epoch, 'of', epochs, 'with loss MSE:', np.mean(losses), ", ", np.std(losses))
-            print(losses)
+            #print(losses)
 
             for i, p in enumerate([par]):
                 pose_gt_batch = scaler_test.descale(pose_gt_batch, f"pose_gt_{p}")
@@ -461,6 +461,7 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_dataset = None
     test_dataset = None
+    filter = False
     for i in pars:
         if i == 13:
             continue
@@ -475,13 +476,15 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
             print(train_dataset.datasets[0].csv_data.shape)
             print(train_dataset.datasets[0].pose_inf.shape)
             for d in train_dataset.datasets:
-                d.filter_data()
+                if filter:
+                    d.filter_data()
                 scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
                 #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
 
             print(test_dataset)
             for d in test_dataset.datasets:
-                d.filter_data()
+                if filter:
+                    d.filter_data()
                 scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
                 #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
 
@@ -503,12 +506,14 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
         else:
             train, test = par_dataset.get_train_test()
             for d in train.datasets:
-                d.filter_data()
+                if filter:
+                    d.filter_data()
                 scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
                 #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
 
             for d in test.datasets:
-                d.filter_data()
+                if filter:
+                    d.filter_data()
                 scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
 
             for _, d in enumerate(train.datasets):
