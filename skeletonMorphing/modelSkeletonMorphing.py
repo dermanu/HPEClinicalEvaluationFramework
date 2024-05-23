@@ -25,8 +25,6 @@ class Synthesizer(nn.Module):
         self.res_pose3 = ResBlock()
         self.bn3 = nn.BatchNorm1d(2048)
         self.res_pose4 = ResBlock()
-        #self.res_pose5 = ResBlock()
-        #self.res_pose6 = ResBlock()
 
         # Linear layer for morphing pose information back to 48 dimensions
         self.pose_morph = nn.Linear(2048, 3*16)
@@ -34,59 +32,18 @@ class Synthesizer(nn.Module):
         # Dropout layer for regularization
         self.dropout = nn.Dropout(p=0.00)  # Add dropout layer with probability 0.20
 
-    def forward(self, x, dist):
+    def forward(self, x):
         # Upscaling the input
         #print(x.shape)
         xu = self.upscale(x)
 
         # Pose processing path
         xp = self.dropout(nn.LeakyReLU()(self.res_pose1(xu)))
-        #xp = self.bn1(xp)
         xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
-        #xp = self.bn2(xp)
-        #xp = self.dropout(nn.LeakyReLU()(self.res_pose3(xp)))
-        #xp = self.bn3(xp)
-        #xp = self.dropout(nn.LeakyReLU()(self.res_pose4(xp)))
-        #xp = self.dropout(nn.LeakyReLU()(self.res_pose5(xp)))
-        #xp = self.dropout(nn.LeakyReLU()(self.res_pose6(xp)))
-
-        # Adding morphed pose information back to the input
+        #xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
         x = x.view(-1, 6, 48)
-        dist = dist.view(-1, 6, 16)
-
-        normalized_confidences = torch.nn.functional.softmax(dist, dim=1)
-        #print("Normalized confidences", torch.nn.functional.softmax(dist, dim=0))
-        #print("Normalized confidences",torch.nn.functional.softmax(dist, dim=1))
-        #print("Normalized confidences", torch.nn.functional.softmax(dist, dim=2))
-        # Calculate the weighted mean for each joint
-        weighted_means = torch.zeros(x.size(0),16, 3).cuda()  # Initialize tensor to store the results
-        #print(torch.mean(dist, dim=2))
-
-        if torch.any(torch.mean(dist, dim=1) < 0.0):
-            print(dist)
-            print(torch.mean(dist, dim=1))
-            raise Exception("Not sure enough")
-        if False:
-            for camera in range(6):
-                # Extract the coordinates and normalized confidences for the current joint from all cameras
-                joint_coordinates = x.view(-1, 6, 16, 3)[:, camera, :]
-                joint_confidences = normalized_confidences[:, camera]
-                #print(joint_coordinates.shape, joint_confidences.shape)
-
-                # Calculate the weighted mean for the current joint
-                for i in range(3):
-                    weighted_means[:, :, i] += joint_coordinates.view(-1, 16, 3)[:, :, i] * joint_confidences[:, :]
-                #weighted_mean = torch.sum(joint_coordinates.reshape(-1, 16, 3) * joint_confidences, dim=1)
-                #print(joint_coordinates * joint_confidences)
-                #print(weighted_means)
-                # Store the weighted mean in the result tensor
-
-
-        #print(weighted_means)
-        #x_pose = weighted_means.reshape(-1, 48) + self.pose_morph(xp)
 
         return self.pose_morph(xp)
-        return x_pose
 
 
 class ResBlock(nn.Module):

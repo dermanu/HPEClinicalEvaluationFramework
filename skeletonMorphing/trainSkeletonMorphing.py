@@ -31,7 +31,6 @@ from torch.utils.data import DataLoader, SubsetRandomSampler
 class EveryNthSampler(torch.utils.data.Sampler):
     def __init__(self, data_source, n):
         self.data_source = data_source
-        print("HERHEHRHEHREHERHEHRHREHRE",data_source)
         self.n = n
 
     def __iter__(self):
@@ -65,6 +64,7 @@ class Normalize():
             self.dict[key] = (c_mins, c_maxs)
         else:
             self.dict[key] = (mins, maxs)
+
     def add_key_from_vector(self, vector, key):
         """
         Add a key to the dictionary (training data) using a vector
@@ -171,10 +171,6 @@ class NetworkTrainer:
                 par = batch['par']
                 conf_inf = batch['confidences_inf'].cuda()
 
-               # print(par)
-                for i, p in enumerate(par):
-                    pose_inf_batch[i] = NetworkTrainer.align(pose_inf_batch[i], pose_gt_batch[i])
-
                 # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
                 inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
                 output_poses = pose_gt_batch.view(-1,
@@ -226,58 +222,10 @@ class NetworkTrainer:
                 #print((pred_poses[0].shape, pose_gt_batch[0].shape, pose_inf_batch[0].shape, par[0], conf_inf[0].shape))
                 pose.append((pred_poses[0], pose_gt_batch[0], pose_inf_batch[0], par[0], conf_inf[0]))
 
-            #joints = np.array(joints)
-            #print("Joints", np.mean(joints, axis=1))
-            #print("Joints MAE", np.mean(np.mean(joints, axis=0)))
-            
 
         return losses, pose[idx][0], pose[idx][1], pose[idx][2], pose[idx][3], pose[idx][4]
         #return losses, pred_poses, pose_gt_batch, pose_inf_batch, par, np.mean(np.mean(joints, axis=0)), conf_inf
     
-    @staticmethod
-    def procrustes(X, Y, scaling=False):
-        muX = torch.mean(X, dim=0)
-        muY = torch.mean(Y, dim=0)
-
-        X0 = X - muX
-        Y0 = Y - muY
-
-        ssX = torch.sum(X0**2, dim=0)
-        ssY = torch.sum(Y0**2, dim=0)
-
-        normX = torch.sqrt(torch.sum(ssX))
-        normY = torch.sqrt(torch.sum(ssY))
-
-        A = torch.matmul(X0.t(), Y0)
-        U, s, Vt = torch.linalg.svd(A)
-        V = Vt.t()
-        T = torch.matmul(V, U.t())
-
-        traceTA = torch.sum(s)
-
-        if scaling:
-            b = traceTA * normX / normY
-        else:
-            b = 1
-
-        d = 1 - traceTA**2
-
-        Z = b * torch.matmul(Y0, T) + muX
-        return d, Z
-
-    @staticmethod
-    def align(pose_inf, pose_gt):
-        # Updated error handling
-        try:
-            aligned_data = []
-            for x in range(pose_inf.shape[0]):
-                _, Z = NetworkTrainer.procrustes(pose_inf[x], pose_gt, scaling=False)  # data[0] is the VizLab data
-                aligned_data.append(Z)
-            return torch.stack(aligned_data)
-        except Exception as e:
-            print(f"Error in normalize_and_align: {e}")
-            raise e
-            return data  # Fallback to original data
 
     @staticmethod
     def train(model, train_loader, optimizer, criterion, scaler):
@@ -300,12 +248,7 @@ class NetworkTrainer:
             pose_inf_batch = batch['pose_inf'].clone()
             par = batch['par']
             conf_inf = batch['confidences_inf'].cuda()
-            for i, p in enumerate(par):
-                #print(pose_inf_batch.shape)
-                pose_inf_batch[i] = NetworkTrainer.align(pose_inf_batch[i], pose_gt_batch[i])
-                #print(pose_inf_batch.shape)
 
-            # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
             inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
             output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
@@ -333,10 +276,10 @@ class NetworkTrainer:
         return losses
 
     @staticmethod
-    def log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, conf_inf):
+    def log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, fold_id = -1):
         wandb.log({"train_loss": np.mean(train_loss), "validation_loss": np.mean(losses),
                    "validation_std" : np.std(losses), "rmse_loss" : np.sqrt(np.mean(losses)),
-                   "epoch": epoch + 1})
+                   "epoch": epoch + 1, "fold_id": fold_id})
 
 
         prediction = pred_poses.view(pose_gt_batch.size(0), pose_gt_batch.size(1)).cpu().detach().numpy()
@@ -346,29 +289,7 @@ class NetworkTrainer:
         print(pred_poses.shape)
         print(hpe_truth.shape)
         print(ground_truth.shape)
-        """
-        dist = conf_inf
-
-        normalized_confidences = torch.nn.functional.softmax(dist).cpu().detach()
-
-        weighted_means = torch.zeros(16, 3)  # Initialize tensor to store the results
-        print(normalized_confidences.shape)
-        for camera in range(6):
-            # Extract the coordinates and normalized confidences for the current joint from all cameras
-            print(hpe_truth.shape)
-            print(normalized_confidences.shape)
-            joint_coordinates = hpe_truth[camera, :]
-            joint_confidences = normalized_confidences[camera]
-            # print(joint_coordinates.shape, joint_confidences.shape)
-
-            # Calculate the weighted mean for the current joint
-            for i in range(3):
-                weighted_means[:, i] += joint_coordinates.view(16, 3)[:, i] * joint_confidences[:]
-
-            print(weighted_means)
-
-        hpe_truth = weighted_means.numpy()
-        """
+        
         plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
         plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch)
         plot_3d_keypoints(-hpe_truth, 'mediapipe', 'hpe_truth', epoch)
@@ -378,7 +299,7 @@ class NetworkTrainer:
 
     @staticmethod
     def train_model(model, train_loader, validation_loader, optimizer, criterion, epochs=10, pars=np.arange(10, 27),
-                    config=None, scaler=None, debug = False):
+                    config=None, scaler=None, debug = False, fold_id = -1):
         """
         Method to train model
         :param validation_loader:
@@ -390,23 +311,22 @@ class NetworkTrainer:
         :param pars:
         :return:
         """
-        scaler_train, scaler_test = scaler
         last_loss_mean = 100000
         # Training loop
         for epoch in range(epochs):
             # time.sleep(15) #??
-            train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler_train)
+            train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler)
             losses, pred_poses, pose_gt_batch, pose_inf_batch, par,  conf_inf = NetworkTrainer.validation(model, validation_loader,
-                                                                                          criterion, scaler_test, epoch, debug=debug)
+                                                                                          criterion, scaler, epoch, debug=debug)
             print('Finished epoch', epoch, 'of', epochs, 'with loss MSE:', np.mean(losses), ", ", np.std(losses))
             #print(losses)
 
             for i, p in enumerate([par]):
-                pose_gt_batch = scaler_test.descale(pose_gt_batch, f"pose_gt_{p}")
-                pose_inf_batch = scaler_test.descale(pose_inf_batch, f"pose_gt_{p}")
+                pose_gt_batch = scaler.descale(pose_gt_batch, f"pose_gt_{p}")
+                pose_inf_batch = scaler.descale(pose_inf_batch, f"pose_gt_{p}")
 
 
-            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, conf_inf)
+            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, fold_id=fold_id)
 
             # Saving the model after each epoch
 
@@ -414,7 +334,8 @@ class NetworkTrainer:
                 last_loss_mean = np.mean(losses)
                 i = list_to_file_name(pars)
                 torch.save(model.state_dict(),
-                           f'models/trained/model_skeleton_morph_{config.model_type}_par_{i}_mediapipe_mpjpe.pth')
+                           f'models/trained/model_skeleton_morph_mediapipe_id_{fold_id}_mediapipe_mpjpe.pth')
+
 
     @staticmethod
     def test_model(model, test_loader, criterion):
@@ -446,6 +367,48 @@ class NetworkTrainer:
 
         print(f"Test Loss", np.sqrt(np.mean(mean_test_loss)))
 
+def load_dataset_par(data_folder: str, par: int, scaler):
+    """
+    Method to load training and test data for a participant
+    :param data_folder:
+    :param par:
+    :return:
+    """
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{par}_mediapipe_dataset.pth',
+                             map_location=torch.device(device))
+    train_dataset, test_dataset = par_dataset.get_train_test()
+
+    for d in train_dataset.datasets:
+        if filter:
+            d.filter_data()
+
+        scaler.add_key_from_vector(d.csv_data, f"pose_gt_{par}")
+            #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
+
+        print(test_dataset)
+        for d in test_dataset.datasets:
+            if filter:
+                d.filter_data()
+            scaler.add_key_from_vector(d.csv_data, f"pose_gt_{par}")
+            #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
+
+        # scaler_test = scaler_train
+        for _, d in enumerate(train_dataset.datasets):
+            if d.csv_data.size == 0:
+                continue
+
+            train_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
+            train_dataset.datasets[_].par = par
+
+        for _, d in enumerate(test_dataset.datasets):
+            if d.csv_data.size == 0:
+                continue
+            test_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
+            test_dataset.datasets[_].par = par
+         
+    return train_dataset, test_dataset
 
 def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     """
@@ -455,141 +418,91 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     :return:
     """
 
-    scaler_train = Normalize()
-    #scaler_test = Normalize()
-    scaler_test = scaler_train
+    scaler = Normalize()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    train_dict = {}
+    test_dict = {}
     train_dataset = None
     test_dataset = None
     filter = False
     for i in pars:
         if i == 13:
             continue
+
+        train, test = load_dataset_par(data_folder, i, scaler)
         print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
+        train_dict[i] = train 
+        test_dict[i] = test
 
-        par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
-                                 map_location=torch.device(device))
-
-        if train_dataset is None:
-            train_dataset, test_dataset = par_dataset.get_train_test()
-            print(train_dataset.datasets[0].csv_data.shape)
-            print(train_dataset.datasets[0].pose_inf.shape)
-            for d in train_dataset.datasets:
-                if filter:
-                    d.filter_data()
-                scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-                #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
-
-            print(test_dataset)
-            for d in test_dataset.datasets:
-                if filter:
-                    d.filter_data()
-                scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-                #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
-
-            # scaler_test = scaler_train
-            for _, d in enumerate(train_dataset.datasets):
-                if d.csv_data.size == 0:
-                    continue
-
-                train_dataset.datasets[_].csv_data = scaler_train.scale(d.csv_data,  f"pose_gt_{i}")
-                train_dataset.datasets[_].par = i
-
-            for _, d in enumerate(test_dataset.datasets):
-                if d.csv_data.size == 0:
-                    continue
-                test_dataset.datasets[_].csv_data = scaler_test.scale(d.csv_data,  f"pose_gt_{i}")
-                test_dataset.datasets[_].par = i
-
-
-        else:
-            train, test = par_dataset.get_train_test()
-            for d in train.datasets:
-                if filter:
-                    d.filter_data()
-                scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-                #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
-
-            for d in test.datasets:
-                if filter:
-                    d.filter_data()
-                scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-
-            for _, d in enumerate(train.datasets):
-                if d.csv_data.size == 0:
-                    continue
-
-                train.datasets[_].csv_data = scaler_train.scale(d.csv_data,  f"pose_gt_{i}")
-                train.datasets[_].par = i
-
-            for _, d in enumerate(test.datasets):
-                if d.csv_data.size == 0:
-                    continue
-                test.datasets[_].csv_data = scaler_test.scale(d.csv_data,  f"pose_gt_{i}")
-                test.datasets[_].par = i
-
-            train_dataset = torch.utils.data.ConcatDataset([train_dataset, train])
-            test_dataset = torch.utils.data.ConcatDataset([test_dataset, test])
-
-        print("NORM RESULTS")
-        print(scaler_train.dict[f'pose_gt_{i}'])
-        print(scaler_test.dict[f'pose_gt_{i}'])
-
-
-    print(len(train_dataset))
 
     #scaler.save("standardizer")
-    return train_dataset, test_dataset, scaler_train, scaler_test
+    print("Length of train dict", len(train_dict))
+    print("Length of test dict", len(test_dict))
+    return train_dict, test_dict, scaler 
 
-def load_train_test_2(data_folder: str, pars = np.arange(10, 27)):
-    """
-    Method to load all training and test data from participants [pars]
-    :param data_folder:
-    :param pars:
-    :return:
-    """
-    import random
-    scaler_train = Normalize()
-    scaler_test = scaler_train
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    train_dataset = []
-    test_dataset = []
 
-    random.seed(42)
-
+def concat_dataset(dataset_dict: dict, pars=np.arange(10, 27)):
+    dataset = None
     for i in pars:
         if i == 13:
             continue
 
-        par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth',
-                                 map_location=torch.device(device))
+        if dataset is None:
+            dataset = dataset_dict[i]
+        else:
+            dataset = torch.utils.data.ConcatDataset([dataset, dataset_dict[i]])
 
-        indexes = list(range(len(par_dataset)))
-        random.shuffle(indexes)
-        train_frames = indexes[:int(0.8 * len(indexes))]
-        test_frames = indexes[int(0.8 * len(indexes)):]
-        par_dataset.train_frames = train_frames
-        par_dataset.test_frames = test_frames
+    return dataset
 
-        train_data, test_data = par_dataset.get_train_test()
+def train_single_fold(config, datasets: tuple, scaler, missing_par: int,debug=False):
 
-        for d in train_data.datasets:
-            scaler_train.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
-        for d in test_data.datasets:
-            scaler_test.add_key_from_vector(d.csv_data, f"pose_gt_{i}")
+    train, test = datasets
+    scaler = scaler
+    sampler = EveryNthSampler(train, config.n_samples)
+    shuffled_sampler = SubsetRandomSampler(list(sampler))
+    sampler_test = EveryNthSampler(test, config.n_samples)
+    shuffled_sampler_test = SubsetRandomSampler(list(sampler_test))
 
-        for d in train_data.datasets:
-            d.csv_data = scaler_train.scale(d.csv_data, f"pose_gt_{i}")
-            d.par = i
-        for d in test_data.datasets:
-            d.csv_data = scaler_test.scale(d.csv_data, f"pose_gt_{i}")
-            d.par = i
+    wandb.log({"train_size": len(sampler), "test_size": len(sampler_test), "fold_id": missing_par})
+    train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, num_workers=8, pin_memory=True, sampler=shuffled_sampler)
+    test_loader = data.DataLoader(test, batch_size=32, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
 
-        train_dataset.extend(train_data)
-        test_dataset.extend(test_data)
 
-    return train_dataset, test_dataset, scaler_train, scaler_test
+    print('Data loader created')
+    # Initializing the model (Synthesizer) and moving it to GPU
+    model = modelSkeletonMorphing.Synthesizer().cuda()
+
+    wandb.watch(model, log_freq=100)
+
+    criterion = nn.MSELoss()
+
+    # Parameters for optimization
+    params = list(model.parameters())  # + list(dec.parameters())
+
+    # Setting anomaly detection for autograd
+    optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, 80, 95], gamma=0.1)
+
+    # Setting anomaly detection for autograd
+    torch.autograd.set_detect_anomaly(True)
+
+    # Namespace to store losses during training
+
+    NetworkTrainer.train_model(model=model,
+                               train_loader=train_loader,
+                               validation_loader=test_loader,
+                               optimizer=optimizer,
+                               criterion=criterion,
+                               epochs=config.N_epochs,
+                               pars=config.pars,
+                               config=config,
+                               scaler=scaler,
+                               debug = debug,
+                               fold_id=missing_par)
+
+
+
 
 def train(datapath: str, pars, rand, mode, debug = False):
     # Configuration settings using SimpleNamespace
@@ -655,84 +568,22 @@ def train(datapath: str, pars, rand, mode, debug = False):
     # config.pars = np.array([12])
     config.pars = pars
     config.model_type = "mediapipe"
+    config.n_samples = 25
     print("PAR", pars)
+
+    train_dict, test_dict, scaler = load_train_test_all(datapath, pars)
+
+
+    for par in pars:
+        if par == 13:
+            continue
+
+        train = concat_dataset(train_dict, [y for y in pars if y != par])
+        test = concat_dataset(test_dict, [par])
+
+        train_single_fold(config, (train, test), scaler, pars, par, debug=debug)
+
 
     # Folder containing data
     # data_folder = '/home/emanu/Desktop/SegmentedData'
-    data_folder = datapath + '/morph_dataset'
-
-    start_time = time.time()
-    if rand:
-        train, test, scaler_train, scaler_test = load_train_test_2(datapath, config.pars)
-    else:
-        train, test, scaler_train, scaler_test = load_train_test_all(datapath, config.pars)
-
-
-    print('Data loaded in')
-    print("--- %s seconds ---" % (time.time() - start_time))
-
-    if not os.path.exists(data_folder + "/all_par_train.pth"):
-        start_time = time.time()
-        print("Saving Train")
-        torch.save(train, data_folder + "/all_par_train.pth")
-        print('Train saved in')
-        print("--- %s seconds ---" % (time.time() - start_time))
-    if not os.path.exists(data_folder + "/all_par_test.pth"):
-        start_time = time.time()
-        print("Saving Test")
-        torch.save(test, data_folder + "/all_par_test.pth")
-        print('Test saved in')
-        print("--- %s seconds ---" % (time.time() - start_time))
-
-    n = 1  # For picking every 5th sample
-    sampler = EveryNthSampler(train, n)
-    # Create a SubsetRandomSampler to shuffle the indices generated by EveryNthSampler
-    #print("HERE GAIAN", len(sampler))
-    shuffled_sampler = SubsetRandomSampler(list(sampler))
-    #print("HERE GAIAN", len(shuffled_sampler))
-    #n = 25  # For picking every 5th sample
-    sampler_test = EveryNthSampler(test, n)
-    # Create a SubsetRandomSampler to shuffle the indices generated by EveryNthSampler
-    shuffled_sampler_test = SubsetRandomSampler(list(sampler_test))
-    wandb.log({"train_size": len(sampler), "test_size": len(sampler_test)})
-    train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, num_workers=8, pin_memory=True, sampler=shuffled_sampler)
-    print(train_loader)
-    test_loader = data.DataLoader(test, batch_size=1, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
-
-
-    print('Data loader created')
-    # Initializing the model (Synthesizer) and moving it to GPU
-    model = modelSkeletonMorphing.Synthesizer().cuda()
-
-    wandb.watch(model, log_freq=100)
-
-    # Mean Squared Error Loss
-    # mse_loss = nn.MSELoss()
-    criterion = MPJPELoss()
-    criterion = RMSELoss()
-    criterion = nn.MSELoss()
-
-    # Parameters for optimization
-    params = list(model.parameters())  # + list(dec.parameters())
-
-    # Setting anomaly detection for autograd
-    optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, 80, 95], gamma=0.1)
-
-    # Setting anomaly detection for autograd
-    torch.autograd.set_detect_anomaly(True)
-
-    # Namespace to store losses during training
-
-    NetworkTrainer.train_model(model=model,
-                               train_loader=train_loader,
-                               validation_loader=test_loader,
-                               optimizer=optimizer,
-                               criterion=criterion,
-                               epochs=config.N_epochs,
-                               pars=config.pars,
-                               config=config,
-                               scaler=(scaler_train, scaler_test),
-                               debug = debug)
-
     print('done')
