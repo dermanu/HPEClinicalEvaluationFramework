@@ -21,7 +21,7 @@ if __name__ == '__main__':
 
     rnd = args.random
     pars = np.array([args.par])
-    pars = np.array([12,15 ,16])
+    pars = np.array([12, 15 ,16])
     debug = args.debug
     wandb = args.wandb
     train(datapath, pars, rnd, wandb, debug)

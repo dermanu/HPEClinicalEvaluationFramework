@@ -170,24 +170,24 @@ class SingleCSVFileDataset(Dataset):
         return csv_data
 
     def procrustes(self, X, Y, scaling=False):
-        muX = torch.mean(X, dim=0)
-        muY = torch.mean(Y, dim=0)
+        muX = np.mean(X, axis=0)
+        muY = np.mean(Y, axis=0)
 
         X0 = X - muX
         Y0 = Y - muY
 
-        ssX = torch.sum(X0**2, dim=0)
-        ssY = torch.sum(Y0**2, dim=0)
+        ssX = np.sum(X0**2, axis=0)
+        ssY = np.sum(Y0**2, axis=0)
 
-        normX = torch.sqrt(torch.sum(ssX))
-        normY = torch.sqrt(torch.sum(ssY))
+        normX = np.sqrt(np.sum(ssX))
+        normY = np.sqrt(np.sum(ssY))
 
-        A = torch.matmul(X0.t(), Y0)
-        U, s, Vt = torch.linalg.svd(A)
-        V = Vt.t()
-        T = torch.matmul(V, U.t())
+        A = np.matmul(X0.T, Y0)
+        U, s, Vt = np.linalg.svd(A)
+        V = Vt.T
+        T = np.matmul(V, U.T)
 
-        traceTA = torch.sum(s)
+        traceTA = np.sum(s)
 
         if scaling:
             b = traceTA * normX / normY
@@ -196,9 +196,8 @@ class SingleCSVFileDataset(Dataset):
 
         d = 1 - traceTA**2
 
-        Z = b * torch.matmul(Y0, T) + muX
+        Z = b * np.matmul(Y0, T) + muX
         return d, Z
-
 
     def align(self, pose_inf, pose_gt):
         # Updated error handling
@@ -207,7 +206,7 @@ class SingleCSVFileDataset(Dataset):
             for x in range(pose_inf.shape[0]):
                 _, Z = self.procrustes(pose_inf[x], pose_gt, scaling=False)  # data[0] is the VizLab data
                 aligned_data.append(Z)
-            return torch.stack(aligned_data)
+            return np.stack(aligned_data)
         except Exception as e:
             print(f"Error in normalize_and_align: {e}")
             raise e
@@ -223,12 +222,16 @@ class SingleCSVFileDataset(Dataset):
         dataset = SingleCSVFileDataset(self.csv_file_path, self.model_type, init=False)
         csv_data, pose_inf, confidences_inf = self.get_training_data() if train else self.get_test_data()
         # Align data according to procrustes
-        for i in range(len(pose_inf)):
-            pose_inf[i] = self.align(pose_inf[i], csv_data[i])
+        #print(i, pose_inf.shape, csv_data.shape)
+        #
         dataset.csv_data = csv_data
         dataset.pose_inf = pose_inf
         dataset.confidences_inf = confidences_inf
         return dataset
+
+    def align_procrustes(self):
+        for i in range(self.pose_inf.shape[0]):
+            self.pose_inf[i] = self.align(self.pose_inf[i], self.csv_data[i])
 
     def get_training_data(self):
         return self.csv_data[self.train_frames], self.pose_inf[self.train_frames], self.confidences_inf[self.train_frames]

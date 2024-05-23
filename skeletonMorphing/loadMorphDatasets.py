@@ -58,6 +58,7 @@ def run_load(datapath: str):
 
     # Read the dataset for the current participant
     for p in par:
+
         p = [p]
         my_dataset = rdm.ReadDatasetFiles(data_folder, p, mov, cam, model_type)
 
@@ -67,4 +68,6 @@ def run_load(datapath: str):
         #file_name = f"{datapath}/morph_dataset/par_{list_to_file_name(p)}_{model_type}_cam_{list_to_file_name(cam)}_onehot_dataset.pth"
         file_name = f"{datapath}/morph_dataset/par_{list_to_file_name(p)}_{model_type}_dataset.pth"
         torch.save(my_dataset, file_name)
+
+
 

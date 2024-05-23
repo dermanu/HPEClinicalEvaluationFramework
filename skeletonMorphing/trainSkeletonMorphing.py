@@ -177,7 +177,7 @@ class NetworkTrainer:
                                                   pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
                 # Forward pass through the model
-                pred_poses = model(inp_poses, conf_inf)
+                pred_poses = model(inp_poses)
 
 
                 for i, p in enumerate(par):
@@ -186,8 +186,9 @@ class NetworkTrainer:
                     a = pred_poses.reshape(-1, 16, 3)
                     b = output_poses.reshape(-1, 16, 3)
                     joints = torch.abs(a - b)
+
                     if debug:
-                        print("DEBUG")
+                        #print("DEBUG")
                         wandb.log({f"loss_{p}": criterion(pred_poses[i], output_poses[i]).item(), "epoch": epoch + 1})
                         column_mapping = {
                             'RShoulder': 'RSJC', # 12 - 0
@@ -219,7 +220,7 @@ class NetworkTrainer:
                 # Log the loss of each batch
                 wandb.log({"batch_loss": loss.item(), "batch": step + 1})
                 losses.append(loss.detach().cpu().numpy().item())
-                #print((pred_poses[0].shape, pose_gt_batch[0].shape, pose_inf_batch[0].shape, par[0], conf_inf[0].shape))
+
                 pose.append((pred_poses[0], pose_gt_batch[0], pose_inf_batch[0], par[0], conf_inf[0]))
 
 
@@ -247,14 +248,14 @@ class NetworkTrainer:
             pose_gt_batch = batch['pose_gt'].clone()
             pose_inf_batch = batch['pose_inf'].clone()
             par = batch['par']
-            conf_inf = batch['confidences_inf'].cuda()
+            #conf_inf = batch['confidences_inf'].cuda()
 
             inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
             output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
 
             # Forward pass through the model
-            pred_poses = model(inp_poses,conf_inf)
+            pred_poses = model(inp_poses)
             #print(pred_poses)
 
             for i, p in enumerate(par):
@@ -379,34 +380,37 @@ def load_dataset_par(data_folder: str, par: int, scaler):
     par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{par}_mediapipe_dataset.pth',
                              map_location=torch.device(device))
     train_dataset, test_dataset = par_dataset.get_train_test()
+    filter = False
 
     for d in train_dataset.datasets:
         if filter:
             d.filter_data()
 
         scaler.add_key_from_vector(d.csv_data, f"pose_gt_{par}")
-            #scaler_train.add_key_from_vector(i.pose_inf, "pose_inf")
 
-        print(test_dataset)
-        for d in test_dataset.datasets:
-            if filter:
-                d.filter_data()
-            scaler.add_key_from_vector(d.csv_data, f"pose_gt_{par}")
-            #scaler_test.add_key_from_vector(i.pose_inf, "pose_inf")
 
-        # scaler_test = scaler_train
-        for _, d in enumerate(train_dataset.datasets):
-            if d.csv_data.size == 0:
-                continue
 
-            train_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
-            train_dataset.datasets[_].par = par
+    for d in test_dataset.datasets:
+        if filter:
+            d.filter_data()
+        scaler.add_key_from_vector(d.csv_data, f"pose_gt_{par}")
 
-        for _, d in enumerate(test_dataset.datasets):
-            if d.csv_data.size == 0:
-                continue
-            test_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
-            test_dataset.datasets[_].par = par
+
+    # scaler_test = scaler_train
+    for _, d in enumerate(train_dataset.datasets):
+        if d.csv_data.size == 0:
+            continue
+
+        train_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
+        train_dataset.datasets[_].par = par
+        d.align_procrustes()
+
+    for _, d in enumerate(test_dataset.datasets):
+        if d.csv_data.size == 0:
+            continue
+        test_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
+        test_dataset.datasets[_].par = par
+        d.align_procrustes()
          
     return train_dataset, test_dataset
 
@@ -422,15 +426,13 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_dict = {}
     test_dict = {}
-    train_dataset = None
-    test_dataset = None
     filter = False
     for i in pars:
         if i == 13:
             continue
 
         train, test = load_dataset_par(data_folder, i, scaler)
-        print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
+        #print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
         train_dict[i] = train 
         test_dict[i] = test
@@ -455,7 +457,16 @@ def concat_dataset(dataset_dict: dict, pars=np.arange(10, 27)):
 
     return dataset
 
-def train_single_fold(config, datasets: tuple, scaler, missing_par: int,debug=False):
+def train_single_fold(config, datasets: tuple, scaler, missing_par: int, debug=False):
+    """
+    Note!!! Currently only using training data both for train and test since we moved to k-fold
+    :param config:
+    :param datasets:
+    :param scaler:
+    :param missing_par:
+    :param debug:
+    :return:
+    """
 
     train, test = datasets
     scaler = scaler
@@ -558,11 +569,10 @@ def train(datapath: str, pars, rand, mode, debug = False):
     # WandB – Initialize a new run
     wandb.init(project="skeleton-morphing--moved", config=init_config, mode=mode)
     # config = wandb.config['parameters']
-
     config = SimpleNamespace()
     config.learning_rate = 0.0001
     config.BATCH_SIZE = 32
-    config.N_epochs = 100
+    config.N_epochs = 20
     config.log_interval = 100
     config.weight_decay = 1e-5
     # config.pars = np.array([12])
@@ -570,18 +580,19 @@ def train(datapath: str, pars, rand, mode, debug = False):
     config.model_type = "mediapipe"
     config.n_samples = 25
     print("PAR", pars)
-
+    print("Estimating ", len(pars), "folds")
     train_dict, test_dict, scaler = load_train_test_all(datapath, pars)
 
 
     for par in pars:
+        print("Fold with missing par: ", par)
         if par == 13:
             continue
 
         train = concat_dataset(train_dict, [y for y in pars if y != par])
         test = concat_dataset(test_dict, [par])
 
-        train_single_fold(config, (train, test), scaler, pars, par, debug=debug)
+        train_single_fold(config, (train, test), scaler, par, debug)
 
 
     # Folder containing data
