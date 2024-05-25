@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 import models.mediapipeMono as MediaPipe
 #import models.openposeMono as OpenPose
 import multiprocessing
+import traceback
 
 
 class ReadDatasetFiles(Dataset):
@@ -73,20 +74,29 @@ class ReadDatasetFiles(Dataset):
         return csv_file_paths
 
     def create_datasets(self):
-        #datasets = []
-        #i = 0
-
-        # Use multiprocessing to parallelize dataset creation
         with multiprocessing.Pool(processes=10) as pool:
-            datasets = pool.map(self.create_single_dataset, self.csv_file_paths)
+            # Use a partial function to pass additional arguments to the worker function
+            results = pool.map(self.create_single_dataset_safe, self.csv_file_paths)
 
-        
+        # Filter out any None results which indicate a failed dataset creation
+        datasets = [result for result in results if result is not None]
+
         print('All datasets are created')
         return datasets
 
+
+    def create_single_dataset_safe(self, csv_file_path):
+        try:
+            return self.create_single_dataset(csv_file_path)
+        except Exception as e:
+            i = self.csv_file_paths.index(csv_file_path) + 1
+            print(f"Error creating dataset {i} of {len(self.csv_file_paths)}: {e}")
+            traceback.print_exc()
+            return None
+
     def create_single_dataset(self, csv_file_path):
         i = self.csv_file_paths.index(csv_file_path) + 1
-        print('Getting dataset nr ' + str(i) + ' of ' + str(len(self.csv_file_paths)) + '...', flush=True)
+        print(f'Getting dataset nr {i} of {len(self.csv_file_paths)}...', flush=True)
         dataset = SingleCSVFileDataset(csv_file_path, self.model_type)
         return dataset
 
@@ -429,8 +439,12 @@ class SingleCSVFileDataset(Dataset):
                 raise ValueError(f"Invalid model_name: {self.model_type}")
             print('Finished loading video data' + avi_file_path + '...')
             print(pose_keypoints.shape)
+
             data_key.append(pose_keypoints)
             data_conf.append(confidences)
+
+        for i in data_key:
+            print(i.shape)
 
         pose_keypoints = np.array(data_key)
         confidences = np.array(data_conf)

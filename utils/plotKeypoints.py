@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 import wandb
 import numpy as np
-def plot_3d_keypoints(keypoints, model_name, wandb_name, epoch):
+def plot_3d_keypoints(keypoints, model_name, wandb_name, epoch, fold_id):
 
     if wandb_name == 'morphed':
         color = "red"
@@ -60,9 +60,9 @@ def plot_3d_keypoints(keypoints, model_name, wandb_name, epoch):
         )
     )
 
-    wandb.log({name: fig, "epoch": epoch+1})
+    wandb.log({name: fig, "epoch": epoch+1, "fold_id" : fold_id})
 
-def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_hpe_truth, model_name, epoch):
+def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_hpe_truth, model_name, epoch, fold_id):
     colors = ['red', 'green', 'blue']
     names = ['Morphed KeyPoints', 'Ground Truth KeyPoints', 'HPE Truth KeyPoints']
     # Define connections between related keypoints
@@ -110,7 +110,7 @@ def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_h
     )
 
     # Log the 3D scatter plot using WandB
-    wandb.log({"3D Keypoints Comparison": fig, "epoch": epoch+1})
+    wandb.log({"3D Keypoints Comparison": fig, "epoch": epoch+1, "fold_id" : fold_id})
 
 
 def plot_3d_keypoints_gt_pred(keypoints_gt, keypoints_pred, model_name):

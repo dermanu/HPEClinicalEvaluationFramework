@@ -16,6 +16,7 @@ def all_participants(data_folder):
                 par_num.append(int(dir[3:]))
 
     par = sorted(par)
+    par_num = sorted(par_num)
     return par, par_num
 
 def list_to_file_name(lst):
@@ -48,17 +49,20 @@ def run_load(datapath: str):
     #cam = [0]
 
     # Assuming you have a list of movements
-    mov = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-    #mov = [1]
+    mov = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    #mov = [5]
 
     # Assuming you have a list of participant folders
     #par = [14]
     par_full, par = all_participants(data_folder)
+    print(par)
     #par = [12, 14, 15, 16]
 
     # Read the dataset for the current participant
     for p in par:
-
+        if p == 12 or p == 14 or p == 15:
+            print("Skipping", p)
+            continue
         p = [p]
         my_dataset = rdm.ReadDatasetFiles(data_folder, p, mov, cam, model_type)
 

@@ -148,7 +148,7 @@ class MPJPELoss(nn.Module):
 class NetworkTrainer:
 
     @staticmethod
-    def validation(model, validation_loader, criterion, scaler, epoch = 0, debug = False):
+    def validation(model, validation_loader, criterion, scaler, epoch = 0, debug = False, fold_id = -1):
         """
         Validation of the model
         :param criterion:
@@ -186,10 +186,11 @@ class NetworkTrainer:
                     a = pred_poses.reshape(-1, 16, 3)
                     b = output_poses.reshape(-1, 16, 3)
                     joints = torch.abs(a - b)
-
+                    wandb.log({f"loss_{p}": criterion(pred_poses[i], output_poses[i]).item(), "epoch": epoch + 1,
+                               "fold_id": fold_id})
                     if debug:
                         #print("DEBUG")
-                        wandb.log({f"loss_{p}": criterion(pred_poses[i], output_poses[i]).item(), "epoch": epoch + 1})
+
                         column_mapping = {
                             'RShoulder': 'RSJC', # 12 - 0
                             'LShoulder': 'LSJC', # 11 - 1
@@ -210,7 +211,7 @@ class NetworkTrainer:
                         }
                         joint = joints[i].detach().cpu().numpy()
                         for y, k in enumerate(column_mapping.keys()):
-                            wandb.log({f"{column_mapping[k]}_{p}": np.mean(joint[y]), "epoch": epoch + 1})
+                            wandb.log({f"{column_mapping[k]}_{p}": np.mean(joint[y]), "epoch": epoch + 1, "fold_id" : fold_id})
 
                 # Calculating MSE loss
                 loss = criterion(pred_poses, output_poses)
@@ -218,7 +219,7 @@ class NetworkTrainer:
                     idx = step
 
                 # Log the loss of each batch
-                wandb.log({"batch_loss": loss.item(), "batch": step + 1})
+                wandb.log({"batch_loss": loss.item(), "batch": step + 1, "fold_id" : fold_id})
                 losses.append(loss.detach().cpu().numpy().item())
 
                 pose.append((pred_poses[0], pose_gt_batch[0], pose_inf_batch[0], par[0], conf_inf[0]))
@@ -291,11 +292,11 @@ class NetworkTrainer:
         print(hpe_truth.shape)
         print(ground_truth.shape)
         
-        plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
-        plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch)
-        plot_3d_keypoints(-hpe_truth, 'mediapipe', 'hpe_truth', epoch)
+        plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch, fold_id)
+        plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch, fold_id)
+        plot_3d_keypoints(-hpe_truth, 'mediapipe', 'hpe_truth', epoch, fold_id)
 
-        plot_3d_keypoints_all(prediction, ground_truth, -hpe_truth, 'mediapipe', epoch)
+        plot_3d_keypoints_all(prediction, ground_truth, -hpe_truth, 'mediapipe', epoch, fold_id)
 
 
     @staticmethod
@@ -318,7 +319,7 @@ class NetworkTrainer:
             # time.sleep(15) #??
             train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion, scaler)
             losses, pred_poses, pose_gt_batch, pose_inf_batch, par,  conf_inf = NetworkTrainer.validation(model, validation_loader,
-                                                                                          criterion, scaler, epoch, debug=debug)
+                                                                                          criterion, scaler, epoch, debug=debug, fold_id = fold_id)
             print('Finished epoch', epoch, 'of', epochs, 'with loss MSE:', np.mean(losses), ", ", np.std(losses))
             #print(losses)
 
@@ -368,7 +369,7 @@ class NetworkTrainer:
 
         print(f"Test Loss", np.sqrt(np.mean(mean_test_loss)))
 
-def load_dataset_par(data_folder: str, par: int, scaler):
+def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
     """
     Method to load training and test data for a participant
     :param data_folder:
@@ -411,7 +412,11 @@ def load_dataset_par(data_folder: str, par: int, scaler):
         test_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
         test_dataset.datasets[_].par = par
         d.align_procrustes()
-         
+
+
+    if concat:
+        return torch.utils.data.ConcatDataset([train_dataset, test_dataset]), None
+
     return train_dataset, test_dataset
 
 def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
@@ -427,15 +432,17 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     train_dict = {}
     test_dict = {}
     filter = False
+    concat = True
     for i in pars:
         if i == 13:
             continue
 
-        train, test = load_dataset_par(data_folder, i, scaler)
+        train, test = load_dataset_par(data_folder, i, scaler, concat=concat)
         #print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
-        train_dict[i] = train 
-        test_dict[i] = test
+        train_dict[i] = train
+        if not concat:
+            test_dict[i] = test
 
 
     #scaler.save("standardizer")
@@ -467,6 +474,7 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par: int, debug=F
     :param debug:
     :return:
     """
+    wandb.init(project="skeleton-morphing--moved", name=f'fold_{missing_par}', config=config, mode="online")
 
     train, test = datasets
     scaler = scaler
@@ -511,6 +519,8 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par: int, debug=F
                                scaler=scaler,
                                debug = debug,
                                fold_id=missing_par)
+
+    wandb.finish()
 
 
 
@@ -567,12 +577,12 @@ def train(datapath: str, pars, rand, mode, debug = False):
     }
 
     # WandB – Initialize a new run
-    wandb.init(project="skeleton-morphing--moved", config=init_config, mode=mode)
+    #wandb.init(project="skeleton-morphing--moved", config=init_config, mode=mode)
     # config = wandb.config['parameters']
     config = SimpleNamespace()
     config.learning_rate = 0.0001
     config.BATCH_SIZE = 32
-    config.N_epochs = 20
+    config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
     # config.pars = np.array([12])
@@ -590,7 +600,7 @@ def train(datapath: str, pars, rand, mode, debug = False):
             continue
 
         train = concat_dataset(train_dict, [y for y in pars if y != par])
-        test = concat_dataset(test_dict, [par])
+        test = concat_dataset(train_dict, [par])
 
         train_single_fold(config, (train, test), scaler, par, debug)
 
