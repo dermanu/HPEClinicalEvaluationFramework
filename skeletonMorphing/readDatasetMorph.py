@@ -180,6 +180,10 @@ class SingleCSVFileDataset(Dataset):
         return csv_data
 
     def procrustes(self, X, Y, scaling=False):
+        """
+        A port of MATLAB's `procrustes` function to Numpy.
+        (According to Copilot's auto commenting)
+        """
         muX = np.mean(X, axis=0)
         muY = np.mean(Y, axis=0)
 
@@ -210,10 +214,15 @@ class SingleCSVFileDataset(Dataset):
         return d, Z
 
     def align(self, pose_inf, pose_gt):
-        # Updated error handling
+        """
+        Method proposed by the Code Guru (amen) to align the data using Procrustes
+        """
         try:
             aligned_data = []
             for x in range(pose_inf.shape[0]):
+                # Loops each camera in the batch (6 total)
+                # Aligns the data using Procrustes
+                # We do not scale, since we already scaled and this information is stored in the Normalize class
                 _, Z = self.procrustes(pose_inf[x], pose_gt, scaling=False)  # data[0] is the VizLab data
                 aligned_data.append(Z)
             return np.stack(aligned_data)
@@ -233,13 +242,13 @@ class SingleCSVFileDataset(Dataset):
         csv_data, pose_inf, confidences_inf = self.get_training_data() if train else self.get_test_data()
         # Align data according to procrustes
         #print(i, pose_inf.shape, csv_data.shape)
-        #
         dataset.csv_data = csv_data
         dataset.pose_inf = pose_inf
         dataset.confidences_inf = confidences_inf
         return dataset
 
     def align_procrustes(self):
+        # Align data according to procrustes
         for i in range(self.pose_inf.shape[0]):
             self.pose_inf[i] = self.align(self.pose_inf[i], self.csv_data[i])
 

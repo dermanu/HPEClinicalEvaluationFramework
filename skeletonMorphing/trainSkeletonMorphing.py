@@ -29,6 +29,9 @@ import os
 from torch.utils.data import DataLoader, SubsetRandomSampler
 
 class EveryNthSampler(torch.utils.data.Sampler):
+    """
+    Custom sampler to sample every n-th element from the dataset
+    """
     def __init__(self, data_source, n):
         self.data_source = data_source
         self.n = n
@@ -122,6 +125,9 @@ class Normalize():
         return normalize
 
 class RMSELoss(nn.Module):
+    """
+    Root Mean Squared Error Loss Following Pytorch syntax
+    """
     def __init__(self):
         super().__init__()
         self.mse = nn.MSELoss()
@@ -131,6 +137,9 @@ class RMSELoss(nn.Module):
 
 
 class MPJPELoss(nn.Module):
+    """
+    Mean Per Joint Position Error Loss
+    """
 
     def __init__(self):
         super().__init__()
@@ -179,10 +188,14 @@ class NetworkTrainer:
                 # Forward pass through the model
                 pred_poses = model(inp_poses)
 
-
+                # Iterate through each participant to find the correct scaling
+                # O(n) but necessary due to the randomness of the batches
                 for i, p in enumerate(par):
+                    # Descale the predicted and output poses to get an accurate loss in terms of mm
                     pred_poses[i] = scaler.descale(pred_poses[i], f"pose_gt_{p}")
                     output_poses[i] = scaler.descale(output_poses[i], f"pose_gt_{p}")
+
+                    # Used to compute the mean error per joint
                     a = pred_poses.reshape(-1, 16, 3)
                     b = output_poses.reshape(-1, 16, 3)
                     joints = torch.abs(a - b)
@@ -259,6 +272,7 @@ class NetworkTrainer:
             pred_poses = model(inp_poses)
             #print(pred_poses)
 
+            # Iterate through each participant to find the correct scaling and scale the predicted and output poses accordingly
             for i, p in enumerate(par):
                 pred_poses[i] = scaler.descale(pred_poses[i], f"pose_gt_{p}")
                 output_poses[i] = scaler.descale(output_poses[i], f"pose_gt_{p}")
@@ -381,12 +395,20 @@ def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
     par_dataset = torch.load(f'{data_folder}/morph_dataset/par_{par}_mediapipe_dataset.pth',
                              map_location=torch.device(device))
     train_dataset, test_dataset = par_dataset.get_train_test()
+    
+    # Wether to remove "bad" frames or not
     filter = False
+
+    # From previous structure the data is split into train / test where test is the last n movement sequences per movement    
+    # (as discussed on the intial meeting)
 
     for d in train_dataset.datasets:
         if filter:
+            # Filter the data to only include the frames with over 70% confidence
             d.filter_data()
 
+        # Add the key to the scaler, this adds the min and max values of the data to the scaler for normalization
+        # Due to having multiple dataset per participant we need to add the key for each dataset, where only the highest values are stored
         scaler.add_key_from_vector(d.csv_data, f"pose_gt_{par}")
 
 
@@ -394,10 +416,14 @@ def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
     for d in test_dataset.datasets:
         if filter:
             d.filter_data()
+        # Must also account for the test data having the "highest" values and therefore is added to the same scaling as the training data
         scaler.add_key_from_vector(d.csv_data, f"pose_gt_{par}")
 
 
-    # scaler_test = scaler_train
+    # After the highest/lowest value is added to the scaler we can scale the data based on the min/max values
+    # We also add information about the participant to the dataset since this was not stored during creation
+    # We also align the data using procrustes as discussed
+
     for _, d in enumerate(train_dataset.datasets):
         if d.csv_data.size == 0:
             continue
@@ -414,6 +440,7 @@ def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
         d.align_procrustes()
 
 
+    # To fit the new setup, we add an option to concatenate the datasets so we can use all the data per participant either for train or test
     if concat:
         return torch.utils.data.ConcatDataset([train_dataset, test_dataset]), None
 
@@ -431,14 +458,12 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_dict = {}
     test_dict = {}
-    filter = False
     concat = True
     for i in pars:
         if i == 13:
             continue
 
         train, test = load_dataset_par(data_folder, i, scaler, concat=concat)
-        #print(f'{data_folder}/morph_dataset/par_{i}_mediapipe_dataset.pth')
 
         train_dict[i] = train
         if not concat:
@@ -452,6 +477,10 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
 
 
 def concat_dataset(dataset_dict: dict, pars=np.arange(10, 27)):
+    """
+    Method to concatenate datasets with the main idea being to concatenate all the participants data in one dataset
+    Minus the participant that is to be used for testing
+    """
     dataset = None
     for i in pars:
         if i == 13:
@@ -466,7 +495,8 @@ def concat_dataset(dataset_dict: dict, pars=np.arange(10, 27)):
 
 def train_single_fold(config, datasets: tuple, scaler, missing_par: int, debug=False):
     """
-    Note!!! Currently only using training data both for train and test since we moved to k-fold
+    Method to train a single fold where a new wandb initation is done for each fold to keep track of the results
+    This is also better for visualization and tracking of the results in wandb due to limited data per run
     :param config:
     :param datasets:
     :param scaler:
@@ -476,6 +506,7 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par: int, debug=F
     """
     wandb.init(project="skeleton-morphing--moved", name=f'fold_{missing_par}', config=config, mode="online")
 
+    # Splitting the data into train and test
     train, test = datasets
     scaler = scaler
     sampler = EveryNthSampler(train, config.n_samples)
@@ -598,10 +629,13 @@ def train(datapath: str, pars, rand, mode, debug = False):
         print("Fold with missing par: ", par)
         if par == 13:
             continue
-
+        
+        # All pars except the current par in the loop
         train = concat_dataset(train_dict, [y for y in pars if y != par])
+        # The current par in the loop
         test = concat_dataset(train_dict, [par])
 
+        # Train fold
         train_single_fold(config, (train, test), scaler, par, debug)
 
 
