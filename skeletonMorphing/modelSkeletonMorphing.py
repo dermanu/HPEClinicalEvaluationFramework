@@ -12,25 +12,25 @@ class Synthesizer(nn.Module):
         super(Synthesizer, self).__init__()
 
         # Upscaling layer to transform input of size 48 to 2304
-        self.upscale = nn.Linear(3*16*6, 2048)
+        self.upscale = nn.Linear(3*16*6, 1024)
 
         # Residual blocks for common features
         self.res_common = ResBlock()
 
         # Residual blocks for pose processing
         self.res_pose1 = ResBlock()
-        self.bn1 = nn.BatchNorm1d(2048)
+        #self.bn1 = nn.BatchNorm1d(2048)
         self.res_pose2 = ResBlock()
-        self.bn2 = nn.BatchNorm1d(2048)
+        #self.bn2 = nn.BatchNorm1d(2048)
         self.res_pose3 = ResBlock()
-        self.bn3 = nn.BatchNorm1d(2048)
+        #self.bn3 = nn.BatchNorm1d(2048)
         self.res_pose4 = ResBlock()
 
         # Linear layer for morphing pose information back to 48 dimensions
-        self.pose_morph = nn.Linear(2048, 3*16)
+        self.pose_morph = nn.Linear(1024, 3*16)
 
         # Dropout layer for regularization
-        self.dropout = nn.Dropout(p=0.00)  # Add dropout layer with probability 0.20
+        self.dropout = nn.Dropout(p=0.10)  # Add dropout layer with probability 0.20
 
     def forward(self, x):
         # Upscaling the input
@@ -51,25 +51,35 @@ class ResBlock(nn.Module):
         super(ResBlock, self).__init__()
 
         # Two linear layers for the residual block
-        self.l1 = nn.Linear(2048, 2048)
-        self.l2 = nn.Linear(2048, 2048)
-        self.l3 = nn.Linear(2048, 2048)
+        self.fc1 = nn.Linear(1024, 2048)
+        self.bn1 = nn.BatchNorm1d(2048)
+        self.fc2 = nn.Linear(2048, 1024)
+        self.bn2 = nn.BatchNorm1d(1024)
+
+        #self.l1 = nn.Linear(2048, 2048)
+        #self.l2 = nn.Linear(2048, 2048)
+        #self.l3 = nn.Linear(2048, 2048)
         # Dropout layer for regularization
-        self.dropout = nn.Dropout(p=0.00)  # Add dropout layer with probability 0.20
+        #self.dropout = nn.Dropout(p=0.00)  # Add dropout layer with probability 0.20
 
     def forward(self, x):
         inp = x
 
         # Leaky ReLU activation for the first linear layer
-        x = self.dropout(nn.LeakyReLU()(self.l1(x)))
+        #x = self.dropout(nn.LeakyReLU()(self.l1(x)))
 
         # Leaky ReLU activation for the second linear layer
-        x = self.dropout(nn.LeakyReLU()(self.l2(x)))
+        #x = self.dropout(nn.LeakyReLU()(self.l2(x)))
 
         # Leaky ReLU activation for the third linear layer
         #x = self.dropout(nn.LeakyReLU()(self.l3(x)))
 
         # Adding the residual connection
-        x += inp
+        #x += inp
+        residual = x
+        out =nn.LeakyReLU(self.bn1(self.fc1(x)))
+        out = self.bn2(self.fc2(out))
+        out += residual
+        out = nn.LeakyReLU(out)
 
-        return x
+        return out

@@ -493,7 +493,7 @@ def concat_dataset(dataset_dict: dict, pars=np.arange(10, 27)):
 
     return dataset
 
-def train_single_fold(config, datasets: tuple, scaler, missing_par: int, debug=False):
+def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False):
     """
     Method to train a single fold where a new wandb initation is done for each fold to keep track of the results
     This is also better for visualization and tracking of the results in wandb due to limited data per run
@@ -612,31 +612,33 @@ def train(datapath: str, pars, rand, mode, debug = False):
     # config = wandb.config['parameters']
     config = SimpleNamespace()
     config.learning_rate = 0.0001
-    config.BATCH_SIZE = 32
+    config.BATCH_SIZE = 64
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
     # config.pars = np.array([12])
     config.pars = pars
     config.model_type = "mediapipe"
-    config.n_samples = 25
+    config.n_samples = 15
     print("PAR", pars)
     print("Estimating ", len(pars), "folds")
     train_dict, test_dict, scaler = load_train_test_all(datapath, pars)
 
 
-    for par in pars:
+    for index in range(1, len(pars), 2):
+        par = [pars[index-1], pars[index]]
+
         print("Fold with missing par: ", par)
         if par == 13:
             continue
         
         # All pars except the current par in the loop
-        train = concat_dataset(train_dict, [y for y in pars if y != par])
+        train = concat_dataset(train_dict, [y for y in pars if y not in par])
         # The current par in the loop
-        test = concat_dataset(train_dict, [par])
+        test = concat_dataset(train_dict, par)
 
         # Train fold
-        train_single_fold(config, (train, test), scaler, par, debug)
+        train_single_fold(config, (train, test), scaler, f"{par[0]}_{par[1]}", debug)
 
 
     # Folder containing data
