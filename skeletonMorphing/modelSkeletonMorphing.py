@@ -14,17 +14,13 @@ class Synthesizer(nn.Module):
         # Upscaling layer to transform input of size 48 to 2304
         self.upscale = nn.Linear(3*16*6, 1024)
 
-        # Residual blocks for common features
-        self.res_common = ResBlock()
 
         # Residual blocks for pose processing
         self.res_pose1 = ResBlock()
         #self.bn1 = nn.BatchNorm1d(2048)
         self.res_pose2 = ResBlock()
         #self.bn2 = nn.BatchNorm1d(2048)
-        self.res_pose3 = ResBlock()
-        #self.bn3 = nn.BatchNorm1d(2048)
-        self.res_pose4 = ResBlock()
+
 
         # Linear layer for morphing pose information back to 48 dimensions
         self.pose_morph = nn.Linear(1024, 3*16)
@@ -35,7 +31,7 @@ class Synthesizer(nn.Module):
     def forward(self, x):
         # Upscaling the input
         #print(x.shape)
-        xu = self.upscale(x)
+        xu = nn.LeakyReLU()(self.upscale(x))
 
         # Pose processing path
         xp = self.dropout(nn.LeakyReLU()(self.res_pose1(xu)))
@@ -77,9 +73,9 @@ class ResBlock(nn.Module):
         # Adding the residual connection
         #x += inp
         residual = x
-        out =nn.LeakyReLU(self.bn1(self.fc1(x)))
-        out = self.bn2(self.fc2(out))
+        out = self.bn1(nn.LeakyReLU()(self.fc1(x)))
+        out = self.bn2(nn.LeakyReLU()(self.fc2(out)))
         out += residual
-        out = nn.LeakyReLU(out)
+        out = nn.LeakyReLU()(out)
 
         return out

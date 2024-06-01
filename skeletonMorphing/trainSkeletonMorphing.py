@@ -504,7 +504,7 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False)
     :param debug:
     :return:
     """
-    wandb.init(project="skeleton-morphing--moved", name=f'fold_{missing_par}', config=config, mode="online")
+    wandb.init(project="skeleton-morphing--moved", config=config, mode="online")
 
     # Splitting the data into train and test
     train, test = datasets
