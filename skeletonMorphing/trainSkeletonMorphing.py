@@ -310,7 +310,7 @@ class NetworkTrainer:
         plot_3d_keypoints(ground_truth, 'mediapipe', 'ground_truth', epoch, fold_id)
         plot_3d_keypoints(-hpe_truth, 'mediapipe', 'hpe_truth', epoch, fold_id)
 
-        plot_3d_keypoints_all(prediction, ground_truth, -hpe_truth, 'mediapipe', epoch, fold_id)
+        plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', epoch, fold_id)
 
 
     @staticmethod
@@ -431,6 +431,8 @@ def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
         train_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
         train_dataset.datasets[_].par = par
         d.align_procrustes()
+        for camera in range(6):
+            scaler.add_key_from_vector(d.pose_inf[:,camera], f"pose_inf_{par}_{camera}")
 
     for _, d in enumerate(test_dataset.datasets):
         if d.csv_data.size == 0:
@@ -438,7 +440,22 @@ def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
         test_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
         test_dataset.datasets[_].par = par
         d.align_procrustes()
+        for camera in range(6):
+            scaler.add_key_from_vector(d.pose_inf[:, camera], f"pose_inf_{par}_{camera}")
 
+    for _, d in enumerate(train_dataset.datasets):
+        if d.csv_data.size == 0:
+            continue
+
+        for camera in range(6):
+            d.pose_inf[:, camera] = scaler.scale(d.pose_inf[:, camera], f"pose_inf_{par}_{camera}")
+
+    for _, d in enumerate(test_dataset.datasets):
+        if d.csv_data.size == 0:
+            continue
+
+        for camera in range(6):
+            d.pose_inf[:, camera] = scaler.scale(d.pose_inf[:, camera], f"pose_inf_{par}_{camera}")
 
     # To fit the new setup, we add an option to concatenate the datasets so we can use all the data per participant either for train or test
     if concat:
@@ -504,7 +521,7 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False)
     :param debug:
     :return:
     """
-    wandb.init(project="skeleton-morphing--moved", config=config, mode="online")
+    wandb.init(project="skeleton-morphing--moved", config=config, notes="Normalize for each camera after procrustes", mode="online")
 
     # Splitting the data into train and test
     train, test = datasets
@@ -576,7 +593,7 @@ def train(datapath: str, pars, rand, mode, debug = False):
         },
         'parameters': {
             'learning_rate': {
-                'value': 0.0001  # Learning rate: 1e-4 0.000
+                'value': 0.00001  # Learning rate: 1e-4 0.000
             },
             'BATCH_SIZE': {
                 'value': 32  # Batch size: 32
@@ -585,7 +602,7 @@ def train(datapath: str, pars, rand, mode, debug = False):
                 'value': 1e-5  # Weight decay: 1e-5
             },
             'epochs': {
-                'value': 100
+                'value': 75
             },
             'datafolder': {
                 'value': datapath
@@ -611,9 +628,9 @@ def train(datapath: str, pars, rand, mode, debug = False):
     #wandb.init(project="skeleton-morphing--moved", config=init_config, mode=mode)
     # config = wandb.config['parameters']
     config = SimpleNamespace()
-    config.learning_rate = 0.0001
-    config.BATCH_SIZE = 64
-    config.N_epochs = 100
+    config.learning_rate = 0.00001
+    config.BATCH_SIZE = 32
+    config.N_epochs = 75
     config.log_interval = 100
     config.weight_decay = 1e-5
     # config.pars = np.array([12])

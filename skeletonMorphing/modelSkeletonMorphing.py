@@ -36,7 +36,7 @@ class Synthesizer(nn.Module):
         # Pose processing path
         xp = self.dropout(nn.LeakyReLU()(self.res_pose1(xu)))
         xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
-        #xp = self.dropout(nn.LeakyReLU()(self.res_pose2(xp)))
+
         x = x.view(-1, 6, 48)
 
         return self.pose_morph(xp)
@@ -48,9 +48,10 @@ class ResBlock(nn.Module):
 
         # Two linear layers for the residual block
         self.fc1 = nn.Linear(1024, 2048)
-        self.bn1 = nn.BatchNorm1d(2048)
-        self.fc2 = nn.Linear(2048, 1024)
-        self.bn2 = nn.BatchNorm1d(1024)
+        self.fc2 = nn.Linear(2048, 2048)
+        #self.bn1 = nn.BatchNorm1d(2048)
+        self.fc3 = nn.Linear(2048, 1024)
+        #self.bn2 = nn.BatchNorm1d(1024)
 
         #self.l1 = nn.Linear(2048, 2048)
         #self.l2 = nn.Linear(2048, 2048)
@@ -73,8 +74,9 @@ class ResBlock(nn.Module):
         # Adding the residual connection
         #x += inp
         residual = x
-        out = self.bn1(nn.LeakyReLU()(self.fc1(x)))
-        out = self.bn2(nn.LeakyReLU()(self.fc2(out)))
+        out = nn.LeakyReLU()(self.fc1(x))
+        out = nn.LeakyReLU()(self.fc2(out))
+        out = nn.LeakyReLU()(self.fc3(out))
         out += residual
         out = nn.LeakyReLU()(out)
 
