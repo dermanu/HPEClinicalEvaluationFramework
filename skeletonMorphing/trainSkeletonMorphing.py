@@ -431,8 +431,7 @@ def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
         train_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
         train_dataset.datasets[_].par = par
         d.align_procrustes()
-        for camera in range(6):
-            scaler.add_key_from_vector(d.pose_inf[:,camera], f"pose_inf_{par}_{camera}")
+        scaler.add_key_from_vector(d.pose_inf, f"pose_inf_{par}")
 
     for _, d in enumerate(test_dataset.datasets):
         if d.csv_data.size == 0:
@@ -440,22 +439,19 @@ def load_dataset_par(data_folder: str, par: int, scaler, concat = False):
         test_dataset.datasets[_].csv_data = scaler.scale(d.csv_data,  f"pose_gt_{par}")
         test_dataset.datasets[_].par = par
         d.align_procrustes()
-        for camera in range(6):
-            scaler.add_key_from_vector(d.pose_inf[:, camera], f"pose_inf_{par}_{camera}")
+        scaler.add_key_from_vector(d.pose_inf, f"pose_inf_{par}")
 
     for _, d in enumerate(train_dataset.datasets):
         if d.csv_data.size == 0:
             continue
 
-        for camera in range(6):
-            d.pose_inf[:, camera] = scaler.scale(d.pose_inf[:, camera], f"pose_inf_{par}_{camera}")
+
+        #d.pose_inf = scaler.scale(d.pose_inf, f"pose_inf_{par}")
 
     for _, d in enumerate(test_dataset.datasets):
         if d.csv_data.size == 0:
             continue
-
-        for camera in range(6):
-            d.pose_inf[:, camera] = scaler.scale(d.pose_inf[:, camera], f"pose_inf_{par}_{camera}")
+       # d.pose_inf = scaler.scale(d.pose_inf, f"pose_inf_{par}")
 
     # To fit the new setup, we add an option to concatenate the datasets so we can use all the data per participant either for train or test
     if concat:
@@ -521,7 +517,7 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False)
     :param debug:
     :return:
     """
-    wandb.init(project="skeleton-morphing--moved", config=config, notes="Normalize for each camera after procrustes", mode="online")
+    wandb.init(project="skeleton-morphing--moved", config=config, notes="Added center and rotation in dataset preparation", mode="online")
 
     # Splitting the data into train and test
     train, test = datasets
@@ -630,7 +626,7 @@ def train(datapath: str, pars, rand, mode, debug = False):
     config = SimpleNamespace()
     config.learning_rate = 0.00001
     config.BATCH_SIZE = 32
-    config.N_epochs = 75
+    config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 1e-5
     # config.pars = np.array([12])
