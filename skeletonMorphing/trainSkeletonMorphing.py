@@ -559,7 +559,7 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False)
                                criterion=criterion,
                                epochs=config.N_epochs,
                                pars=config.pars,
-                               config=config,
+                               config=None,
                                scaler=scaler,
                                debug = debug,
                                fold_id=missing_par)
@@ -657,3 +657,141 @@ def train(datapath: str, pars, rand, mode, debug = False):
     # Folder containing data
     # data_folder = '/home/emanu/Desktop/SegmentedData'
     print('done')
+
+def sweep(config, datasets: tuple, scaler, missing_par, debug=False):
+    """
+    Method to train a single fold where a new wandb initation is done for each fold to keep track of the results
+    This is also better for visualization and tracking of the results in wandb due to limited data per run
+    :param config:
+    :param datasets:
+    :param scaler:
+    :param missing_par:
+    :param debug:
+    :return:
+    """
+    #wandb.sweep(project="skeleton-morphing--moved", sweep=config)
+
+    # Splitting the data into train and test
+    train, test = datasets
+    scaler = scaler
+    sampler = EveryNthSampler(train, config.n_samples)
+    shuffled_sampler = SubsetRandomSampler(list(sampler))
+    sampler_test = EveryNthSampler(test, config.n_samples)
+    shuffled_sampler_test = SubsetRandomSampler(list(sampler_test))
+
+    wandb.log({"train_size": len(sampler), "test_size": len(sampler_test), "fold_id": missing_par})
+    train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, num_workers=8, pin_memory=True, sampler=shuffled_sampler)
+    test_loader = data.DataLoader(test, batch_size=32, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
+
+
+    print('Data loader created')
+    # Initializing the model (Synthesizer) and moving it to GPU
+    model = modelSkeletonMorphing.Synthesizer().cuda()
+
+    wandb.watch(model, log_freq=100)
+
+    criterion = nn.MSELoss()
+
+    # Parameters for optimization
+    params = list(model.parameters())  # + list(dec.parameters())
+
+    # Setting anomaly detection for autograd
+    optimizer = optim.Adam(params, lr=config.learning_rate, weight_decay=config.weight_decay)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, 80, 95], gamma=0.1)
+
+    # Setting anomaly detection for autograd
+    torch.autograd.set_detect_anomaly(True)
+
+    # Namespace to store losses during training
+
+    NetworkTrainer.train_model(model=model,
+                               train_loader=train_loader,
+                               validation_loader=test_loader,
+                               optimizer=optimizer,
+                               criterion=criterion,
+                               epochs=config.N_epochs,
+                               pars=config.pars,
+                               config=config,
+                               scaler=scaler,
+                               debug = debug,
+                               fold_id=missing_par)
+
+    #wandb.finish()
+
+
+
+def init_sweep(datapath: str, pars, fold_id):
+    wandb.login()
+    sweep_configuration = {
+    "method": "random",
+    "metric": {"goal": "minimize", "name": "score"},
+    "parameters": {
+        "x": {"max": 0.1, "min": 0.01},
+        "y": {"values": [1, 3, 7]},
+    },
+    }
+    sweep_configuration = {
+        'method': 'bayes',
+        'metric': {
+            'name': 'validation_loss',
+            'goal': 'minimize'
+        },
+        'parameters': {
+            'learning_rate': {
+                'max': 0.01,
+                'min': 0.000001
+            },
+            'BATCH_SIZE': {
+                'values': [16, 32, 64, 128, 256, 512, 1024]  # Batch size: 32
+            },
+            'weight_decay': {
+                'max': 0.01,
+                'min': 0.00001
+            },
+            'N_epochs': {
+                'max': 200,
+                'min': 50
+            },
+            'datafolder': {
+                'value': datapath
+            },
+            'pars': {
+                'value': pars
+            },
+            'fold_id': {
+                'value': fold_id
+            },
+            'model_type': {
+                'value': 'mediapipe'
+            },
+            'n_samples': {
+                'values': [5, 10, 15, 20, 25]
+            }
+        },
+        'early_terminate': {
+            'type': 'hyperband',
+            'min_iter': 7,
+            'eta': 3
+        }
+    }
+
+    print("PAR", pars)
+    print("Estimating ", len(pars), "folds")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project="skeleton-morphing--moved")
+
+    # 3: Start the sweep
+    train_dict, test_dict, scaler = load_train_test_all(datapath, pars)
+
+
+        # All pars except the current par in the loop
+    train = concat_dataset(train_dict, [y for y in pars if y not in fold_id])
+    # The current par in the loop
+    test = concat_dataset(train_dict, fold_id)
+
+    # Train fold
+    wandb.agent(sweep_id, function=sweep(wandb.config, (train, test), scaler,f"{fold_id[0]}_{fold_id[1]}"), count=100)
+
+    # Folder containing data
+    # data_folder = '/home/emanu/Desktop/SegmentedData'
+    print('done')
+
