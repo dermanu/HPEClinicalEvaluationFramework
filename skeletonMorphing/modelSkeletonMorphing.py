@@ -8,7 +8,7 @@ import torch.nn as nn
 
 
 class Synthesizer(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout_rate):
         super(Synthesizer, self).__init__()
 
         # Upscaling layer to transform input of size 48 to 2304
@@ -26,7 +26,7 @@ class Synthesizer(nn.Module):
         self.pose_morph = nn.Linear(1024, 3*16)
 
         # Dropout layer for regularization
-        self.dropout = nn.Dropout(p=0.10)  # Add dropout layer with probability 0.20
+        self.dropout = nn.Dropout(p=dropout_rate)  # Add dropout layer with probability 0.20
 
     def forward(self, x):
         # Upscaling the input

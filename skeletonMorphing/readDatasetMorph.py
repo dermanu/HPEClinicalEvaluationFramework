@@ -265,18 +265,11 @@ class SingleCSVFileDataset(Dataset):
         U = np.dot(V, W)
         return U
 
-    def align_procrustes(self, center=True):
+    def align_procrustes(self):
 
         # Align data according to procrustes
         for i in range(self.pose_inf.shape[0]):
             self.pose_inf[i] = self.align(self.pose_inf[i], self.csv_data[i])
-            if center:
-                centered_data1, centroid1 = self.center_data(self.csv_data[i])
-                for y in range(self.pose_inf.shape[1]):
-                    centered_data2, centroid2 = self.center_data(self.pose_inf[i, y])
-                    rotation_matrix = self.kabsch_algorithm(centered_data1, centered_data2)
-                    aligned_data2 = np.dot(centered_data2, rotation_matrix)
-                    self.pose_inf[i,y] = aligned_data2
 
 
     def get_training_data(self):
