@@ -132,6 +132,57 @@ def calculate_pmpjpe(target, prediction):
     return mean, std
 
 
+def calculate_cmc_old(target: np.ndarray, prediction: np.ndarray, axes_to_use=None, procrustes=False):
+    """
+    Calculate coefficient of multiple correlation (CMC) for all joints and axes
+    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :param axes_to_use: List of axes to use for CMC calculation
+    :param procrustes: Whether to use procrustes alignment
+    :return: Mean CMC and mean P-value
+    """
+
+    if axes_to_use is None:
+        axes_to_use = [0, 1, 2]
+
+    assert prediction.shape == target.shape, "The shape of prediction and target must match."
+
+    target = target[:, :, axes_to_use]
+    prediction = prediction[:, :, axes_to_use]
+
+    if procrustes:
+        target, prediction, _ = align_procrustes(target, prediction)
+
+    cmc_all = []
+    pvalues_all = []
+
+    for keypoint in range(target.shape[1]):
+        for coordinate in range(target.shape[2]):
+            gt = target[:, keypoint, coordinate]
+            pred = prediction[:, keypoint, coordinate]
+
+            gt_norm = np.linalg.norm(gt)
+            pred_norm = np.linalg.norm(pred)
+
+            if gt_norm == 0 or pred_norm == 0:
+                continue  # Skip if normalization would divide by zero
+
+            gt = gt / gt_norm
+            pred = pred / pred_norm
+
+            try:
+                cmc, pvalue = stats.pearsonr(gt, pred)
+                cmc_all.append(cmc)
+                pvalues_all.append(pvalue)
+            except ValueError:
+                continue  # Skip if pearsonr encounters infs or NaNs
+
+    if not cmc_all or not pvalues_all:
+        return float('nan'), float('nan')  # Handle case where no valid CMC or p-values were calculated
+
+    return np.mean(cmc_all), np.mean(pvalues_all)
+
+
 ####################
 # Calculate PCK3D #
 ####################
