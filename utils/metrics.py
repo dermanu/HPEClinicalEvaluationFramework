@@ -1,6 +1,8 @@
 import numpy as np
 from scipy import signal, stats
 from sklearn.metrics import auc
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
 
 
 def align_by_pelvis(joints):
@@ -9,9 +11,8 @@ def align_by_pelvis(joints):
     :param joints: 3D joint positions
     :return: Aligned 3D joint positions
     """
-
     pelvis = joints[:, 0, :]
-    joints = joints - pelvis
+    joints = joints - pelvis[:, np.newaxis, :]
     return joints
 
 
@@ -22,7 +23,7 @@ def calculate_mpjpe(target, prediction):
     :param prediction: Predicted 3D joint positions
     :return: Mean and standard deviation of the MPJPE
     """
-    assert prediction.shape == target.shape
+    assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
     mpjpe = np.linalg.norm(prediction - target, axis=2)
     mean = np.mean(mpjpe)
@@ -40,6 +41,7 @@ def align_procrustes(target, prediction):
     :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
     :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
     :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
+    :return error_count: Error count of failed alignments
     """
 
     gt_all = []
@@ -55,7 +57,7 @@ def align_procrustes(target, prediction):
                 pred = pred.T
                 gt = gt.T
                 transposed = True
-            assert (gt.shape[1] == pred.shape[1])
+            assert (gt.shape[1] == pred.shape[1]), "The number of joints must match."
 
             # 1. Remove mean.
             muX = np.mean(pred, axis=1, keepdims=True)
@@ -119,8 +121,9 @@ def calculate_pmpjpe(target, prediction):
     :param target: Ground truth 3D joint positions
     :param prediction: Predicted 3D joint positions
     :return: Mean and standard deviation of the PMPJPE
+    :return: Error count of failed alignments
     """
-    assert prediction.shape == target.shape
+    assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
     target, prediction, error_count = align_procrustes(target, prediction)
     mean, std = calculate_mpjpe(target, prediction)
@@ -142,7 +145,7 @@ def calculate_pck(target, prediction, threshold=100.0,
 
     if joints_to_use is None:
         joints_to_use = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-    assert len(prediction.shape) == len(target.shape)
+    assert len(prediction.shape) == len(target.shape), "The shape of prediction and target must match."
 
     if procrustes:
         target, prediction, err = align_procrustes(target, prediction)
@@ -156,19 +159,21 @@ def calculate_pck(target, prediction, threshold=100.0,
     return pck
 
 
-def mean_velocity_error(prediction, target, procrustes=True):
+def mean_velocity_error(prediction, target, sample_rate, procrustes=True):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
     :param prediction: Predicted 3D joint positions
     :param target: Ground truth 3D joint positions
+    :param sample_rate: Sample rate in Hz
+    :param procrustes: Weather Procrustes alignment should be used
     :param procrustes: Whether to use procrustes alignment
     :return: Mean and standard deviation of the mean per-joint velocity error
     """
 
-    assert prediction.shape == target.shape
+    assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
-    velocity_predicted = np.diff(prediction, axis=0)
-    velocity_target = np.diff(target, axis=0)
+    velocity_predicted = np.diff(prediction, axis=0) * sample_rate
+    velocity_target = np.diff(target, axis=0) * sample_rate
 
     if procrustes:
         mean, std, err = calculate_pmpjpe(velocity_target, velocity_predicted)
@@ -178,66 +183,70 @@ def mean_velocity_error(prediction, target, procrustes=True):
     return mean, std
 
 
-def mean_acceleration_error(prediction, target, procrustes=True):
+def mean_acceleration_error(prediction, target, sample_rate, procrustes=True):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
     :param prediction: Predicted 3D joint positions
     :param target: Ground truth 3D joint positions
     :param procrustes: Whether to use procrustes alignment
+    :param sample_rate: Sample rate in Hz
+    :param procrustes: Weather Procrustes alignment should be used
     :return: Mean and standard deviation of the mean per-joint velocity error
     """
 
-    assert prediction.shape == target.shape
+    assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
     if procrustes:
         target, prediction, err = align_procrustes(target, prediction)
 
-    acceleration_predicted = np.diff(np.diff(prediction, axis=0), axis=0)
-    acceleration_target = np.diff(np.diff(target, axis=0), axis=0)
+    acceleration_predicted = np.diff(np.diff(prediction, axis=0), axis=0) * sample_rate
+    acceleration_target = np.diff(np.diff(target, axis=0), axis=0) * sample_rate
 
     mean, std, err = calculate_pmpjpe(acceleration_target, acceleration_predicted)
 
     return mean, std
 
 
-def calculate_cmc(target, prediction, axes_to_use=None, procrustes=False):
+def calculate_signal_similarity(target, prediction, axes_to_use=None, procrustes = False):
     """
-    Calculate coefficient of multiple correlation (CMC) for all joints and axes
+    Calculate average Pearson correlation coefficient for all joints and axes to measure signal similarity.
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
     :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :param joints_to_use: List of joints to use for CMC calculation
-    :param axes_to_use: List of axes to use for CMC calculation
+    :param axes_to_use: List of axes to use for similarity calculation
     :param procrustes: Whether to use procrustes alignment
-    :return: CMC
-    :return: P-value
+    :return: Mean correlation coefficient and mean p-value
     """
 
     if axes_to_use is None:
         axes_to_use = [0, 1, 2]
 
-    assert len(prediction) == len(target)
+    assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
     target = target[:, :, axes_to_use]
     prediction = prediction[:, :, axes_to_use]
 
     if procrustes:
-        target, prediction, err = align_procrustes(target, prediction)
+        target, prediction, _ = align_procrustes(target, prediction)
 
-    cmc_all = []
-    pvalues_all = []
+    correlations = []
+    pvalues = []
+
     for keypoint in range(target.shape[1]):
-        for coordinates in range(target.shape[2]):
-            gt = target[:, keypoint, coordinates]
-            pred = prediction[:, keypoint, coordinates]
-            gt_norm = np.linalg.norm(gt)
-            pred_norm = np.linalg.norm(pred)
-            gt = gt / gt_norm
-            pred = pred / pred_norm
-            cmc, pvalue = stats.pearsonr(gt, pred)  # ValueError: array must not contain infs or NaNs
-            cmc_all.append(cmc)
-            pvalues_all.append(pvalue)
+        for coordinate in range(target.shape[2]):
+            gt = target[:, keypoint, coordinate]
+            pred = prediction[:, keypoint, coordinate]
 
-    return np.mean(cmc_all), np.mean(pvalues_all)
+            if np.std(gt) == 0 or np.std(pred) == 0:
+                continue  # Skip if no variance in the data
+
+            corr, pvalue = pearsonr(gt, pred)
+            correlations.append(corr)
+            pvalues.append(pvalue)
+
+    if not correlations:
+        return float('nan'), float('nan')  # Handle case where no valid correlations were calculated
+
+    return np.mean(correlations), np.mean(pvalues)
 
 
 def compute_CP(target, prediction, threshold=180, joints_to_use=None):
@@ -250,14 +259,14 @@ def compute_CP(target, prediction, threshold=180, joints_to_use=None):
     :return: Number of correct poses
     """
     if joints_to_use is None:
-        joints_to_use = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        joints_to_use = list(range(target.shape[1]))
 
-    assert len(target.shape) == len(prediction.shape)
+    assert target.shape == prediction.shape, "The shape of prediction and target must match."
 
     distances = np.linalg.norm(target[:, joints_to_use, :] - prediction[:, joints_to_use, :], axis=2)
     correct_poses = np.count_nonzero(distances < threshold, axis=1) == len(joints_to_use)
 
-    return correct_poses
+    return np.sum(correct_poses)
 
 
 def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
@@ -276,9 +285,9 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
     """
 
     if joints_to_use is None:
-        joints_to_use = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        joints_to_use = list(range(target.shape[1]))
 
-    assert len(prediction.shape) == len(target.shape)
+    assert len(prediction.shape) == len(target.shape), "The shape of prediction and target must match."
 
     cps_length = int((max_th + 1 - min_th) / step)
     thresholds = np.arange(min_th, max_th + 1, step)
@@ -307,27 +316,24 @@ def angle_2p_3d(joint_a, joint_b, joint_c):
     :param joint_a: [frames, joint, 3]
     :param joint_b: [frames, joint, 3]
     :param joint_c: [frames, joint, 3]
-    :return joint_angles: [frames, joint, 1]
+    :return joint_angles: [frames, 1]
     """
+    # Vectorized calculation of vectors
+    v1 = joint_a - joint_b
+    v2 = joint_c - joint_b
 
-    all_angles = []
-    for i in range(joint_a.shape[0]):
-        a = joint_a[i]
-        b = joint_b[i]
-        c = joint_c[i]
-        v1 = np.array([a[0] - b[0], a[1] - b[1], a[2] - b[2]])
-        v2 = np.array([c[0] - b[0], c[1] - b[1], c[2] - b[2]])
+    # Normalizing the vectors
+    v1_norm = v1 / np.linalg.norm(v1, axis=2, keepdims=True)
+    v2_norm = v2 / np.linalg.norm(v2, axis=2, keepdims=True)
 
-        v1mag = np.sqrt([v1[0] * v1[0] + v1[1] * v1[1] + v1[2] * v1[2]])
-        v1norm = np.array([v1[0] / v1mag, v1[1] / v1mag, v1[2] / v1mag])
+    # Dot product and angle calculation
+    dot_product = np.sum(v1_norm * v2_norm, axis=2)
+    dot_product = np.clip(dot_product, -1.0, 1.0)  # Clip to handle numerical issues
 
-        v2mag = np.sqrt(v2[0] * v2[0] + v2[1] * v2[1] + v2[2] * v2[2])
-        v2norm = np.array([v2[0] / v2mag, v2[1] / v2mag, v2[2] / v2mag])
-        res = v1norm[0] * v2norm[0] + v1norm[1] * v2norm[1] + v1norm[2] * v2norm[2]
-        angle_rad = np.arccos(res)
-        all_angles.append(angle_rad)
-    all_angles = np.concatenate(np.array(all_angles))
-    return np.round(np.degrees(all_angles), 2)
+    angles_rad = np.arccos(dot_product)
+    angles_deg = np.degrees(angles_rad)
+
+    return np.round(angles_deg, 2)
 
 
 def angle_between_points(joint_a, joint_b, joint_c):
@@ -336,27 +342,27 @@ def angle_between_points(joint_a, joint_b, joint_c):
     :param joint_a: [frames, joint, 3]
     :param joint_b: [frames, joint, 3]
     :param joint_c: [frames, joint, 3]
-    :return joint_angles: [frames, joint, 1]
+    :return joint_angles: [frames, joint]
     """
-    AB = np.array(joint_b) - np.array(joint_a)
-    BC = np.array(joint_c) - np.array(joint_b)
+    AB = joint_b - joint_a
+    BC = joint_c - joint_b
 
     dot_product = np.einsum('...i,...i', AB, BC)
+    magnitude_AB = np.linalg.norm(AB, axis=2)
+    magnitude_BC = np.linalg.norm(BC, axis=2)
 
-    magnitude_AB = np.linalg.norm(AB, axis=-1)
-    magnitude_BC = np.linalg.norm(BC, axis=-1)
+    angles_rad = np.arccos(np.clip(dot_product / (magnitude_AB * magnitude_BC), -1.0, 1.0))  # Clip to handle numerical issues
+    angles_deg = np.degrees(angles_rad)
 
-    angle_rad = np.arccos(dot_product / (magnitude_AB * magnitude_BC))
-    angle_deg = np.degrees(angle_rad)
-
-    return angle_deg
+    return angles_deg
 
 
 def orthogonal_projection(vector, normal):
     """
-    :param vector:
-    :param normal:
-    :return:
+    Calculate the orthogonal projection of a vector onto a plane defined by a normal vector.
+    :param vector: The vector to be projected, shape (n,)
+    :param normal: The normal vector of the plane, shape (n,)
+    :return: The orthogonal projection of the vector onto the plane, shape (n,)
     """
     proj = vector - np.dot(vector, normal) / np.dot(normal, normal) * normal
     return proj
@@ -476,7 +482,7 @@ def shoulder_angle(elbow_left, shoulder_left, Ds, CB):
     SE = elbow_left - shoulder_left
 
     shoulder_angle_angle = angle_between_points(orthogonal_projection(ES, np.cross(Ds, CB)),
-                                          np.sign(SE * Ds))
+                                                np.sign(SE * Ds))
     return shoulder_angle_angle
 
 
@@ -507,20 +513,20 @@ def ankle_angle(knee_left, ankle_left, toe_left):
 ####################################################################
 ### Adjust according to https://www.mdpi.com/1424-8220/22/5/1729 ###
 ####################################################################
-def calculate_mpsae(target, prediction, joint_segments):
+def calculate_mpsae(target, prediction, procrustes=True):
     """
-    Calculate the mean per segment angle error. Target and prediction are dictionaries with the same keys segments is a
-    list of lists of segment names.
-    :param target:
-    :param prediction:
-    :param joint_segments:
-    :return:
+    Calculate the mean per segment angle error.
+    :param target: Ground truth 3D joint positions, dictionary with keys as joint names
+    :param prediction: Predicted 3D joint positions, dictionary with keys as joint names
+    :param joint_segments: List of joints to use for MPSAE calculation
+    :return: Mean error, standard deviation of error, segment-wise errors
     """
-
-    assert len(prediction) == len(target)
+    assert len(prediction) == len(target), "The shape of prediction and target must match."
 
     target_Y = np.array([0, 1, 0])
     prediction_Y = np.array([0, 1, 0])
+
+    target, prediction, error_count = align_procrustes(target, prediction)
 
     target_hip_mid = hip_mid(target['hip_left'], target['hip_right'])
     prediction_hip_mid = hip_mid(prediction['hip_left'], prediction['hip_right'])
@@ -529,72 +535,74 @@ def calculate_mpsae(target, prediction, joint_segments):
     target_CB = target_shoulder_mid - target_hip_mid
     prediction_CB = prediction_shoulder_mid - prediction_hip_mid
     target_Ds = help_shoulder(target_hip_mid, target_shoulder_mid, target['shoulder_left'], target['shoulder_right'])
-    prediction_Ds = help_shoulder(prediction_hip_mid, prediction_shoulder_mid, prediction['shoulder_left'], prediction['shoulder_right'])
+    prediction_Ds = help_shoulder(prediction_hip_mid, prediction_shoulder_mid, prediction['shoulder_left'],
+                                  prediction['shoulder_right'])
     target_Dh = help_hip(target_Y, target['hip_left'], target['hip_right'])
     prediction_Dh = help_hip(prediction_Y, prediction['hip_left'], prediction['hip_right'])
 
-
-    trunk_twist_error = np.round(np.abs(
+    trunk_twist_error = np.abs(
         trunk_twist(target['hip_left'], target['hip_right'], target['shoulder_left'], target['shoulder_right']) -
         trunk_twist(prediction['hip_left'], prediction['hip_right'], prediction['shoulder_left'],
-                    prediction['shoulder_right'])), 2)
+                    prediction['shoulder_right']))
 
-    trunk_bending_error = np.round(np.abs(
+    trunk_bending_error = np.abs(
         trunk_bending(target_Y, target_CB, target_Dh) -
-        trunk_bending(prediction_Y, prediction_CB, prediction_Dh)), 2)
+        trunk_bending(prediction_Y, prediction_CB, prediction_Dh))
 
-    trunk_angle_error = np.round(np.abs(
+    trunk_angle_error = np.abs(
         trunk_angle(target_hip_mid, target_shoulder_mid, target_Ds) -
-        trunk_angle(prediction_hip_mid, prediction_shoulder_mid, prediction_Ds)), 2)
+        trunk_angle(prediction_hip_mid, prediction_shoulder_mid, prediction_Ds))
 
-    knee_left_error = np.round(np.abs(
+    knee_left_error = np.abs(
         knee_angle(target['hip_left'], target['knee_left'], target['ankle_left']) -
-        knee_angle(prediction['hip_left'], prediction['knee_left'], prediction['ankle_left'])), 2)
+        knee_angle(prediction['hip_left'], prediction['knee_left'], prediction['ankle_left']))
 
-    knee_right_error = np.round(np.abs(
+    knee_right_error = np.abs(
         knee_angle(target['hip_right'], target['knee_right'], target['ankle_right']) -
-        knee_angle(prediction['hip_right'], prediction['knee_right'], prediction['ankle_right'])), 2)
+        knee_angle(prediction['hip_right'], prediction['knee_right'], prediction['ankle_right']))
 
-    shoulder_left_error = np.round(np.abs(
+    shoulder_left_error = np.abs(
         shoulder_angle(target['elbow_left'], target['shoulder_left'], target_Ds, target_CB) -
-        shoulder_angle(prediction['elbow_left'], prediction['shoulder_left'], prediction_Ds, prediction_CB)), 2)
+        shoulder_angle(prediction['elbow_left'], prediction['shoulder_left'], prediction_Ds, prediction_CB))
 
-    shoulder_right_error = np.round(np.abs(
+    shoulder_right_error = np.abs(
         shoulder_angle(target['elbow_right'], target['shoulder_right'], target_Ds, target_CB) -
-        shoulder_angle(prediction['elbow_right'], prediction['shoulder_right'], prediction_Ds, prediction_CB)), 2)
+        shoulder_angle(prediction['elbow_right'], prediction['shoulder_right'], prediction_Ds, prediction_CB))
 
-    elbow_left_error = np.round(np.abs(
+    elbow_left_error = np.abs(
         elbow_angle(target['shoulder_left'], target['elbow_left'], target['wrist_left']) -
-        elbow_angle(prediction['shoulder_left'], prediction['elbow_left'], prediction['wrist_left'])), 2)
+        elbow_angle(prediction['shoulder_left'], prediction['elbow_left'], prediction['wrist_left']))
 
-    elbow_right_error = np.round(np.abs(
+    elbow_right_error = np.abs(
         elbow_angle(target['shoulder_right'], target['elbow_right'], target['wrist_right']) -
-        elbow_angle(prediction['shoulder_right'], prediction['elbow_right'], prediction['wrist_right'])), 2)
+        elbow_angle(prediction['shoulder_right'], prediction['elbow_right'], prediction['wrist_right']))
 
-    ankle_left_error = np.round(np.abs(
+    ankle_left_error = np.abs(
         ankle_angle(target['knee_left'], target['ankle_left'], target['toe_left']) -
-        ankle_angle(prediction['knee_left'], prediction['ankle_left'], prediction['toe_left'])), 2)
+        ankle_angle(prediction['knee_left'], prediction['ankle_left'], prediction['toe_left']))
 
-    ankle_right_error = np.round(np.abs(
+    ankle_right_error = np.abs(
         ankle_angle(target['knee_right'], target['ankle_right'], target['toe_right']) -
-        ankle_angle(prediction['knee_right'], prediction['ankle_right'], prediction['toe_right'])), 2)
+        ankle_angle(prediction['knee_right'], prediction['ankle_right'], prediction['toe_right']))
 
     single_segment_error = np.array(
         [trunk_twist_error, trunk_bending_error, trunk_angle_error, knee_left_error, knee_right_error,
          shoulder_left_error, shoulder_right_error, elbow_left_error, elbow_right_error, ankle_left_error,
          ankle_right_error])
+
     single_segment_mean_error = np.mean(single_segment_error, axis=0)
     single_segment_std_error = np.std(single_segment_error, axis=0)
-    single_segment_r2 =
 
+    # Calculate R2 for each segment
+    segment_r2 = calculate_r2(single_segment_error, np.zeros_like(single_segment_error))
 
-    return single_segment_mean_error, single_segment_std_error, single_segment_error,
+    return single_segment_mean_error, single_segment_std_error, single_segment_error, segment_r2
 
 
 def calculate_r2(target, predicted):
     """
     Calculate the coefficient of determination R^2
-    :param actual: Actual values
+    :param target: Actual values
     :param predicted: Predicted values
     :return: R^2
     """
@@ -618,7 +626,6 @@ def plot_r2(values, segment_names):
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()
-
 
 
 def calculate_mpsae_old(target, prediction, joint_segments):

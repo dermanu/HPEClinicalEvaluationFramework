@@ -4,11 +4,10 @@ import numpy as np
 
 
 class ACAE(nn.Module):
-    def __init__(self, num_joints, num_latent, symmetric_pairs=None):
+    def __init__(self, num_joints, num_latent):
         super(ACAE, self).__init__()
         self.num_joints = num_joints
         self.num_latent = num_latent
-        self.symmetric_pairs = symmetric_pairs
 
         # Initialize parameters with Xavier initialization for better convergence
         self.Wenc = nn.Parameter(torch.empty(num_latent, num_joints))
@@ -16,26 +15,43 @@ class ACAE(nn.Module):
         self.Wdec = nn.Parameter(torch.empty(num_joints, num_latent))
         nn.init.xavier_uniform_(self.Wdec)
 
+        print(f"Wenc shape: {self.Wenc.shape}")
+        print(f"Wdec shape: {self.Wdec.shape}")
+
     def forward(self, x):
+        batch_size = x.size(0)
+
         # Normalize weights to ensure they sum to one and are used equally across coordinates
-        Wenc_normalized = torch.softmax(self.Wenc, dim=1).unsqueeze(2).repeat(1, 1, 3)
-        Wdec_normalized = torch.softmax(self.Wdec, dim=1).unsqueeze(2).repeat(1, 1, 3)
+        Wenc_normalized = torch.softmax(self.Wenc, dim=1).unsqueeze(0).repeat(batch_size, 1, 1)
+        Wdec_normalized = torch.softmax(self.Wdec, dim=1).unsqueeze(0).repeat(batch_size, 1, 1)
 
-        # Enforce chirality by mirroring weights
-        if self.symmetric_pairs:
-            for a, b in self.symmetric_pairs:
-                Wenc_normalized[:, b, :] = Wenc_normalized[:, a, :]
-                Wdec_normalized[b, :, :] = Wdec_normalized[a, :, :]
+        # Ensure x has shape [batch_size, num_joints, 3]
+        print(f"Input shape: {x.shape}")
+        x = x.permute(0, 2, 1)  # Shape: [batch_size, 3, num_joints]
+        print(f"Permuted input shape: {x.shape}")
 
-        latent = torch.bmm(Wenc_normalized, x)
-        reconstruction = torch.bmm(Wdec_normalized, latent)
+        # Print weight shapes
+        print(f"Wenc_normalized shape: {Wenc_normalized.shape}")
+        print(f"Wdec_normalized shape: {Wdec_normalized.shape}")
+
+        # Perform batch matrix multiplication
+        latent = torch.bmm(Wenc_normalized, x)  # Shape: [batch_size, num_latent, 3]
+        print(f"Latent shape after bmm with Wenc_normalized: {latent.shape}")
+        latent = latent.permute(0, 2, 1)  # Shape: [batch_size, 3, num_latent]
+        print(f"Latent shape after permute: {latent.shape}")
+
+        reconstruction = torch.bmm(Wdec_normalized, latent)  # Shape: [batch_size, num_joints, 3]
+        print(f"Reconstruction shape after bmm with Wdec_normalized: {reconstruction.shape}")
+        reconstruction = reconstruction.permute(0, 2, 1)  # Shape: [batch_size, num_joints, 3]
+        print(f"Reconstruction shape after permute: {reconstruction.shape}")
+
         return reconstruction, latent
 
     def reconstruction_loss(self, original, reconstructed):
         return torch.mean(torch.abs(original - reconstructed))
 
     def regularization_loss(self):
-        return torch.norm(self.Wenc, p=1) + torch.norm(self.Wdec, p=1)
+        return torch.abs(torch.norm(self.Wenc, p=1) + torch.norm(self.Wdec, p=1))
 
 
 def procrustes(X, Y, scaling=True):
@@ -45,8 +61,8 @@ def procrustes(X, Y, scaling=True):
     X0 = X - muX
     Y0 = Y - muY
 
-    ssX = (X0**2.).sum()
-    ssY = (Y0**2.).sum()
+    ssX = (X0 ** 2.).sum()
+    ssY = (Y0 ** 2.).sum()
 
     normX = np.sqrt(ssX)
     normY = np.sqrt(ssY)
@@ -63,18 +79,18 @@ def procrustes(X, Y, scaling=True):
     else:
         b = 1
 
-    d = 1 - traceTA**2
+    d = 1 - traceTA ** 2
 
     Z = b * np.dot(Y0, T) + muX
     return d, Z
 
 
 def normalize_and_align(data):
-    # Updated error handling
     try:
+        base = data[0].numpy()
         aligned_data = []
         for x in data:
-            _, Z = procrustes(data[0].numpy(), data[1].numpy(), scaling=True)  # data[0] is the VizLab data
+            _, Z = procrustes(base, x.numpy(), scaling=True)
             aligned_data.append(torch.tensor(Z, dtype=torch.float32))
         return torch.stack(aligned_data)
     except Exception as e:
@@ -105,8 +121,7 @@ def train_acae(acae, data_loader, optimizer, epochs=10, lambda_sparse=0.01):
 # Dummy example
 num_joints = 28  # total number of joints (dataset1 + dataset 2)
 num_latent = int(np.ceil(np.sqrt(num_joints) * 2))
-symmetric_pairs = [(1, 2), (3, 4)]
-acae = ACAE(num_joints, num_latent, symmetric_pairs)
+acae = ACAE(num_joints, num_latent)
 optimizer = torch.optim.Adam(acae.parameters(), lr=0.001)
-dummy_data_loader = [torch.randn(10, num_joints, 3) for _ in range(100)]  # Example data
+dummy_data_loader = [torch.randn(32, num_joints, 3) for _ in range(100)]  # Example data
 train_acae(acae, dummy_data_loader, optimizer)
