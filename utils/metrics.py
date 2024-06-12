@@ -121,7 +121,7 @@ def align_procrustes(target, prediction):
 def calculate_pmpjpe(target, prediction):
     """
     Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
-    often referred to as "Protocol #2" in many papers.
+    often referred to as "Protocol #2" in many papers..
     :param target: Ground truth 3D joint positions
     :param prediction: Predicted 3D joint positions
     :return: Mean and standard deviation of the PMPJPE
