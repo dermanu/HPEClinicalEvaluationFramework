@@ -3,6 +3,10 @@ from scipy import signal, stats
 from sklearn.metrics import auc
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
+import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+import wandb
 
 
 def align_by_pelvis(joints):
@@ -34,7 +38,7 @@ def calculate_mpjpe(target, prediction):
 
 def align_procrustes(target, prediction):
     """
-    Procrustes MJPE: MPJPE after rigid alignment (scale, rotation, and translation),
+    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers.
     Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -207,7 +211,7 @@ def mean_acceleration_error(prediction, target, sample_rate, procrustes=True):
     return mean, std
 
 
-def calculate_signal_similarity(target, prediction, axes_to_use=None, procrustes = False):
+def calculate_correlation(target, prediction, axes_to_use=None, procrustes=True):
     """
     Calculate average Pearson correlation coefficient for all joints and axes to measure signal similarity.
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -270,7 +274,7 @@ def compute_CP(target, prediction, threshold=180, joints_to_use=None):
 
 
 def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
-                joints_to_use=None, procrustes=False):
+                joints_to_use=None, procrustes=True):
     """
     Compute the correct pose score (CPS) according to (https://arxiv.org/abs/2011.14679) for different thresholds
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -310,51 +314,23 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
     return cps_best, cps_idx
 
 
-def angle_2p_3d(joint_a, joint_b, joint_c):
+def calculate_angle(joint_a, joint_b, joint_c):
     """
-    Calculate the angle between two segments in 3D
-    :param joint_a: [frames, joint, 3]
-    :param joint_b: [frames, joint, 3]
-    :param joint_c: [frames, joint, 3]
-    :return joint_angles: [frames, 1]
+    Calculate the angle formed at joint_b by the lines connecting joint_a and joint_c
+    :param joint_a: 3D coordinates of joint A, numpy array of shape [sample, joint, 3]
+    :param joint_b: 3D coordinates of joint B (vertex of the angle), numpy array of shape [sample, joint, 3]
+    :param joint_c: 3D coordinates of joint C, numpy array of shape [sample, joint, 3]
+    :return: Angles in degrees, numpy array of shape [sample, joint]
     """
-    # Vectorized calculation of vectors
     v1 = joint_a - joint_b
     v2 = joint_c - joint_b
-
-    # Normalizing the vectors
     v1_norm = v1 / np.linalg.norm(v1, axis=2, keepdims=True)
     v2_norm = v2 / np.linalg.norm(v2, axis=2, keepdims=True)
-
-    # Dot product and angle calculation
     dot_product = np.sum(v1_norm * v2_norm, axis=2)
-    dot_product = np.clip(dot_product, -1.0, 1.0)  # Clip to handle numerical issues
-
+    dot_product = np.clip(dot_product, -1.0, 1.0)  # Clip to ensure they are within the valid range for arccos [-1, 1]
     angles_rad = np.arccos(dot_product)
     angles_deg = np.degrees(angles_rad)
-
     return np.round(angles_deg, 2)
-
-
-def angle_between_points(joint_a, joint_b, joint_c):
-    """
-    Calculate the angle between two segments in 3D
-    :param joint_a: [frames, joint, 3]
-    :param joint_b: [frames, joint, 3]
-    :param joint_c: [frames, joint, 3]
-    :return joint_angles: [frames, joint]
-    """
-    AB = joint_b - joint_a
-    BC = joint_c - joint_b
-
-    dot_product = np.einsum('...i,...i', AB, BC)
-    magnitude_AB = np.linalg.norm(AB, axis=2)
-    magnitude_BC = np.linalg.norm(BC, axis=2)
-
-    angles_rad = np.arccos(np.clip(dot_product / (magnitude_AB * magnitude_BC), -1.0, 1.0))  # Clip to handle numerical issues
-    angles_deg = np.degrees(angles_rad)
-
-    return angles_deg
 
 
 def orthogonal_projection(vector, normal):
@@ -364,268 +340,174 @@ def orthogonal_projection(vector, normal):
     :param normal: The normal vector of the plane, shape (n,)
     :return: The orthogonal projection of the vector onto the plane, shape (n,)
     """
-    proj = vector - np.dot(vector, normal) / np.dot(normal, normal) * normal
-    return proj
+    return vector - np.dot(vector, normal) / np.dot(normal, normal) * normal
 
 
-def help_shoulder(hip_mid, shoulder_mid, shoulder_left, shoulder_right):
+def get_vertical_axis_from_calibration(hip_left, hip_right, shoulder_left, shoulder_right):
     """
-    Calculate the help vector Ds = (hip_mid, shoulder_mid) x (shoulder_right, shoulder_left)
-    :param hip_mid: ip center
-    :param shoulder_mid: Shoulder center
-    :param shoulder_left: Left shoulder
-    :param shoulder_right: Right shoulder
-    :return: Help vector Ds
+    Determine the vertical axis based on the positions of the hips and shoulders. Needs a relative neutral pose
+    :param hip_left: numpy array of shape (3,), position of the left hip
+    :param hip_right: numpy array of shape (3,), position of the right hip
+    :param shoulder_left: numpy array of shape (3,), position of the left shoulder
+    :param shoulder_right: numpy array of shape (3,), position of the right shoulder
+    :return: normalized vertical axis vector
     """
-    ds = np.cross(hip_mid - shoulder_mid, shoulder_right - shoulder_left)
-    return ds
-
-
-def help_hip(Y, hip_left, hip_right):
-    """
-    Calculate the help vector Dh = Y x (hip_right, hip_left)
-    :param Y: Y vector
-    :param hip_left: Left hip
-    :param hip_right: Right hip
-    :return: Help vector Dh
-    """
-    dh = np.cross(Y, hip_right - hip_left)
-    return dh
-
-
-def shoulder_mid(shoulder_left, shoulder_right):
-    """
-    Calculate the shoulder mid-point
-    :param shoulder_left: Left shoulder
-    :param shoulder_right: Right shoulder
-    :return: Shoulder mid-point
-    """
-    shoulder_mid_point = (shoulder_right + shoulder_left) / 2
-    return shoulder_mid_point
-
-
-def hip_mid(hip_left, hip_right):
-    """
-    Calculate the hip mid-point
-    :param hip_left: Left hip
-    :param hip_right: Right hip
-    :return: Hip mid-point
-    """
-    hip_mid_point = (hip_right + hip_left) / 2
-    return hip_mid_point
-
-
-def trunk_angle(hip_mid, shoulder_mid, Ds):
-    """
-    Calculate the trunk angle
-    :param hip_mid: Hip mid-point
-    :param shoulder_mid: Shoulder mid-point
-    :return: Trunk angle
-    """
-    trunk_angle_angle = 90 - angle_between_points(hip_mid, shoulder_mid, Ds)
-    return trunk_angle_angle
-
-
-def trunk_twist(hip_left, hip_right, shoulder_left, shoulder_right):
-    """
-    Calculate the trunk twist
-    :param hip_left: Left hip
-    :param hip_right: Right hip
-    :param shoulder_left: Left shoulder
-    :param shoulder_right: Right shoulder
-    :return: Trunk twist
-    """
-    shoulder_mid_point = shoulder_mid(shoulder_left, shoulder_right)
-    hip_mid_point = hip_mid(hip_left, hip_right)
-
-    HH = hip_right - hip_left
-    CB = shoulder_mid_point - hip_mid_point
-    SS = shoulder_right - shoulder_left
-
-    trunk_twist_angle = angle_between_points(orthogonal_projection(HH, CB), orthogonal_projection(SS, CB))
-    return trunk_twist_angle
-
-
-def trunk_bending(Y, CB, Dh):
-    """
-    Calculate the trunk bending
-    :param Y: Y vector
-    :param CB: CB vector
-    :param Dh: Dh vector
-    :return: Trunk bending
-    """
-    trunk_bending_angle = angle_between_points(Y, orthogonal_projection(CB, Dh))
-    return trunk_bending_angle
-
-
-def knee_angle(hip_left, knee_left, ankle_left):
-    """
-    Calculate the knee angle
-    :param hip_left: Left hip
-    :param knee_left: Left knee
-    :param ankle_left: Left ankle
-    :return: Knee angle
-    """
-    knee_angle_angle = angle_between_points(hip_left, knee_left, ankle_left)
-    return knee_angle_angle
-
-
-def shoulder_angle(elbow_left, shoulder_left, Ds, CB):
-    """
-    Calculate the shoulder angle
-    :param elbow_left: Left elbow
-    :param shoulder_left: Left shoulder
-    :param Ds: Help vector Ds
-    :return: Shoulder angle
-    """
-    ES = shoulder_left - elbow_left
-    SE = elbow_left - shoulder_left
-
-    shoulder_angle_angle = angle_between_points(orthogonal_projection(ES, np.cross(Ds, CB)),
-                                                np.sign(SE * Ds))
-    return shoulder_angle_angle
-
-
-def elbow_angle(shoulder_left, elbow_left, wrist_left):
-    """
-    Calculate the elbow angle
-    :param shoulder_left: Left shoulder
-    :param elbow_left: Left elbow
-    :param wrist_left: Left wrist
-    :return: Elbow angle
-    """
-    elbow_angle_angle = angle_between_points(shoulder_left, elbow_left, wrist_left)
-    return elbow_angle_angle
-
-
-def ankle_angle(knee_left, ankle_left, toe_left):
-    """
-    Calculate the ankle angle
-    :param knee_left: Left knee
-    :param ankle_left: Left ankle
-    :param toe_left: Left toe
-    :return: Ankle angle
-    """
-    ankle_angle = angle_between_points(knee_left, ankle_left, toe_left)
-    return ankle_angle
+    hip_mid = (hip_left + hip_right) / 2
+    shoulder_mid = (shoulder_left + shoulder_right) / 2
+    vertical_vector = shoulder_mid - hip_mid
+    return vertical_vector / np.linalg.norm(vertical_vector)
 
 
 ####################################################################
 ### Adjust according to https://www.mdpi.com/1424-8220/22/5/1729 ###
 ####################################################################
-def calculate_mpsae(target, prediction, procrustes=True):
+def calculate_joint_angles(keypoints, Y_vector=np.array([0, 1, 0])):
     """
-    Calculate the mean per segment angle error.
-    :param target: Ground truth 3D joint positions, dictionary with keys as joint names
-    :param prediction: Predicted 3D joint positions, dictionary with keys as joint names
-    :param joint_segments: List of joints to use for MPSAE calculation
-    :return: Mean error, standard deviation of error, segment-wise errors
+    Calculate various joint angles based on 3D keypoints.
+    :param keypoints: Dictionary of 3D coordinates for each joint
+    :param Y_vector: Reference vertical axis vector (default is the Y-axis)
+    :return: Dictionary of calculated joint angles
     """
-    assert len(prediction) == len(target), "The shape of prediction and target must match."
+    angles = {}
 
-    target_Y = np.array([0, 1, 0])
-    prediction_Y = np.array([0, 1, 0])
+    # Midpoints
+    shoulder_mid = (keypoints['shoulder_right'] + keypoints['shoulder_left']) / 2
+    hip_mid = (keypoints['hip_right'] + keypoints['hip_left']) / 2
 
-    target, prediction, error_count = align_procrustes(target, prediction)
+    # Help vectors
+    D_s = np.cross(hip_mid - shoulder_mid, keypoints['shoulder_right'] - keypoints['shoulder_left'])
+    D_h = np.cross(Y_vector, keypoints['hip_right'] - keypoints['hip_left'])
 
-    target_hip_mid = hip_mid(target['hip_left'], target['hip_right'])
-    prediction_hip_mid = hip_mid(prediction['hip_left'], prediction['hip_right'])
-    target_shoulder_mid = shoulder_mid(target['shoulder_left'], target['shoulder_right'])
-    prediction_shoulder_mid = shoulder_mid(prediction['shoulder_left'], prediction['shoulder_right'])
-    target_CB = target_shoulder_mid - target_hip_mid
-    prediction_CB = prediction_shoulder_mid - prediction_hip_mid
-    target_Ds = help_shoulder(target_hip_mid, target_shoulder_mid, target['shoulder_left'], target['shoulder_right'])
-    prediction_Ds = help_shoulder(prediction_hip_mid, prediction_shoulder_mid, prediction['shoulder_left'],
-                                  prediction['shoulder_right'])
-    target_Dh = help_hip(target_Y, target['hip_left'], target['hip_right'])
-    prediction_Dh = help_hip(prediction_Y, prediction['hip_left'], prediction['hip_right'])
+    # Trunk angles
+    angles['trunk_angle'] = 90 - calculate_angle(hip_mid - shoulder_mid, D_h)
+    angles['trunk_twist'] = calculate_angle(
+        orthogonal_projection(keypoints['hip_left'] - keypoints['hip_right'], shoulder_mid - hip_mid),
+        orthogonal_projection(keypoints['shoulder_right'] - keypoints['shoulder_left'], shoulder_mid - hip_mid))
+    angles['trunk_bend'] = calculate_angle(Y_vector, orthogonal_projection(shoulder_mid - hip_mid, D_h))
 
-    trunk_twist_error = np.abs(
-        trunk_twist(target['hip_left'], target['hip_right'], target['shoulder_left'], target['shoulder_right']) -
-        trunk_twist(prediction['hip_left'], prediction['hip_right'], prediction['shoulder_left'],
-                    prediction['shoulder_right']))
+    # Lower limb angles
+    angles['knee_angle_l'] = calculate_angle(keypoints['hip_left'], hip_mid, keypoints['ankle_left']) # HK?
+    angles['ankle_angle_l'] = calculate_angle(keypoints['knee_left'], keypoints['ankle_left'], keypoints['toe_left'])
+    angles['knee_angle_r'] = calculate_angle(keypoints['hip_right'], hip_mid, keypoints['ankle_right'])
+    angles['ankle_angle_r'] = calculate_angle(keypoints['knee_right'], keypoints['ankle_right'], keypoints['toe_right'])
 
-    trunk_bending_error = np.abs(
-        trunk_bending(target_Y, target_CB, target_Dh) -
-        trunk_bending(prediction_Y, prediction_CB, prediction_Dh))
+    # Upper limb angles
+    angles['shoulder_angle_l'] = calculate_angle(
+        orthogonal_projection(keypoints['elbow_left'] - keypoints['shoulder_left'], np.cross(D_s, shoulder_mid - hip_mid)),
+        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['elbow_left'] - keypoints['shoulder_left'], D_s))
+    angles['elbow_angle_l'] = calculate_angle(keypoints['shoulder_left'], keypoints['elbow_left'], keypoints['wrist_left'])
+    angles['shoulder_angle_r'] = calculate_angle(
+        orthogonal_projection(keypoints['elbow_right'] - keypoints['shoulder_right'], np.cross(D_s, shoulder_mid - hip_mid)),
+        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['elbow_right'] - keypoints['shoulder_right'], D_s))
+    angles['elbow_angle_r'] = calculate_angle(keypoints['shoulder_right'], keypoints['elbow_right'], keypoints['wrist_right'])
 
-    trunk_angle_error = np.abs(
-        trunk_angle(target_hip_mid, target_shoulder_mid, target_Ds) -
-        trunk_angle(prediction_hip_mid, prediction_shoulder_mid, prediction_Ds))
-
-    knee_left_error = np.abs(
-        knee_angle(target['hip_left'], target['knee_left'], target['ankle_left']) -
-        knee_angle(prediction['hip_left'], prediction['knee_left'], prediction['ankle_left']))
-
-    knee_right_error = np.abs(
-        knee_angle(target['hip_right'], target['knee_right'], target['ankle_right']) -
-        knee_angle(prediction['hip_right'], prediction['knee_right'], prediction['ankle_right']))
-
-    shoulder_left_error = np.abs(
-        shoulder_angle(target['elbow_left'], target['shoulder_left'], target_Ds, target_CB) -
-        shoulder_angle(prediction['elbow_left'], prediction['shoulder_left'], prediction_Ds, prediction_CB))
-
-    shoulder_right_error = np.abs(
-        shoulder_angle(target['elbow_right'], target['shoulder_right'], target_Ds, target_CB) -
-        shoulder_angle(prediction['elbow_right'], prediction['shoulder_right'], prediction_Ds, prediction_CB))
-
-    elbow_left_error = np.abs(
-        elbow_angle(target['shoulder_left'], target['elbow_left'], target['wrist_left']) -
-        elbow_angle(prediction['shoulder_left'], prediction['elbow_left'], prediction['wrist_left']))
-
-    elbow_right_error = np.abs(
-        elbow_angle(target['shoulder_right'], target['elbow_right'], target['wrist_right']) -
-        elbow_angle(prediction['shoulder_right'], prediction['elbow_right'], prediction['wrist_right']))
-
-    ankle_left_error = np.abs(
-        ankle_angle(target['knee_left'], target['ankle_left'], target['toe_left']) -
-        ankle_angle(prediction['knee_left'], prediction['ankle_left'], prediction['toe_left']))
-
-    ankle_right_error = np.abs(
-        ankle_angle(target['knee_right'], target['ankle_right'], target['toe_right']) -
-        ankle_angle(prediction['knee_right'], prediction['ankle_right'], prediction['toe_right']))
-
-    single_segment_error = np.array(
-        [trunk_twist_error, trunk_bending_error, trunk_angle_error, knee_left_error, knee_right_error,
-         shoulder_left_error, shoulder_right_error, elbow_left_error, elbow_right_error, ankle_left_error,
-         ankle_right_error])
-
-    single_segment_mean_error = np.mean(single_segment_error, axis=0)
-    single_segment_std_error = np.std(single_segment_error, axis=0)
-
-    # Calculate R2 for each segment
-    segment_r2 = calculate_r2(single_segment_error, np.zeros_like(single_segment_error))
-
-    return single_segment_mean_error, single_segment_std_error, single_segment_error, segment_r2
+    return angles
 
 
-def calculate_r2(target, predicted):
+def calculate_angle_error(target, prediction, Y_target=np.array([0, 1, 0]), Y_prediction=np.array([0, 1, 0]),
+                          procrustes=True, r2=True, box=True):
     """
-    Calculate the coefficient of determination R^2
-    :param target: Actual values
-    :param predicted: Predicted values
-    :return: R^2
+    Calculate the angle error between target and prediction joint positions.
+    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :param Y_target: Reference vertical axis vector for target (default is the Y-axis)
+    :param Y_prediction: Reference vertical axis vector for prediction (default is the Y-axis)
+    :param procrustes: Whether to use Procrustes alignment
+    :param r2: Whether to calculate R² value
+    :param box: Whether to plot a box plot of the angle errors
+    :return: Mean error, standard deviation of error, and R² value (if calculated)
     """
-    ss_res = np.sum((target - predicted) ** 2)
-    ss_tot = np.sum((target - np.mean(target)) ** 2)
-    r2 = 1 - (ss_res / ss_tot)
-    return r2
+    if procrustes:
+        target, prediction, error_count = align_procrustes(target, prediction)
+    target_angles = calculate_joint_angles(target, Y_target)
+    prediction_angles = calculate_joint_angles(target, Y_prediction)
+    angle_error = np.abs(target_angles - prediction_angles)
+    mean_error = np.mean(angle_error)
+    std_error = np.std(angle_error)
+
+    r2 = None
+    if r2:
+        r2 = plot_calculate_r2(target_angles, prediction_angles)
+
+    if box:
+        plot_box(angle_error)
+    return mean_error, std_error, r2
 
 
-def plot_r2(values, segment_names):
+def plot_calculate_r2(target_angles_dict, prediction_angles_dict):
     """
-    Plot R^2 values for each segment
-    :param values: list of R^2 values
-    :param segment_names: names of the segments
+    Plot R² values for the linear regression fit of target vs prediction angles for each metric and calculate R² value.
+    :param target_angles_dict: Dictionary where keys are metric names and values are lists of ground truth angles
+    :param prediction_angles_dict: Dictionary where keys are metric names and values are lists of predicted angles
+    :return: Dictionary of R² values for each metric
     """
-    plt.figure(figsize=(10, 5))
-    plt.bar(segment_names, values, color='skyblue')
-    plt.xlabel('Segment')
-    plt.ylabel('R^2 Value')
-    plt.title('R^2 for each Segment')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
+    r2_values = {}
+
+    fig = go.Figure()
+
+    colors = ['blue', 'green', 'red', 'purple', 'orange', 'cyan', 'magenta', 'yellow', 'brown', 'black', 'pink']
+    symbols = ['circle', 'square', 'diamond', 'cross', 'x', 'triangle-up', 'triangle-down', 'triangle-left', 'triangle-right', 'pentagon', 'hexagon']
+
+    for i, metric in enumerate(target_angles_dict.keys()):
+        target_angles = np.array(target_angles_dict[metric]).reshape(-1, 1)
+        prediction_angles = np.array(prediction_angles_dict[metric])
+        reg = LinearRegression().fit(target_angles, prediction_angles)
+        prediction_line = reg.predict(target_angles)
+        r2 = r2_score(prediction_angles, prediction_line)
+        r2_values[metric] = r2
+
+        # Scatter plot of the actual values with different colors and marker forms
+        fig.add_trace(go.Scatter(
+            x=target_angles.flatten(),
+            y=prediction_angles,
+            mode='markers',
+            name=f'{metric} Actual values',
+            marker=dict(color=colors[i % len(colors)], symbol=symbols[i % len(symbols)])
+        ))
+
+        # Linear regression line
+        fig.add_trace(go.Scatter(
+            x=target_angles.flatten(),
+            y=prediction_line,
+            mode='lines',
+            name=f'{metric} Linear fit (R²={r2:.2f})',
+            line=dict(color=colors[i % len(colors)])
+        ))
+
+    fig.update_layout(
+        title='Prediction Angles vs Target Angles',
+        xaxis_title='Target Angles',
+        yaxis_title='Prediction Angles',
+        legend_title='Legend',
+        showlegend=True
+    )
+
+    wandb.log({"R2 plot": fig})
+    return r2_values
+
+
+def plot_box(errors_dict):
+    """
+    Plot different errors in a box plot.
+    :param errors_dict: Dictionary where keys are metric names and values are lists of error values.
+    """
+    fig = go.Figure()
+
+    # Different colors and symbols for different metrics
+    colors = ['blue', 'green', 'red', 'purple', 'orange', 'cyan', 'magenta', 'yellow', 'brown', 'black', 'pink']
+    symbols = ['circle', 'square', 'diamond', 'cross', 'x', 'triangle-up', 'triangle-down', 'triangle-left', 'triangle-right', 'pentagon', 'hexagon']
+
+    for i, (metric, errors) in enumerate(errors_dict.items()):
+        fig.add_trace(go.Box(y=errors, name=metric, boxmean=True))
+
+    fig.update_layout(
+        title='Error Metrics',
+        xaxis_title='Metrics',
+        yaxis_title='Error Values',
+        showlegend=True
+    )
+
+    wandb.log({"Angular error box": fig})
 
 
 def calculate_mpsae_old(target, prediction, joint_segments):
@@ -643,9 +525,9 @@ def calculate_mpsae_old(target, prediction, joint_segments):
     segment_errors_mean = {}
     segment_errors_std = {}
     for segment_name, segment_array in joint_segments.items():
-        angle_target = angle_2p_3d(target[:, segment_array[0]], target[:, segment_array[1]],
+        angle_target = calculate_angle(target[:, segment_array[0]], target[:, segment_array[1]],
                                    target[:, segment_array[2]])  # batch, 1
-        angle_prediction = angle_2p_3d(prediction[:, segment_array[0]], prediction[:, segment_array[1]],
+        angle_prediction = calculate_angle(prediction[:, segment_array[0]], prediction[:, segment_array[1]],
                                        prediction[:, segment_array[2]])
         angle_err = np.abs(np.array(angle_target) - np.array(angle_prediction))
         angle_err = np.round(angle_err, 2)

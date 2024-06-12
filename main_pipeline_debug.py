@@ -10,12 +10,13 @@ from utils import frameAugmentation as frameAug
 from utils.plotKeypoints import plot_3d_keypoints_gt_pred
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
+import pickle
 
 
 def log_frame_example(frame):
     """
     Log the last frame of one camera angle to visualize applied frame augmentations. Blur the faces for privacy.
-    :param frames: augmented frames, e.g. [cam0, cam1, cam2, ...]
+    :param frame: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
 
     face_detect = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
@@ -34,10 +35,11 @@ def log_frame_example(frame):
 
 
 class Framework:
-    def __init__(self, model_name, model_type, directory):
+    def __init__(self, model_name, model_type, sample_rate, directory):
         # Access the parsed arguments
         self.model_name = model_name
         self.model_type = model_type
+        self.sample_rate = sample_rate
         self.dataset_path = directory
 
         # Initialize some functions
@@ -62,44 +64,37 @@ class Framework:
         }
 
         # Defines body segments
-        self.body_segments = {
-            "left_lower_arm": [3, 5],
-            "left_upper_arm": [1, 3],
-            "right_lower_arm": [2, 4],
-            "right_upper_arm": [0, 2],
-            # "torso": [0, 1, 7, 6],
-            "left_upper_leg": [7, 9],
-            "left_lower_leg": [9, 11],
-            "right_upper_leg": [6, 8],
-            "right_lower_leg": [8, 12],
-            "left_foot": [13, 15],
-            "right_foot": [12, 14]}
+        # self.body_segments = {
+        #    "left_lower_arm": [3, 5],
+        #    "left_upper_arm": [1, 3],
+        #    "right_lower_arm": [2, 4],
+        #    "right_upper_arm": [0, 2],
+        #    "left_upper_leg": [7, 9],
+        #    "left_lower_leg": [9, 11],
+        #    "right_upper_leg": [6, 8],
+        #    "right_lower_leg": [8, 12],
+        #    "left_foot": [13, 15],
+        #    "right_foot": [12, 14]}
 
-        # Defines pairs of bones for each body segment of each side of the body
-        self.bone_pairs = {
-            "lower_arm": [0, 2],
-            "upper_arm": [1, 3],
-            "upper_leg": [4, 6],
-            "lower_leg": [5, 7],
-            "foot": [8, 9]
+        self.body_segments = {
+            "left_lower_arm": ['elbow_left', 'wrist_left'],
+            "left_upper_arm": ['shoulder_left', 'elbow_left'],
+            "right_lower_arm": ['elbow_right', 'wrist_right'],
+            "right_upper_arm": ['shoulder_right', 'elbow_right'],
+            "left_upper_leg": ['hip_left', 'knee_left'],
+            "left_lower_leg": ['knee_left', 'ankle_left'],
+            "right_upper_leg": ['hip_right', 'knee_right'],
+            "right_lower_leg": ['knee_right', 'ankle_right'],
+            "left_foot": ['ankle_left', 'toe_left'],
+            "right_foot": ['ankle_right', 'toe_right']
         }
 
-        # Defines segments around each joint to calculate angles (distal to proximal).
-        self.joint_segments = {
-            "right_elbow": [0, 2, 4],
-            "left_elbow": [1, 3, 5],
-            "right_shoulder_1": [2, 0, 1],
-            "right_shoulder_2": [2, 0, 6],
-            "left_shoulder_1": [3, 1, 0],
-            "left_shoulder_2": [3, 1, 7],
-            "right_hips_1": [8, 6, 7],
-            "right_hips_2": [8, 6, 0],
-            "left_hips_1": [9, 7, 8],
-            "left_hips_2": [9, 7, 1],
-            "right_knee": [6, 8, 10],
-            "left_knee": [7, 9, 11],
-            "right_ankle": [12, 10, 14],
-            "left_ankle": [13, 11, 15]
+        # Joint names mapping for MoCap ground truth
+        self.joint_names_gt = {
+            0: 'right_shoulder', 1: 'left_shoulder', 2: 'right_elbow', 3: 'left_elbow',
+            4: 'right_wrist', 5: 'left_wrist', 6: 'right_hip', 7: 'left_hip',
+            8: 'right_knee', 9: 'left_knee', 10: 'right_ankle', 11: 'left_ankle',
+            12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
         }
 
         self.interpolation_fun = "akima"
@@ -141,45 +136,48 @@ class Framework:
         :param inference_times: [inference_time0, inference_time1, inference_time2, ]
         """
 
-        # First we calculate the metrics for all extracted keypoints
-        # The metric for distance is millimeters
-        mpjpe_m, mpjpe_s = metrics.calculate_mpjpe(gt_keypoints, pred_keypoints)
+        ###########################################
+        # MAYBE CALCULATE PROCRUSTES BEFORE ONCE ##
+        ###########################################
+
+        # Prepare input
+        keypoint_names = list(gt_keypoints[0].keys())
+        keypoint_names_pred = list(pred_keypoints[0].keys())
+        assert keypoint_names == keypoint_names_pred, "Both the labels of the prediction and ground truth must match."
+        gt_keypoints = [[sample[key] for key in keypoint_names] for sample in gt_keypoints]
+        pred_keypoints = [[sample[key] for key in keypoint_names] for sample in pred_keypoints]
+        gt_keypoints = [item for sublist in gt_keypoints for item in sublist]
+        pred_keypoints = [item for sublist in pred_keypoints for item in sublist]
+
+        # Spatial metrics
         pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
-        pck = metrics.calculate_pck(gt_keypoints, pred_keypoints)
-        velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints, pred_keypoints)
+        angular_m, angular_s, r2 = metrics.calculate_angle_error(gt_keypoints, pred_keypoints)
         cps, cps_auc = metrics.compute_CPS(gt_keypoints, pred_keypoints)
-        angular_m, angular_s, angular_m_s, angular_s_s = metrics.calculate_mpsae(gt_keypoints, pred_keypoints, self.joint_segments)
-        cmc, pvalue = metrics.calculate_cmc(gt_keypoints, pred_keypoints)
+        # Spatio-temporal metrics
+        velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints, pred_keypoints, self.sample_rate)
+        pcc, pvalue = metrics.calculate_correlation(gt_keypoints, pred_keypoints)
+        # Cosine similarity?
 
         # Log whole body metrics
-        wandb.log({"mpjpe_all_mean": mpjpe_m, "mpjpe_all_std": mpjpe_s,
-                   "pmpjpe_all_mean": pmpjpe_m, "pmpjpe_all_std": pmpjpe_s,
-                   "procustes_n": len(pred_keypoints) - proc_error,
-                   "velocity_error_all_mean": velocity_m, "velocity_error_all_std": velocity_s,
-                   "pck_all": pck,
-                   "cps_all": cps, "cps_auc_all": cps_auc,
+        wandb.log({"pmpjpe_all_mean": pmpjpe_m, "pmpjpe_all_std": pmpjpe_s,
                    "angular_all_mean": angular_m, "angular_all_std": angular_s,
-                   "angular_seg_mean": angular_m_s, "angular_seg_std": angular_s_s,
-                   "cmc_all": cmc, "cmc_pvalue_all": pvalue})
-
-        # Bone symmetry MISSING
+                   "cps_all": cps, "cps_auc_all": cps_auc,
+                   "velocity_error_all_mean": velocity_m, "velocity_error_all_std": velocity_s,
+                   "pcc_all": pcc, "pvalue_all": pvalue,
+                   "procrustes_n_all": len(pred_keypoints) - proc_error,
+                   })
 
         # Log metrics for different body segments
         for segment in self.body_segments:
             keypoints = self.body_segments[segment]
-            mpjpe_m, mpjpe_s = metrics.calculate_mpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
             pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            # pck = metrics.calculate_pck(gt_keypoints[keypoints], pred_keypoints[keypoints])
             velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            cmc, pvalue = metrics.calculate_cmc(gt_keypoints[keypoints], pred_keypoints[keypoints])
+            pcc, pvalue = metrics.calculate_correlation(gt_keypoints[keypoints], pred_keypoints[keypoints])
 
-            # Bone symmetry MISSING
-
-            wandb.log({"mpjpe_mean_"+segment: mpjpe_m, "mpjpe_std_"+segment: mpjpe_s,
-                       "pmpjpe_mean_"+segment: pmpjpe_m, "pmpjpe_std_"+segment: pmpjpe_s,
+            wandb.log({"pmpjpe_mean_"+segment: pmpjpe_m, "pmpjpe_std_"+segment: pmpjpe_s,
                        "velocity_mean_"+segment: velocity_m, "velocity_std_"+segment: velocity_s,
-                       # "pck_"+segment: pck,
-                       "cmc_"+segment: cmc, "cmc_pvalue_"+segment: pvalue})
+                       "pcc_"+segment: pcc, "pvalue_"+segment: pvalue,
+                       "procrustes_n_"+segment: len(pred_keypoints) - proc_error})
 
         # Log inference time
         inference_time_mean = np.mean(inference_times)
@@ -206,8 +204,8 @@ class Framework:
             pred_keypoints_all = []
             inference_times_all = []
 
-            for par in tqdm(self.participants, ascii=True, desc="Participants"):
-                for mov in tqdm(self.movement_category[config['movement']], ascii=True, desc="Movements"):
+            for par in tqdm(self.participants, ascii=True, desc="Participant:"):
+                for mov in tqdm(self.movement_category[config['movement']], ascii=True, desc="Movement:"):
                     #try:
                     gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, config['cameras'],
                                                                 self.model_name)
@@ -224,11 +222,19 @@ class Framework:
 
                         if self.model_name == "mediapipe":
                             pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
-                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]
+                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31] # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, 1:]
 
-                        if self.model_name == "alphapose":
-                            print("AlphaPose not implemented yet")
+                            # Joint names mapping for MediaPipe
+                            self.joint_names = {
+                                0: 'right_shoulder', 1: 'left_shoulder', 2: 'right_elbow', 3: 'left_elbow',
+                                4: 'right_wrist', 5: 'left_wrist', 6: 'right_hip', 7: 'left_hip',
+                                8: 'right_knee', 9: 'left_knee', 10: 'right_ankle', 11: 'left_ankle',
+                                12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
+                            }
+
+                        if self.model_name == "motionbert":
+                            print("MotionBERT not implemented yet")
                             # pred_keypoints, inference_times, frame = alphaPoseMono.inference_video(caps, self)
 
                     # Multioccular models
@@ -239,37 +245,65 @@ class Framework:
                             # Load camera parameter matrix and add noise if specified so
                             p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'],
                                                                      self.sweep_config['decalibration'])
-                        if self.model_name == "canonpose":
-                            print("CanonPose not implemented yet")
+                        if self.model_name == "openpose":
+                            print("OpenPose not implemented yet")
+                            # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
+
+                        if self.model_name == "LWCDR":
+                            print("LWCDR not implemented yet")
                             # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
 
                     # Postprocess predicted keypoints
-                    pred_keypoints_processing = postprocessing.postprocess_points(pred_keypoints,
+                    pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
                                                                                   self.interpolation_fun,
                                                                                   self.smoothing_fun)
 
-                    # Morph ground truth to format of predicted keypoints
-                    pred_keypoints_morphed = self.apply_morphing(pred_keypoints_processing)
+                    # Morph ground truth to format of predicted keypoints (can't handle gaps)
+                    pred_keypoints = self.apply_morphing(pred_keypoints)
+
+                    # Add joint names
+                    pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
+                                      range(pred_keypoints.shape[1])}
+
+                    gt_keypoints = {self.joint_names_gt[i]: gt_keypoints[:, i, :] for i in
+                                      range(gt_keypoints.shape[1])}
 
                     # Collect pred_keypoints for each movement iteration
                     gt_keypoints_all.append(gt_keypoints)
-                    pred_keypoints_all.append(pred_keypoints_morphed)
+                    pred_keypoints_all.append(pred_keypoints)
                     inference_times_all.append(inference_times)
 
                     # Collect last good frame for visualization
                     if frame is not None or frame.size != 0:
                         frame_example = frame
 
+            # Save data for debugging
+            data_to_save= {'gt_keypoints': gt_keypoints_all,
+                           'pred_keypoints': pred_keypoints_all,
+                           'inference_time': inference_times_all,
+                           'frame': frame_example
+                           }
+
+            with open(run.name + '.pkl', 'wb') as file:
+                 pickle.dump(data_to_save, file)
+
+
             # Calculate the metrics, generate plots and log them to wandb
-            #with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
-            #    pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
+            with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
+                pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
             print("Calculating metrics and logging to wandb")
             inference_times_all = np.concatenate(inference_times_all)
             gt_keypoints_all = np.concatenate(gt_keypoints_all, axis=0)
             pred_keypoints_all = np.concatenate(pred_keypoints_all, axis=0)
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
-            plot_3d_keypoints_gt_pred(gt_keypoints[-1], pred_keypoints_morphed[-1], self.model_name)
+            # plot metrics
+
+            plot_3d_keypoints_gt_pred(gt_keypoints[-1], pred_keypoints_all[-1], self.model_name)
             log_frame_example(frame_example)
+            # Log r2
+            print("Calculating metrics and logging to wandb")
+
+            # Save metrics for each movement for later calculations
 
     def initiate_wandb_sweep(self):
         """
@@ -282,11 +316,14 @@ class Framework:
             raise ValueError('Choose a valid model type (multi or mono)')
 
         if self.model_type == 'mono':
-            if self.model_name not in ['mediapipe', 'alphapose', 'unknown']:
+            if self.model_name not in ['mediapipe', 'motionbert']:
                 raise ValueError('Choose a valid monooccular model, or change the model type to multi')
         elif self.model_type == 'multi':
-            if self.model_name not in ['cdrnet', 'canonpose']:
+            if self.model_name not in ['openpose', 'LWCDR']:
                 raise ValueError('Choose a valid multioccular model, or change the model type to mono')
+
+            if self.sample_rate is None:
+                raise ValueError('Sample rate missing (Hz)')
 
         if self.dataset_path is None:
             raise ValueError('Dataset path is missing')
@@ -335,7 +372,7 @@ class Framework:
 
         # Initialize the sweep run
         sweep_id = wandb.sweep(sweep=self.sweep_config,
-                               project='HPE_framework_2')
+                               project='HPE_framework')
 
         # Start sweep
         wandb.agent(sweep_id, function=self.main)
@@ -345,5 +382,5 @@ class Framework:
 
 
 # Run the framework
-Framework(model_name="mediapipe", model_type="mono",
-          directory="/home/emanu/Desktop/MoCap/segmented").initiate_wandb_sweep()
+Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
+          directory="/media/emanu/LaCie/MoCap/segmented").initiate_wandb_sweep()
