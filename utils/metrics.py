@@ -29,7 +29,7 @@ def calculate_mpjpe(target, prediction):
     """
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
-    mpjpe = np.linalg.norm(prediction - target, axis=2)
+    mpjpe = np.linalg.norm(prediction - target, axis=1)
     mean = np.mean(mpjpe)
     std = np.std(mpjpe)
 
@@ -163,7 +163,7 @@ def calculate_pck(target, prediction, threshold=100.0,
     return pck
 
 
-def mean_velocity_error(prediction, target, sample_rate, procrustes=True):
+def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
     :param prediction: Predicted 3D joint positions
@@ -182,12 +182,12 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=True):
     if procrustes:
         mean, std, err = calculate_pmpjpe(velocity_target, velocity_predicted)
     else:
-        mean, std, err = calculate_mpjpe(velocity_target, velocity_predicted)
+        mean, std = calculate_mpjpe(velocity_target, velocity_predicted)
 
     return mean, std
 
 
-def mean_acceleration_error(prediction, target, sample_rate, procrustes=True):
+def mean_acceleration_error(prediction, target, sample_rate, procrustes=False):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
     :param prediction: Predicted 3D joint positions
@@ -211,11 +211,11 @@ def mean_acceleration_error(prediction, target, sample_rate, procrustes=True):
     return mean, std
 
 
-def calculate_correlation(target, prediction, axes_to_use=None, procrustes=True):
+def calculate_correlation(target, prediction, axes_to_use=None, procrustes=False):
     """
     Calculate average Pearson correlation coefficient for all joints and axes to measure signal similarity.
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :param target: Ground truth 3D joint positions, shape [sample, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, 3]
     :param axes_to_use: List of axes to use for similarity calculation
     :param procrustes: Whether to use procrustes alignment
     :return: Mean correlation coefficient and mean p-value
@@ -226,8 +226,8 @@ def calculate_correlation(target, prediction, axes_to_use=None, procrustes=True)
 
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
-    target = target[:, :, axes_to_use]
-    prediction = prediction[:, :, axes_to_use]
+    target = target[:, axes_to_use]
+    prediction = prediction[:, axes_to_use]
 
     if procrustes:
         target, prediction, _ = align_procrustes(target, prediction)
@@ -235,17 +235,16 @@ def calculate_correlation(target, prediction, axes_to_use=None, procrustes=True)
     correlations = []
     pvalues = []
 
-    for keypoint in range(target.shape[1]):
-        for coordinate in range(target.shape[2]):
-            gt = target[:, keypoint, coordinate]
-            pred = prediction[:, keypoint, coordinate]
+    for coordinate in range(target.shape[1]):
+        gt = target[:, coordinate]
+        pred = prediction[:, coordinate]
 
-            if np.std(gt) == 0 or np.std(pred) == 0:
-                continue  # Skip if no variance in the data
+        if np.std(gt) == 0 or np.std(pred) == 0:
+            continue  # Skip if no variance in the data
 
-            corr, pvalue = pearsonr(gt, pred)
-            correlations.append(corr)
-            pvalues.append(pvalue)
+        corr, pvalue = pearsonr(gt, pred)
+        correlations.append(corr)
+        pvalues.append(pvalue)
 
     if not correlations:
         return float('nan'), float('nan')  # Handle case where no valid correlations were calculated
@@ -274,7 +273,7 @@ def compute_CP(target, prediction, threshold=180, joints_to_use=None):
 
 
 def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
-                joints_to_use=None, procrustes=True):
+                joints_to_use=None, procrustes=False):
     """
     Compute the correct pose score (CPS) according to (https://arxiv.org/abs/2011.14679) for different thresholds
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -371,41 +370,41 @@ def calculate_joint_angles(keypoints, Y_vector=np.array([0, 1, 0])):
     angles = {}
 
     # Midpoints
-    shoulder_mid = (keypoints['shoulder_right'] + keypoints['shoulder_left']) / 2
-    hip_mid = (keypoints['hip_right'] + keypoints['hip_left']) / 2
+    shoulder_mid = (keypoints['right_shoulder'] + keypoints['left_shoulder']) / 2
+    hip_mid = (keypoints['right_hip'] + keypoints['left_hip']) / 2
 
     # Help vectors
-    D_s = np.cross(hip_mid - shoulder_mid, keypoints['shoulder_right'] - keypoints['shoulder_left'])
-    D_h = np.cross(Y_vector, keypoints['hip_right'] - keypoints['hip_left'])
+    D_s = np.cross(hip_mid - shoulder_mid, keypoints['right_shoulder'] - keypoints['left_shoulder'])
+    D_h = np.cross(Y_vector, keypoints['right_hip'] - keypoints['left_hip'])
 
     # Trunk angles
     angles['trunk_angle'] = 90 - calculate_angle(hip_mid - shoulder_mid, D_h)
     angles['trunk_twist'] = calculate_angle(
-        orthogonal_projection(keypoints['hip_left'] - keypoints['hip_right'], shoulder_mid - hip_mid),
-        orthogonal_projection(keypoints['shoulder_right'] - keypoints['shoulder_left'], shoulder_mid - hip_mid))
+        orthogonal_projection(keypoints['left_hip'] - keypoints['right_hip'], shoulder_mid - hip_mid),
+        orthogonal_projection(keypoints['right_shoulder'] - keypoints['left_shoulder'], shoulder_mid - hip_mid))
     angles['trunk_bend'] = calculate_angle(Y_vector, orthogonal_projection(shoulder_mid - hip_mid, D_h))
 
     # Lower limb angles
-    angles['knee_angle_l'] = calculate_angle(keypoints['hip_left'], hip_mid, keypoints['ankle_left']) # HK?
-    angles['ankle_angle_l'] = calculate_angle(keypoints['knee_left'], keypoints['ankle_left'], keypoints['toe_left'])
-    angles['knee_angle_r'] = calculate_angle(keypoints['hip_right'], hip_mid, keypoints['ankle_right'])
-    angles['ankle_angle_r'] = calculate_angle(keypoints['knee_right'], keypoints['ankle_right'], keypoints['toe_right'])
+    angles['knee_angle_l'] = calculate_angle(keypoints['left_hip'], hip_mid, keypoints['left_ankle']) # HK?
+    angles['ankle_angle_l'] = calculate_angle(keypoints['left_knee'], keypoints['left_ankle'], keypoints['left_toe'])
+    angles['knee_angle_r'] = calculate_angle(keypoints['right_hip'], hip_mid, keypoints['right_ankle'])
+    angles['ankle_angle_r'] = calculate_angle(keypoints['right_knee'], keypoints['right_ankle'], keypoints['right_toe'])
 
     # Upper limb angles
     angles['shoulder_angle_l'] = calculate_angle(
-        orthogonal_projection(keypoints['elbow_left'] - keypoints['shoulder_left'], np.cross(D_s, shoulder_mid - hip_mid)),
-        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['elbow_left'] - keypoints['shoulder_left'], D_s))
-    angles['elbow_angle_l'] = calculate_angle(keypoints['shoulder_left'], keypoints['elbow_left'], keypoints['wrist_left'])
+        orthogonal_projection(keypoints['left_elbow'] - keypoints['left_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)),
+        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['left_elbow'] - keypoints['left_shoulder'], D_s))
+    angles['elbow_angle_l'] = calculate_angle(keypoints['left_shoulder'], keypoints['left_elbow'], keypoints['left_wrist'])
     angles['shoulder_angle_r'] = calculate_angle(
-        orthogonal_projection(keypoints['elbow_right'] - keypoints['shoulder_right'], np.cross(D_s, shoulder_mid - hip_mid)),
-        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['elbow_right'] - keypoints['shoulder_right'], D_s))
-    angles['elbow_angle_r'] = calculate_angle(keypoints['shoulder_right'], keypoints['elbow_right'], keypoints['wrist_right'])
+        orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)),
+        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s))
+    angles['elbow_angle_r'] = calculate_angle(keypoints['right_shoulder'], keypoints['right_elbow'], keypoints['right_wrist'])
 
     return angles
 
 
 def calculate_angle_error(target, prediction, Y_target=np.array([0, 1, 0]), Y_prediction=np.array([0, 1, 0]),
-                          procrustes=True, r2=True, box=True):
+                          procrustes=False, r2=True, box=True):
     """
     Calculate the angle error between target and prediction joint positions.
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]

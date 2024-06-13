@@ -11,6 +11,7 @@ from utils.plotKeypoints import plot_3d_keypoints_gt_pred
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
 import pickle
+from scipy.spatial import procrustes
 
 
 def log_frame_example(frame):
@@ -18,7 +19,6 @@ def log_frame_example(frame):
     Log the last frame of one camera angle to visualize applied frame augmentations. Blur the faces for privacy.
     :param frame: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
-
     face_detect = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
     face_data = face_detect.detectMultiScale(frame, 1.2, 3)
 
@@ -32,87 +32,6 @@ def log_frame_example(frame):
 
     image = wandb.Image(frame)
     wandb.log({"Example_Frame": image})
-
-
-def align_procrustes(target, prediction):
-    """
-    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
-    often referred to as "Protocol #2" in many papers.
-    Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
-    :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
-    :return error_count: Error count of failed alignments
-    """
-    gt_all = []
-    pred_all = []
-    error_count = 0
-    joint_number = target.shape[1]
-
-    for (gt, pred) in (zip(target, prediction)):
-        gt_raw = gt
-        if not (np.sum(np.abs(pred)) == 0):
-            transposed = False
-            if pred.shape[0] != 3 and pred.shape[0] != 2:
-                pred = pred.T
-                gt = gt.T
-                transposed = True
-            assert (gt.shape[1] == pred.shape[1]), "The number of joints must match."
-
-            # 1. Remove mean.
-            muX = np.mean(pred, axis=1, keepdims=True)
-            muY = np.mean(gt, axis=1, keepdims=True)
-            X0 = pred - muX
-            Y0 = gt - muY
-
-            # 2. Compute variance of X1 used for scale.
-            var1 = np.sum(X0 ** 2)
-
-            # 3. The outer product of X1 and X2.
-            K = X0.dot(Y0.T)
-
-            # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are singular vectors of K.
-            try:
-                U, s, Vh = np.linalg.svd(K)
-            except np.linalg.LinAlgError:
-                # print("SVD did not converge")
-                error_count += 1
-                continue
-
-            V = Vh.T
-            # Construct Z that fixes the orientation of R to get det(R)=1.
-            Z = np.eye(U.shape[0])
-            Z[-1, -1] *= np.sign(np.linalg.det(U.dot(V.T)))
-            # Construct R.
-            R = V.dot(Z.dot(U.T))
-
-            # 5. Recover scale.
-            scale = np.trace(R.dot(K)) / var1
-
-            # 6. Recover translation.
-            t = muY - scale * (R.dot(muX))
-
-            # 7. Error:
-            pred_hat = scale * R.dot(pred) + t
-
-            if transposed:
-                pred_hat = pred_hat.T
-
-        else:
-            pred_hat = np.tile(np.mean(gt, axis=0), (joint_number, 1))
-            R = np.identity(3)
-
-        gt_all.append(gt_raw)
-        pred_all.append(pred_hat)
-
-    gt_all = np.array(gt_all)
-    pred_all = np.array(pred_all)
-
-    if error_count > 0:
-        print(f"Procrustes alignment failed {error_count} times")
-
-    return gt_all, pred_all, error_count
 
 
 class Framework:
@@ -157,18 +76,18 @@ class Framework:
         #    "left_foot": [13, 15],
         #    "right_foot": [12, 14]}
 
-        self.body_segments = {
-            "left_lower_arm": ['elbow_left', 'wrist_left'],
-            "left_upper_arm": ['shoulder_left', 'elbow_left'],
-            "right_lower_arm": ['elbow_right', 'wrist_right'],
-            "right_upper_arm": ['shoulder_right', 'elbow_right'],
-            "left_upper_leg": ['hip_left', 'knee_left'],
-            "left_lower_leg": ['knee_left', 'ankle_left'],
-            "right_upper_leg": ['hip_right', 'knee_right'],
-            "right_lower_leg": ['knee_right', 'ankle_right'],
-            "left_foot": ['ankle_left', 'toe_left'],
-            "right_foot": ['ankle_right', 'toe_right']
-        }
+       # self.body_segments = {
+       #     "left_lower_arm": ['left_elbow', 'left_wrist'],
+       #     "left_upper_arm": ['left_shoulder', 'left_elbow'],
+       #     "right_lower_arm": ['right_elbow', 'wrist_right'],
+       #     "right_upper_arm": ['shoulder_right', 'elbow_right'],
+       #     "left_upper_leg": ['hip_left', 'knee_left'],
+       #     "left_lower_leg": ['knee_left', 'ankle_left'],
+       #     "right_upper_leg": ['hip_right', 'knee_right'],
+       #     "right_lower_leg": ['knee_right', 'ankle_right'],
+       #     "left_foot": ['ankle_left', 'toe_left'],
+       #     "right_foot": ['ankle_right', 'toe_right']
+       # }
 
         # Joint names mapping for MoCap ground truth
         self.joint_names_gt = {
@@ -209,6 +128,16 @@ class Framework:
             morphed_pose = self.model_skel_morph(inp_poses)
         return morphed_pose.view(-1, input_pose.size(1), input_pose.size(2)).cpu().detach().numpy()
 
+
+    def convert_keypoints_dicts_to_array(self, keypoints_all):
+        all_keypoints_array = []
+        for keypoints_dict in keypoints_all:
+            keypoints_list = [keypoints_dict[key] for key in sorted(keypoints_dict.keys())]
+            keypoints_array = np.stack(keypoints_list, axis=1)
+            all_keypoints_array.append(keypoints_array)
+        return all_keypoints_array
+
+
     def calculate_log_metrics(self, gt_keypoints, pred_keypoints, inference_times):
         """
         Calculate metrics for each sweep and logs them on wandb. Calculates it for the whole body and body segments.
@@ -222,13 +151,69 @@ class Framework:
         ###########################################
 
         # Prepare input
-        keypoint_names = list(gt_keypoints[0].keys())
-        keypoint_names_pred = list(pred_keypoints[0].keys())
-        assert keypoint_names == keypoint_names_pred, "Both the labels of the prediction and ground truth must match."
-        gt_keypoints = [[sample[key] for key in keypoint_names] for sample in gt_keypoints]
-        pred_keypoints = [[sample[key] for key in keypoint_names] for sample in pred_keypoints]
-        gt_keypoints = [item for sublist in gt_keypoints for item in sublist]
-        pred_keypoints = [item for sublist in pred_keypoints for item in sublist]
+        gt_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(gt_keypoints)
+        pred_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(pred_keypoints)
+        joint_names = list(gt_keypoints[0].keys())
+        assert joint_names == list(gt_keypoints[0].keys()), "Joint names of target and prediction do not match."
+
+        metrics_dict = {metric: {joint: [] for joint in joint_names} for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "pcc", "pvalue"]}
+        all_metrics_dict = {metric: [] for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "angular_m", "angular_s", "r2", "cps", "cps_auc", "pcc", "pvalue"]}
+
+        # Calculate metrics for each movement type, to avoid jumps between movement segments
+        for gt_movement, pred_movement in zip(gt_keypoints_all_arrays, pred_keypoints_all_arrays):
+            # Calculate metrics for each joint
+            for joint in range(np.size(gt_movement, 1)):
+                gt_array = np.squeeze(np.array(gt_movement[:, joint, :]))
+                pred_array = np.squeeze(np.array(pred_movement[:, joint, :]))
+
+                pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(gt_array, pred_array)
+                velocity_m, velocity_s = metrics.mean_velocity_error(gt_array, pred_array, self.sample_rate)
+                pcc, pvalue = metrics.calculate_correlation(gt_array, pred_array)
+
+                metrics_dict["pmpjpe_m"][joint_names[joint]].append(pmpjpe_m)
+                metrics_dict["pmpjpe_s"][joint_names[joint]].append(pmpjpe_s)
+                metrics_dict["velocity_m"][joint_names[joint]].append(velocity_m)
+                metrics_dict["velocity_s"][joint_names[joint]].append(velocity_s)
+                metrics_dict["pcc"][joint_names[joint]].append(pcc)
+                metrics_dict["pvalue"][joint_names[joint]].append(pvalue)
+
+            # Calculate whole body metrics using all keypoints
+            all_metrics_dict["pmpjpe_m"].append(
+                np.mean([np.mean(metrics_dict["pmpjpe_m"][joint]) for joint in joint_names]))
+            all_metrics_dict["pmpjpe_s"].append(
+                np.mean([np.mean(metrics_dict["pmpjpe_s"][joint]) for joint in joint_names]))
+            all_metrics_dict["velocity_m"].append(
+                np.mean([np.mean(metrics_dict["velocity_m"][joint]) for joint in joint_names]))
+            all_metrics_dict["velocity_s"].append(
+                np.mean([np.mean(metrics_dict["velocity_s"][joint]) for joint in joint_names]))
+            all_metrics_dict["pcc"].append(
+                np.mean([np.mean(metrics_dict["pcc"][joint]) for joint in joint_names]))
+            all_metrics_dict["pvalue"].append(
+                np.mean([np.mean(metrics_dict["pvalue"][joint]) for joint in joint_names]))
+
+        gt_movement_dict = {joint: gt_movement[:, joint_names.index(joint)] for joint in joint_names}
+        pred_movement_dict = {joint: pred_movement[:, joint_names.index(joint)] for joint in joint_names}
+
+        angular_m, angular_s, r2 = metrics.calculate_angle_error(gt_movement_dict, pred_movement_dict)
+        cps, cps_auc = metrics.compute_CPS(gt_movement_dict, pred_movement_dict)
+        all_metrics_dict["angular_s"].append(angular_s)
+        all_metrics_dict["r2"].append(r2)
+        all_metrics_dict["cps"].append(cps)
+        all_metrics_dict["cps_auc"].append(cps_auc)
+
+
+        # Log mean over all movements
+        for metric, values in metrics_dict.items():
+             wandb.log({f"{metric}_joint": {joint: np.mean(vals) for joint, vals in values.items()}})
+
+       # for metric, values in segment_metrics_dict.items():
+       #     wandb.log({f"{metric}_segment": {segment: np.mean(vals) for segment, vals in values.items()}})
+
+        for metric, values in all_metrics_dict.items():
+            wandb.log({f"{metric}_all": np.mean(values)})
+
+
+
 
         # Spatial metrics
         pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
@@ -285,102 +270,21 @@ class Framework:
             pred_keypoints_all = []
             inference_times_all = []
 
-            for par in tqdm(self.participants, ascii=True, desc="Participant:"):
-                for mov in tqdm(self.movement_category[config['movement']], ascii=True, desc="Movement:"):
-                    #try:
-                    gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, config['cameras'],
-                                                                self.model_name)
-                    #except:
-                    #    print(f"Participant {par} and movement {mov} not found")
-                    #    continue
-
-                    # Open model based on name and run inference
-                    # Monocular models
-                    if self.model_type == "mono":
-                        # Just load the first (and only) camera
-                        gt_keypoints = gt_keypoints[0][1]
-                        caps = caps[0][1]
-
-                        if self.model_name == "mediapipe":
-                            pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
-                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31] # Select only relevant keypoints and put them in the right order
-                            pred_keypoints = pred_keypoints[:, selected_columns, 1:]
-
-                            # Joint names mapping for MediaPipe
-                            self.joint_names = {
-                                0: 'right_shoulder', 1: 'left_shoulder', 2: 'right_elbow', 3: 'left_elbow',
-                                4: 'right_wrist', 5: 'left_wrist', 6: 'right_hip', 7: 'left_hip',
-                                8: 'right_knee', 9: 'left_knee', 10: 'right_ankle', 11: 'left_ankle',
-                                12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
-                            }
-
-                        if self.model_name == "motionbert":
-                            print("MotionBERT not implemented yet")
-                            # pred_keypoints, inference_times, frame = alphaPoseMono.inference_video(caps, self)
-
-                    # Multioccular models
-                    elif self.model_type == "multi":
-                        # Desynchronize video streams
-                        if self.sweep_config['desynchronizer']:
-                            caps = self.cam_desynchronizer.desynchronize(caps)
-                            # Load camera parameter matrix and add noise if specified so
-                            p_matrix = camCali.get_projection_matrix(self.sweep_config['cameras'],
-                                                                     self.sweep_config['decalibration'])
-                        if self.model_name == "openpose":
-                            print("OpenPose not implemented yet")
-                            # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
-
-                        if self.model_name == "LWCDR":
-                            print("LWCDR not implemented yet")
-                            # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
-
-                    # Postprocess predicted keypoints
-                    pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
-                                                                                  self.interpolation_fun,
-                                                                                  self.smoothing_fun)
-
-                    # Procrustes Alignment
-                    gt_keypoints, pred_keypoints, proc_error = align_procrustes(gt_keypoints, pred_keypoints)
-
-                    # Morph ground truth to format of predicted keypoints (can't handle gaps)
-                    pred_keypoints = self.apply_morphing(pred_keypoints)
-
-                    # Add joint names
-                    pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
-                                      range(pred_keypoints.shape[1])}
-
-                    gt_keypoints = {self.joint_names_gt[i]: gt_keypoints[:, i, :] for i in
-                                      range(gt_keypoints.shape[1])}
-
-                    # Collect pred_keypoints for each movement iteration
-                    gt_keypoints_all.append(gt_keypoints)
-                    pred_keypoints_all.append(pred_keypoints)
-                    inference_times_all.append(inference_times)
-
-                    # Collect last good frame for visualization
-                    if frame is not None or frame.size != 0:
-                        frame_example = frame
-
-            # Save data for debugging
-            data_to_save= {'gt_keypoints': gt_keypoints_all,
-                           'pred_keypoints': pred_keypoints_all,
-                           'inference_time': inference_times_all,
-                           'frame': frame_example
-                           }
-
-            with open(run.name + '.pkl', 'wb') as file:
-                 pickle.dump(data_to_save, file)
-
-
             # Calculate the metrics, generate plots and log them to wandb
-            with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
-                pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
+            with open('mediapipe-upper-defocus-0.pkl', 'rb') as f:  # Python 3: open(..., 'wb')
+                loaded_data = pickle.load(f)
+                gt_keypoints_all = loaded_data["gt_keypoints"]
+                pred_keypoints_all = loaded_data["pred_keypoints"]
+                inference_times_all = loaded_data["inference_time"]
+                frame_example = loaded_data["frame"]
+
+            # Verify that both dictionaries have the same keys
+            gt_keys = gt_keypoints_all[0].keys()
+            pred_keys = pred_keypoints_all[0].keys()
+            assert gt_keys == pred_keys, "Mismatch in keys between ground truth and predicted keypoints"
+
             print("Calculating metrics and logging to wandb")
-            inference_times_all = np.concatenate(inference_times_all)
-            gt_keypoints_all = np.concatenate(gt_keypoints_all, axis=0)
-            pred_keypoints_all = np.concatenate(pred_keypoints_all, axis=0)
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
-            # plot metrics
 
             plot_3d_keypoints_gt_pred(gt_keypoints[-1], pred_keypoints_all[-1], self.model_name)
             log_frame_example(frame_example)
