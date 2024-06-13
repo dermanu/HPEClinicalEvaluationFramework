@@ -312,8 +312,11 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
 
     return cps_best, cps_idx
 
+####################################################################
+### Adjust according to https://www.mdpi.com/1424-8220/22/5/1729 ###
+####################################################################
 
-def calculate_angle(joint_a, joint_b, joint_c):
+def calculate_angle_point(joint_a, joint_b, joint_c):
     """
     Calculate the angle formed at joint_b by the lines connecting joint_a and joint_c
     :param joint_a: 3D coordinates of joint A, numpy array of shape [sample, joint, 3]
@@ -321,11 +324,19 @@ def calculate_angle(joint_a, joint_b, joint_c):
     :param joint_c: 3D coordinates of joint C, numpy array of shape [sample, joint, 3]
     :return: Angles in degrees, numpy array of shape [sample, joint]
     """
+    # Check if any inputs need reshaping
+    if len(joint_a.shape) == 1:
+        joint_a = joint_a.reshape(-1, joint_a.shape[0], 3)
+    if len(joint_b.shape) == 1:
+        joint_b = joint_b.reshape(-1, joint_b.shape[0], 3)
+    if len(joint_c.shape) == 1:
+        joint_c = joint_c.reshape(-1, joint_c.shape[0], 3)
+
     v1 = joint_a - joint_b
     v2 = joint_c - joint_b
-    v1_norm = v1 / np.linalg.norm(v1, axis=2, keepdims=True)
-    v2_norm = v2 / np.linalg.norm(v2, axis=2, keepdims=True)
-    dot_product = np.sum(v1_norm * v2_norm, axis=2)
+    v1_norm = v1 / np.linalg.norm(v1, axis=1, keepdims=True)
+    v2_norm = v2 / np.linalg.norm(v2, axis=1, keepdims=True)
+    dot_product = np.sum(v1_norm * v2_norm, axis=1)
     dot_product = np.clip(dot_product, -1.0, 1.0)  # Clip to ensure they are within the valid range for arccos [-1, 1]
     angles_rad = np.arccos(dot_product)
     angles_deg = np.degrees(angles_rad)
@@ -335,11 +346,14 @@ def calculate_angle(joint_a, joint_b, joint_c):
 def orthogonal_projection(vector, normal):
     """
     Calculate the orthogonal projection of a vector onto a plane defined by a normal vector.
-    :param vector: The vector to be projected, shape (n,)
-    :param normal: The normal vector of the plane, shape (n,)
-    :return: The orthogonal projection of the vector onto the plane, shape (n,)
+    :param vector: The vector to be projected, shape (batch, 3)
+    :param normal: The normal vector of the plane, shape (batch, 3)
+    :return: The orthogonal projection of the vector onto the plane, shape (batch, 3)
     """
-    return vector - np.dot(vector, normal) / np.dot(normal, normal) * normal
+    dot_product = np.einsum('ij,ij->i', vector, normal)
+    normal_norm_sq = np.einsum('ij,ij->i', normal, normal)
+    projection = vector - (dot_product / normal_norm_sq)[:, np.newaxis] * normal
+    return projection
 
 
 def get_vertical_axis_from_calibration(hip_left, hip_right, shoulder_left, shoulder_right):
@@ -357,9 +371,26 @@ def get_vertical_axis_from_calibration(hip_left, hip_right, shoulder_left, shoul
     return vertical_vector / np.linalg.norm(vertical_vector)
 
 
-####################################################################
-### Adjust according to https://www.mdpi.com/1424-8220/22/5/1729 ###
-####################################################################
+def calculate_angle_vector(v1, v2):
+    """
+    Calculate the angle between two vectors.
+    :param v1: First vector, numpy array of shape (batch, 3)
+    :param v2: Second vector, numpy array of shape (batch, 3)
+    :return: Angles in degrees, numpy array of shape (batch,)
+    """
+    # Check if v1 needs reshaping
+    if len(v1.shape) == 1:
+        v1 = v1.reshape(-1, 3)
+
+    v1_norm = v1 / np.linalg.norm(v1, axis=1, keepdims=True)
+    v2_norm = v2 / np.linalg.norm(v2, axis=1, keepdims=True)
+    dot_product = np.einsum('ij,ij->i', v1_norm, v2_norm)
+    dot_product = np.clip(dot_product, -1.0, 1.0)  # Clip to ensure they are within the valid range for arccos [-1, 1]
+    angles_rad = np.arccos(dot_product)
+    angles_deg = np.degrees(angles_rad)
+    return np.round(angles_deg, 2)
+
+
 def calculate_joint_angles(keypoints, Y_vector=np.array([0, 1, 0])):
     """
     Calculate various joint angles based on 3D keypoints.
@@ -372,33 +403,31 @@ def calculate_joint_angles(keypoints, Y_vector=np.array([0, 1, 0])):
     # Midpoints
     shoulder_mid = (keypoints['right_shoulder'] + keypoints['left_shoulder']) / 2
     hip_mid = (keypoints['right_hip'] + keypoints['left_hip']) / 2
+    hip_mid = hip_mid.reshape(-1, 3)
+    shoulder_mid = shoulder_mid.reshape(-1, 3)
 
     # Help vectors
     D_s = np.cross(hip_mid - shoulder_mid, keypoints['right_shoulder'] - keypoints['left_shoulder'])
     D_h = np.cross(Y_vector, keypoints['right_hip'] - keypoints['left_hip'])
 
     # Trunk angles
-    angles['trunk_angle'] = 90 - calculate_angle(hip_mid - shoulder_mid, D_h)
-    angles['trunk_twist'] = calculate_angle(
+    angles['trunk_angle'] = 90 - calculate_angle_vector(hip_mid - shoulder_mid, D_h)
+    angles['trunk_twist'] = calculate_angle_vector(
         orthogonal_projection(keypoints['left_hip'] - keypoints['right_hip'], shoulder_mid - hip_mid),
         orthogonal_projection(keypoints['right_shoulder'] - keypoints['left_shoulder'], shoulder_mid - hip_mid))
-    angles['trunk_bend'] = calculate_angle(Y_vector, orthogonal_projection(shoulder_mid - hip_mid, D_h))
+    angles['trunk_bend'] = calculate_angle_vector(Y_vector, orthogonal_projection(shoulder_mid - hip_mid, D_h))
 
     # Lower limb angles
-    angles['knee_angle_l'] = calculate_angle(keypoints['left_hip'], hip_mid, keypoints['left_ankle']) # HK?
-    angles['ankle_angle_l'] = calculate_angle(keypoints['left_knee'], keypoints['left_ankle'], keypoints['left_toe'])
-    angles['knee_angle_r'] = calculate_angle(keypoints['right_hip'], hip_mid, keypoints['right_ankle'])
-    angles['ankle_angle_r'] = calculate_angle(keypoints['right_knee'], keypoints['right_ankle'], keypoints['right_toe'])
+    angles['knee_angle_l'] = calculate_angle_point(keypoints['left_hip'], hip_mid, keypoints['left_ankle']) # HK?
+    angles['ankle_angle_l'] = calculate_angle_point(keypoints['left_knee'], keypoints['left_ankle'], keypoints['left_foot_index'])
+    angles['knee_angle_r'] = calculate_angle_point(keypoints['right_hip'], hip_mid, keypoints['right_ankle'])
+    angles['ankle_angle_r'] = calculate_angle_point(keypoints['right_knee'], keypoints['right_ankle'], keypoints['right_foot_index'])
 
     # Upper limb angles
-    angles['shoulder_angle_l'] = calculate_angle(
-        orthogonal_projection(keypoints['left_elbow'] - keypoints['left_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)),
-        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['left_elbow'] - keypoints['left_shoulder'], D_s))
-    angles['elbow_angle_l'] = calculate_angle(keypoints['left_shoulder'], keypoints['left_elbow'], keypoints['left_wrist'])
-    angles['shoulder_angle_r'] = calculate_angle(
-        orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)),
-        shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s))
-    angles['elbow_angle_r'] = calculate_angle(keypoints['right_shoulder'], keypoints['right_elbow'], keypoints['right_wrist'])
+    angles['shoulder_angle_r'] = calculate_angle_vector(orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s.T))[1]
+    angles['elbow_angle_l'] = calculate_angle_point(keypoints['left_shoulder'], keypoints['left_elbow'], keypoints['left_wrist'])
+    angles['shoulder_angle_r'] = calculate_angle_vector(orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s.T))[1]
+    angles['elbow_angle_r'] = calculate_angle_point(keypoints['right_shoulder'], keypoints['right_elbow'], keypoints['right_wrist'])
 
     return angles
 
@@ -418,8 +447,19 @@ def calculate_angle_error(target, prediction, Y_target=np.array([0, 1, 0]), Y_pr
     """
     if procrustes:
         target, prediction, error_count = align_procrustes(target, prediction)
+
     target_angles = calculate_joint_angles(target, Y_target)
     prediction_angles = calculate_joint_angles(target, Y_prediction)
+
+    target_angle_values = []
+    prediction_angle_values = []
+    for joint, angle in target_angles.items():
+        target_angle_values.append(angle)
+    for joint, angle in prediction_angles.items():
+        prediction_angle_values.append(angle)
+
+    angle_error = np.abs(np.array(target_angle_values) - np.array(prediction_angle_values))
+
     angle_error = np.abs(target_angles - prediction_angles)
     mean_error = np.mean(angle_error)
     std_error = np.std(angle_error)
