@@ -27,15 +27,15 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
         if not ret:
             break
 
+        # Convert the BGR image to RGB - Is this really needed?
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
         if sweep_config is not None:
             # Augment frame
-            frame = frameaug.augment_frames(frame, sweep_config)
+            rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
         # Record start time
         start_time = time.time()
-
-        # Convert the BGR image to RGB - Is this really needed?
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Process the frame
         results = pose.process(rgb_frame)

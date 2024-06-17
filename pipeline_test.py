@@ -7,7 +7,7 @@ from tqdm import tqdm
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
-from utils.plotKeypoints import plot_3d_keypoints_gt_pred
+from utils.plotKeypoints import plot_3d_keypoints_gt_pred_single_frame
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
 import pickle
@@ -159,6 +159,8 @@ class Framework:
         metrics_dict = {metric: {joint: [] for joint in joint_names} for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "pcc", "pvalue"]}
         all_metrics_dict = {metric: [] for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "angular_m", "angular_s", "r2", "cps", "cps_auc", "pcc", "pvalue"]}
 
+        frame_num = 0
+
         # Calculate metrics for each movement type, to avoid jumps between movement segments
         for gt_movement, pred_movement in zip(gt_keypoints_all_arrays, pred_keypoints_all_arrays):
             # Calculate metrics for each joint
@@ -191,63 +193,67 @@ class Framework:
             all_metrics_dict["pvalue"].append(
                 np.mean([np.mean(metrics_dict["pvalue"][joint]) for joint in joint_names]))
 
-        gt_movement_dict = {joint: gt_movement[:, joint_names.index(joint)] for joint in joint_names}
-        pred_movement_dict = {joint: pred_movement[:, joint_names.index(joint)] for joint in joint_names}
+            frame_num += np.size(gt_movement, 0)
+
+        gt_keypoints_all_arrays = np.concatenate(gt_keypoints_all_arrays, axis=0)
+        pred_keypoints_all_arrays = np.concatenate(pred_keypoints_all_arrays, axis=0)
+        gt_movement_dict = {joint: gt_keypoints_all_arrays[:, joint_names.index(joint)] for joint in joint_names}
+        pred_movement_dict = {joint: pred_keypoints_all_arrays[:, joint_names.index(joint)] for joint in joint_names}
 
         angular_m, angular_s, r2 = metrics.calculate_angle_error(gt_movement_dict, pred_movement_dict)
-        cps, cps_auc = metrics.compute_CPS(gt_movement_dict, pred_movement_dict)
+        cps, cps_auc = metrics.compute_CPS(gt_movement, pred_movement)
+        all_metrics_dict["angular_m"].append(angular_m)
         all_metrics_dict["angular_s"].append(angular_s)
         all_metrics_dict["r2"].append(r2)
         all_metrics_dict["cps"].append(cps)
         all_metrics_dict["cps_auc"].append(cps_auc)
 
-
-        # Log mean over all movements
+        # Log metrics for each joint
         for metric, values in metrics_dict.items():
              wandb.log({f"{metric}_joint": {joint: np.mean(vals) for joint, vals in values.items()}})
 
-       # for metric, values in segment_metrics_dict.items():
-       #     wandb.log({f"{metric}_segment": {segment: np.mean(vals) for segment, vals in values.items()}})
+        # Log overall metrics
 
+        # Log each metric from all_metrics_dict
         for metric, values in all_metrics_dict.items():
-            wandb.log({f"{metric}_all": np.mean(values)})
+            if isinstance(values, list):
+                if all(isinstance(v, dict) for v in values):
+                    # Handle list of dictionaries (e.g., angular_m, angular_s, r2)
+                    combined_dict = {}
+                    for sub_dict in values:
+                        for sub_metric, sub_value in sub_dict.items():
+                            if sub_metric not in combined_dict:
+                                combined_dict[sub_metric] = []
+                            combined_dict[sub_metric].append(sub_value)
+                    for sub_metric, sub_values in combined_dict.items():
+                        combined_mean = np.mean(sub_values)
+                        wandb.log({f"{metric}_{sub_metric}": combined_mean})
 
+                    # Calculate overall mean and std for angular and r2 metrics
+                    if metric in ['angular_m', 'angular_s', 'r2']:
+                        all_values = np.concatenate(
+                            [np.array(sub_values).reshape(-1) for sub_values in combined_dict.values()])
+                        overall_mean = np.mean(all_values)
+                        overall_std = np.std(all_values)
+                        wandb.log({f"{metric}_overall_mean": overall_mean, f"{metric}_overall_std": overall_std})
 
-
-
-        # Spatial metrics
-        pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
-        angular_m, angular_s, r2 = metrics.calculate_angle_error(gt_keypoints, pred_keypoints)
-        cps, cps_auc = metrics.compute_CPS(gt_keypoints, pred_keypoints)
-        # Spatio-temporal metrics
-        velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints, pred_keypoints, self.sample_rate)
-        pcc, pvalue = metrics.calculate_correlation(gt_keypoints, pred_keypoints)
-        # Cosine similarity?
-
-        # Log whole body metrics
-        wandb.log({"pmpjpe_all_mean": pmpjpe_m, "pmpjpe_all_std": pmpjpe_s,
-                   "angular_all_mean": angular_m, "angular_all_std": angular_s,
-                   "cps_all": cps, "cps_auc_all": cps_auc,
-                   "velocity_error_all_mean": velocity_m, "velocity_error_all_std": velocity_s,
-                   "pcc_all": pcc, "pvalue_all": pvalue,
-                   "procrustes_n_all": len(pred_keypoints) - proc_error,
-                   })
-
-        # Log metrics for different body segments
-        for segment in self.body_segments:
-            keypoints = self.body_segments[segment]
-            pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            pcc, pvalue = metrics.calculate_correlation(gt_keypoints[keypoints], pred_keypoints[keypoints])
-
-            wandb.log({"pmpjpe_mean_"+segment: pmpjpe_m, "pmpjpe_std_"+segment: pmpjpe_s,
-                       "velocity_mean_"+segment: velocity_m, "velocity_std_"+segment: velocity_s,
-                       "pcc_"+segment: pcc, "pvalue_"+segment: pvalue,
-                       "procrustes_n_"+segment: len(pred_keypoints) - proc_error})
+                elif all(isinstance(v, (list, np.ndarray)) for v in values):
+                    # Handle list of arrays (e.g., cps_auc)
+                    combined_array = np.concatenate(values)
+                    wandb.log({f"{metric}": wandb.Histogram(np_histogram=np.histogram(combined_array))})
+                else:
+                    # Handle list of numerical values (e.g., pmpjpe_m, pmpjpe_s, velocity_m, velocity_s, cps, pcc, pvalue)
+                    combined_values = np.concatenate([np.array(v).reshape(-1) for v in values])
+                    combined_mean = np.mean(combined_values)
+                    wandb.log({metric: combined_mean})
+            else:
+                # Handle individual values
+                wandb.log({metric: values})
 
         # Log inference time
-        inference_time_mean = np.mean(inference_times)
-        inference_time_std = np.std(inference_times)
+        flattened_inference_times = [time for sequence in inference_times for time in sequence]
+        inference_time_mean = np.mean(np.array(flattened_inference_times))
+        inference_time_std = np.std(np.array(flattened_inference_times))
         wandb.log({"inference_time_mean": inference_time_mean, "inference_time_std": inference_time_std})
 
         # Log number (n) of frames metrics are based on:
@@ -286,7 +292,7 @@ class Framework:
             print("Calculating metrics and logging to wandb")
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
 
-            plot_3d_keypoints_gt_pred(gt_keypoints[-1], pred_keypoints_all[-1], self.model_name)
+            plot_3d_keypoints_gt_pred_single_frame(gt_keypoints_all, pred_keypoints_all, self.model_name)
             log_frame_example(frame_example)
             # Log r2
             print("Calculating metrics and logging to wandb")

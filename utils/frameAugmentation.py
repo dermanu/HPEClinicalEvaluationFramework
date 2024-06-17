@@ -10,36 +10,33 @@ ia.seed(1)
 
 def occlusion(frame):
     # Create moving occlusion of 10-20% of the image size and fill it with gaussian noise.
-    aug = iaa.Cutout(size=(0.1, 0.2), fill_mode="gaussian", fill_per_channel=True)
-
+    aug = iaa.Cutout(size=(0.05, 0.2), nb_iterations=(2, 3), fill_mode="gaussian", fill_per_channel=True)
     return aug(image=frame)
 
 
 def motion_blur(frame):
     # Add motion blur
     aug = iaa.imgcorruptlike.MotionBlur(severity=1)
-
     return aug(image=frame)
 
 
 def overexposure(frame):
     # Add overexposure
-    aug = iaa.imgcorruptlike.Brightness(severity=2)
-
+    aug = iaa.color.MultiplyBrightness(0.2)
     return aug(image=frame)
 
 
 def underexposure(frame):
     # Add underexposure
-    aug = iaa.GammaContrast(0.5)
-
+    aug = iaa.BlendAlpha(
+        (0.15),
+        background=iaa.Multiply(0.2))
     return aug(image=frame)
 
 
 def defocus(frame):
     # Add blur to simulate out of focus
-    aug = iaa.imgcorruptlike.DefocusBlur(severity=1)
-
+    aug = iaa.imgcorruptlike.DefocusBlur(severity=2)
     return aug(image=frame)
 
 
@@ -62,7 +59,7 @@ class FrameAugmentor:
         # Apply augmentation to each frame of input based on settings in sweep_config
         augmentation_type = sweep_config['augmentation']
         if augmentation_type == 'background':
-            frame = self.change_bg.change_frame_bg(frame, 'background.jpeg', detect="person")
+            frame = self.change_bg.change_frame_bg(frame, 'utils/background.jpeg', detect="person")
         if augmentation_type == 'motion_blur':
             frame = motion_blur(frame)
         if augmentation_type == 'occlusion':
@@ -71,7 +68,6 @@ class FrameAugmentor:
             frame = defocus(frame)
         if augmentation_type == 'underexposure':
             frame = underexposure(frame)
-
         return frame
 
 
@@ -88,5 +84,4 @@ class CameraDesynchronizer:
             frame_offset = self.rng.integers(low=0, high=1, size=1)
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_offset)
             caps_offset.append(cap)
-
         return caps_offset
