@@ -7,7 +7,7 @@ from tqdm import tqdm
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
-from utils.plotKeypoints import plot_3d_keypoints_gt_pred
+from utils.plotKeypoints import plot_3d_keypoints_validation
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
 import pickle
@@ -116,12 +116,13 @@ def align_procrustes(target, prediction):
 
 
 class Framework:
-    def __init__(self, model_name, model_type, sample_rate, directory):
+    def __init__(self, model_name, model_type, sample_rate, directory, sweep_id=None):
         # Access the parsed arguments
         self.model_name = model_name
         self.model_type = model_type
         self.sample_rate = sample_rate
         self.dataset_path = directory
+        self.sweep_id = sweep_id
 
         # Initialize some functions
         self.model_skel_morph = self.load_morph_model()
@@ -134,7 +135,12 @@ class Framework:
         # self.participants = ['par6', 'par7', 'par8', 'par9', 'par10', 'par11', 'par12', 'par14', 'par15',
         #                     'par16', 'par17', 'par18', 'par19', 'par20', 'par21', 'par22', 'par23', 'par24', 'par25',
         #                     'par26']
-        self.participants = ['par5']
+
+        morph = [5, 6, 12, 15, 16, 18, 20, 21, 22, 24, 25]
+
+
+        self.participants = ['par4', 'par19', 'par11', 'par23' ]
+        #self.participants = ['par4']
 
         # Defines movement number in dataset related to different movement categories
         self.movement_category = {
@@ -157,18 +163,18 @@ class Framework:
         #    "left_foot": [13, 15],
         #    "right_foot": [12, 14]}
 
-        self.body_segments = {
-            "left_lower_arm": ['elbow_left', 'wrist_left'],
-            "left_upper_arm": ['shoulder_left', 'elbow_left'],
-            "right_lower_arm": ['elbow_right', 'wrist_right'],
-            "right_upper_arm": ['shoulder_right', 'elbow_right'],
-            "left_upper_leg": ['hip_left', 'knee_left'],
-            "left_lower_leg": ['knee_left', 'ankle_left'],
-            "right_upper_leg": ['hip_right', 'knee_right'],
-            "right_lower_leg": ['knee_right', 'ankle_right'],
-            "left_foot": ['ankle_left', 'toe_left'],
-            "right_foot": ['ankle_right', 'toe_right']
-        }
+        # self.body_segments = {
+        #     "left_lower_arm": ['left_elbow', 'left_wrist'],
+        #     "left_upper_arm": ['left_shoulder', 'left_elbow'],
+        #     "right_lower_arm": ['right_elbow', 'wrist_right'],
+        #     "right_upper_arm": ['shoulder_right', 'elbow_right'],
+        #     "left_upper_leg": ['hip_left', 'knee_left'],
+        #     "left_lower_leg": ['knee_left', 'ankle_left'],
+        #     "right_upper_leg": ['hip_right', 'knee_right'],
+        #     "right_lower_leg": ['knee_right', 'ankle_right'],
+        #     "left_foot": ['ankle_left', 'toe_left'],
+        #     "right_foot": ['ankle_right', 'toe_right']
+        # }
 
         # Joint names mapping for MoCap ground truth
         self.joint_names_gt = {
@@ -209,6 +215,14 @@ class Framework:
             morphed_pose = self.model_skel_morph(inp_poses)
         return morphed_pose.view(-1, input_pose.size(1), input_pose.size(2)).cpu().detach().numpy()
 
+    def convert_keypoints_dicts_to_array(self, keypoints_all):
+        all_keypoints_array = []
+        for keypoints_dict in keypoints_all:
+            keypoints_list = [keypoints_dict[key] for key in sorted(keypoints_dict.keys())]
+            keypoints_array = np.stack(keypoints_list, axis=1)
+            all_keypoints_array.append(keypoints_array)
+        return all_keypoints_array
+
     def calculate_log_metrics(self, gt_keypoints, pred_keypoints, inference_times):
         """
         Calculate metrics for each sweep and logs them on wandb. Calculates it for the whole body and body segments.
@@ -222,51 +236,114 @@ class Framework:
         ###########################################
 
         # Prepare input
-        keypoint_names = list(gt_keypoints[0].keys())
-        keypoint_names_pred = list(pred_keypoints[0].keys())
-        assert keypoint_names == keypoint_names_pred, "Both the labels of the prediction and ground truth must match."
-        gt_keypoints = [[sample[key] for key in keypoint_names] for sample in gt_keypoints]
-        pred_keypoints = [[sample[key] for key in keypoint_names] for sample in pred_keypoints]
-        gt_keypoints = [item for sublist in gt_keypoints for item in sublist]
-        pred_keypoints = [item for sublist in pred_keypoints for item in sublist]
+        gt_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(gt_keypoints)
+        pred_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(pred_keypoints)
+        joint_names = list(gt_keypoints[0].keys())
+        assert joint_names == list(gt_keypoints[0].keys()), "Joint names of target and prediction do not match."
 
-        # Spatial metrics
-        pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints, pred_keypoints)
-        angular_m, angular_s, r2 = metrics.calculate_angle_error(gt_keypoints, pred_keypoints)
-        cps, cps_auc = metrics.compute_CPS(gt_keypoints, pred_keypoints)
-        # Spatio-temporal metrics
-        velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints, pred_keypoints, self.sample_rate)
-        pcc, pvalue = metrics.calculate_correlation(gt_keypoints, pred_keypoints)
-        # Cosine similarity?
+        metrics_dict = {metric: {joint: [] for joint in joint_names} for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "pcc", "pvalue"]}
+        all_metrics_dict = {metric: [] for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "angular_m", "angular_s", "r2", "cps", "cps_auc", "pcc", "pvalue"]}
 
-        # Log whole body metrics
-        wandb.log({"pmpjpe_all_mean": pmpjpe_m, "pmpjpe_all_std": pmpjpe_s,
-                   "angular_all_mean": angular_m, "angular_all_std": angular_s,
-                   "cps_all": cps, "cps_auc_all": cps_auc,
-                   "velocity_error_all_mean": velocity_m, "velocity_error_all_std": velocity_s,
-                   "pcc_all": pcc, "pvalue_all": pvalue,
-                   "procrustes_n_all": len(pred_keypoints) - proc_error,
-                   })
+        frame_num = 0
 
-        # Log metrics for different body segments
-        for segment in self.body_segments:
-            keypoints = self.body_segments[segment]
-            pmpjpe_m, pmpjpe_s, proc_error = metrics.calculate_pmpjpe(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            velocity_m, velocity_s = metrics.mean_velocity_error(gt_keypoints[keypoints], pred_keypoints[keypoints])
-            pcc, pvalue = metrics.calculate_correlation(gt_keypoints[keypoints], pred_keypoints[keypoints])
+        # Calculate metrics for each movement type, to avoid jumps between movement segments
+        for gt_movement, pred_movement in zip(gt_keypoints_all_arrays, pred_keypoints_all_arrays):
+            # Calculate metrics for each joint
+            for joint in range(np.size(gt_movement, 1)):
+                gt_array = np.squeeze(np.array(gt_movement[:, joint, :]))
+                pred_array = np.squeeze(np.array(pred_movement[:, joint, :]))
 
-            wandb.log({"pmpjpe_mean_"+segment: pmpjpe_m, "pmpjpe_std_"+segment: pmpjpe_s,
-                       "velocity_mean_"+segment: velocity_m, "velocity_std_"+segment: velocity_s,
-                       "pcc_"+segment: pcc, "pvalue_"+segment: pvalue,
-                       "procrustes_n_"+segment: len(pred_keypoints) - proc_error})
+                pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(gt_array, pred_array)
+                velocity_m, velocity_s = metrics.mean_velocity_error(gt_array, pred_array, self.sample_rate)
+                pcc, pvalue = metrics.calculate_correlation(gt_array, pred_array)
+
+                metrics_dict["pmpjpe_m"][joint_names[joint]].append(pmpjpe_m)
+                metrics_dict["pmpjpe_s"][joint_names[joint]].append(pmpjpe_s)
+                metrics_dict["velocity_m"][joint_names[joint]].append(velocity_m)
+                metrics_dict["velocity_s"][joint_names[joint]].append(velocity_s)
+                metrics_dict["pcc"][joint_names[joint]].append(pcc)
+                metrics_dict["pvalue"][joint_names[joint]].append(pvalue)
+
+            # Calculate whole body metrics using all keypoints
+            all_metrics_dict["pmpjpe_m"].append(
+                np.mean([np.mean(metrics_dict["pmpjpe_m"][joint]) for joint in joint_names]))
+            all_metrics_dict["pmpjpe_s"].append(
+                np.mean([np.mean(metrics_dict["pmpjpe_s"][joint]) for joint in joint_names]))
+            all_metrics_dict["velocity_m"].append(
+                np.mean([np.mean(metrics_dict["velocity_m"][joint]) for joint in joint_names]))
+            all_metrics_dict["velocity_s"].append(
+                np.mean([np.mean(metrics_dict["velocity_s"][joint]) for joint in joint_names]))
+            all_metrics_dict["pcc"].append(
+                np.mean([np.mean(metrics_dict["pcc"][joint]) for joint in joint_names]))
+            all_metrics_dict["pvalue"].append(
+                np.mean([np.mean(metrics_dict["pvalue"][joint]) for joint in joint_names]))
+
+            frame_num += np.size(gt_movement, 0)
+
+        gt_keypoints_all_arrays = np.concatenate(gt_keypoints_all_arrays, axis=0)
+        pred_keypoints_all_arrays = np.concatenate(pred_keypoints_all_arrays, axis=0)
+        gt_movement_dict = {joint: gt_keypoints_all_arrays[:, joint_names.index(joint)] for joint in joint_names}
+        pred_movement_dict = {joint: pred_keypoints_all_arrays[:, joint_names.index(joint)] for joint in joint_names}
+
+        angular_m, angular_s, r2 = metrics.calculate_angle_error(gt_movement_dict, pred_movement_dict)
+        cps, cps_auc = metrics.compute_CPS(gt_movement, pred_movement)
+        all_metrics_dict["angular_m"].append(angular_m)
+        all_metrics_dict["angular_s"].append(angular_s)
+        all_metrics_dict["r2"].append(r2)
+        all_metrics_dict["cps"].append(cps)
+        all_metrics_dict["cps_auc"].append(cps_auc)
+
+        # Log metrics for each joint
+        for metric, values in metrics_dict.items():
+             wandb.log({f"{metric}_joint": {joint: np.mean(vals) for joint, vals in values.items()}})
+
+        # Log overall metrics
+
+        # Log each metric from all_metrics_dict
+        for metric, values in all_metrics_dict.items():
+            if isinstance(values, list):
+                if all(isinstance(v, dict) for v in values):
+                    # Handle list of dictionaries (e.g., angular_m, angular_s, r2)
+                    combined_dict = {}
+                    for sub_dict in values:
+                        for sub_metric, sub_value in sub_dict.items():
+                            if sub_metric not in combined_dict:
+                                combined_dict[sub_metric] = []
+                            combined_dict[sub_metric].append(sub_value)
+                    for sub_metric, sub_values in combined_dict.items():
+                        combined_mean = np.mean(sub_values)
+                        wandb.log({f"{metric}_{sub_metric}": combined_mean})
+
+                    # Calculate overall mean and std for angular and r2 metrics
+                    if metric in ['angular_m', 'angular_s', 'r2']:
+                        all_values = np.concatenate(
+                            [np.array(sub_values).reshape(-1) for sub_values in combined_dict.values()])
+                        overall_mean = np.mean(all_values)
+                        overall_std = np.std(all_values)
+                        wandb.log({f"{metric}_overall_mean": overall_mean, f"{metric}_overall_std": overall_std})
+
+                elif all(isinstance(v, (list, np.ndarray)) for v in values):
+                    # Handle list of arrays (e.g., cps_auc)
+                    combined_array = np.concatenate(values)
+                    wandb.log({f"{metric}": wandb.Histogram(np_histogram=np.histogram(combined_array))})
+                else:
+                    # Handle list of numerical values (e.g., pmpjpe_m, pmpjpe_s, velocity_m, velocity_s, cps, pcc, pvalue)
+                    combined_values = np.concatenate([np.array(v).reshape(-1) for v in values])
+                    combined_mean = np.mean(combined_values)
+                    wandb.log({metric: combined_mean})
+            else:
+                # Handle individual values
+                wandb.log({metric: values})
 
         # Log inference time
-        inference_time_mean = np.mean(inference_times)
-        inference_time_std = np.std(inference_times)
+        flattened_inference_times = [time for sequence in inference_times for time in sequence]
+        inference_time_mean = np.mean(np.array(flattened_inference_times))
+        inference_time_std = np.std(np.array(flattened_inference_times))
         wandb.log({"inference_time_mean": inference_time_mean, "inference_time_std": inference_time_std})
 
         # Log number (n) of frames metrics are based on:
         wandb.log({"sample_number": len(pred_keypoints)})
+
 
     def main(self, config=None):
         """
@@ -278,7 +355,7 @@ class Framework:
             config = wandb.config
 
             # Overwrite the random name of the run with the sweep name
-            run.name = config.model_name + "-" + config.movement + "-" + config.augmentation + "-" + str(config.cameras)
+            run.name = config.model_name + "-" + config.movement + "-" + str(config.augmentation) + "-" + str(config.cameras)
 
             # Generate cv2 video API and load respective ground truth keypoints
             gt_keypoints_all = []
@@ -287,12 +364,12 @@ class Framework:
 
             for par in tqdm(self.participants, ascii=True, desc="Participant:"):
                 for mov in tqdm(self.movement_category[config['movement']], ascii=True, desc="Movement:"):
-                    #try:
+
                     gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, config['cameras'],
                                                                 self.model_name)
-                    #except:
-                    #    print(f"Participant {par} and movement {mov} not found")
-                    #    continue
+                    if not gt_keypoints or not caps:
+                        print(f"Participant {par} and movement {mov} not found")
+                        continue
 
                     # Open model based on name and run inference
                     # Monocular models
@@ -306,7 +383,7 @@ class Framework:
                             selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31] # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, 1:]
 
-                            # Joint names mapping for MediaPipe
+                            # Joint names mapping for MediaPipe (kinda redundant, as names are included in gt)
                             self.joint_names = {
                                 0: 'right_shoulder', 1: 'left_shoulder', 2: 'right_elbow', 3: 'left_elbow',
                                 4: 'right_wrist', 5: 'left_wrist', 6: 'right_hip', 7: 'left_hip',
@@ -343,7 +420,7 @@ class Framework:
                     gt_keypoints, pred_keypoints, proc_error = align_procrustes(gt_keypoints, pred_keypoints)
 
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
-                    pred_keypoints = self.apply_morphing(pred_keypoints)
+                    #pred_keypoints = self.apply_morphing(pred_keypoints)
 
                     # Add joint names
                     pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
@@ -376,15 +453,13 @@ class Framework:
             with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
                 pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
             print("Calculating metrics and logging to wandb")
-            inference_times_all = np.concatenate(inference_times_all)
-            gt_keypoints_all = np.concatenate(gt_keypoints_all, axis=0)
-            pred_keypoints_all = np.concatenate(pred_keypoints_all, axis=0)
+
+
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
             # plot metrics
 
-            plot_3d_keypoints_gt_pred(gt_keypoints[-1], pred_keypoints_all[-1], self.model_name)
+            plot_3d_keypoints_validation(gt_keypoints_all, pred_keypoints_all, self.model_name)
             log_frame_example(frame_example)
-            # Log r2
             print("Calculating metrics and logging to wandb")
 
             # Save metrics for each movement for later calculations
@@ -434,7 +509,7 @@ class Framework:
             # Sweep parameters
             parameters_dict = {
                 'augmentation': {
-                    'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background']
+                    'values': [None, 'defocus', 'underexposure', 'occlusion', 'background']
                 },
                 'cameras': {
                     'values': [0, 5, 4, 1, 3, 2]
@@ -444,7 +519,7 @@ class Framework:
             # Sweep parameters
             parameters_dict = {
                 'augmentation': {
-                    'values': ['defocus', 'underexposure', 'motion_blur', 'occlusion', 'background',
+                    'values': [None, 'defocus', 'underexposure', 'occlusion', 'background',
                                'desynchronize', 'decalibration']
                 },
                 'cameras': {
@@ -454,17 +529,24 @@ class Framework:
 
         self.sweep_config['parameters'].update(parameters_dict)
 
-        # Initialize the sweep run
-        sweep_id = wandb.sweep(sweep=self.sweep_config,
-                               project='HPE_framework')
-
-        # Start sweep
-        wandb.agent(sweep_id, function=self.main)
-
+        if not self.sweep_id:
+            self.sweep_id = wandb.sweep(sweep=self.sweep_config, project='HPE_framework')
+            print(f"Sweep initialized with ID: {self.sweep_id}")
+        else:
+            print(f"Sweep already initialized with ID: {self.sweep_id}")
         # Training complete
         print("Testing complete")
 
 
+    def run_sweep_agent(self):
+        print(f"Starting wandb agent for sweep ID: {self.sweep_id}")
+        wandb.agent(self.sweep_id, function=self.main)
+
+
 # Run the framework
-Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
-          directory="/media/emanu/LaCie/MoCap/segmented").initiate_wandb_sweep()
+framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25, directory="/media/emanu/LaCie/MoCap/segmented", sweep_id=None)
+framework.initiate_wandb_sweep()
+framework.run_sweep_agent()
+
+# To start a new run enter this into a console:
+# python /home/emanu/Documents/PycharmProjects/HPEClinicalEvaluation/main_pipeline_debug.py
