@@ -105,40 +105,49 @@ def plot_3d_keypoints_all(keypoints_morphed, keypoints_ground_truth, keypoints_h
 
 def plot_3d_keypoints_validation(keypoints_ground_truth, keypoints_hpe_truth, model_name):
     colors = ['red', 'blue']
-    names = ['Morphed KeyPoints', 'Ground Truth KeyPoints', 'HPE Truth KeyPoints']
-
-    keypoints_ground_truth = np.squeeze(np.array(list(keypoints_ground_truth[0].values()))[:, 0, :])
-    keypoints_hpe_truth = np.squeeze(np.array(list(keypoints_hpe_truth[0].values()))[:, 0, :])
+    names = ['Ground Truth KeyPoints', 'HPE Truth KeyPoints']
 
     # Define connections between related keypoints
     if model_name == 'mediapipe':
         connections = [(0, 1), (0, 2), (1, 3), (2, 4), (3, 5), (6, 7), (0, 6),
-                        (1, 7), (6, 8), (7, 9), (8, 10), (9, 11), (10, 12),
-                        (11, 13), (10, 14), (11, 15), (12, 14), (13, 15)]
+                       (1, 7), (6, 8), (7, 9), (8, 10), (9, 11), (10, 12),
+                       (11, 13), (10, 14), (11, 15), (12, 14), (13, 15)]
 
     # Create a Plotly 3D scatter plot
     fig = go.Figure()
 
     all_values = ()
     idx = 0
-    for keypoints in [keypoints_ground_truth, keypoints_hpe_truth]:
-        # Extract X, Y, and Z coordinates from keypoints
-        x, z, y = zip(*keypoints)
+    for keypoints, keypoints_dict, name in zip([keypoints_ground_truth, keypoints_hpe_truth],
+                                               [keypoints_ground_truth, keypoints_hpe_truth],
+                                               names):
+        keypoints_array = np.array([v for v in keypoints_dict.values()])
+        x, y, z = keypoints_array[:, 0], keypoints_array[:, 1], keypoints_array[:, 2]
 
         # Scatter plot for keypoints
-        fig.add_trace(go.Scatter3d(x=x, y=y, z=z, mode='markers', marker=dict(color=colors[idx], size=5)))
+        for kp_name, kp_x, kp_y, kp_z in zip(keypoints_dict.keys(), x, y, z):
+            fig.add_trace(go.Scatter3d(
+                x=[kp_x], y=[kp_y], z=[kp_z], mode='markers',
+                marker=dict(color=colors[idx], size=5),
+                text=[kp_name], textposition="top center",
+                name=f'{name} {kp_name}'
+            ))
 
         # Plot connections
         for connection in connections:
             x_vals = [x[connection[0]], x[connection[1]]]
             y_vals = [y[connection[0]], y[connection[1]]]
             z_vals = [z[connection[0]], z[connection[1]]]
-            fig.add_trace(go.Scatter3d(x=x_vals, y=y_vals, z=z_vals, mode='lines', line=dict(color=colors[idx])))
+            fig.add_trace(go.Scatter3d(
+                x=x_vals, y=y_vals, z=z_vals, mode='lines',
+                line=dict(color=colors[idx]),
+                name=f'{name} Connection {connection[0]}-{connection[1]}'
+            ))
 
         idx += 1
 
         # Combine x, y, z values into a single list
-        all_values = all_values + x + y + z
+        all_values = all_values + tuple(x) + tuple(y) + tuple(z)
 
     # Find the minimum and maximum values
     min_value = min(all_values) - abs(min(all_values) * 0.1)
@@ -170,7 +179,6 @@ def plot_3d_keypoints_gt_pred_single_frame(keypoints_gt, keypoints_pred, model_n
 
     # Create a Plotly 3D scatter plot
     fig = go.Figure()
-
     all_values = []
     idx = 0
 
