@@ -18,16 +18,12 @@ def log_frame_example(frame):
     Log the last frame of one camera angle to visualize applied frame augmentations. Blur the faces for privacy.
     :param frame: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
-
     face_detect = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
     face_data = face_detect.detectMultiScale(frame, 1.2, 3)
 
     for (x, y, w, h) in face_data:
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
         roi = frame[y:y + h, x:x + w]
-        # applying a gaussian blur over this new rectangle area
         roi = cv2.GaussianBlur(roi, (23, 23), 30)
-        # impose this blurred image on original image to get final image
         frame[y:y + roi.shape[0], x:x + roi.shape[1]] = roi
 
     image = wandb.Image(frame)
@@ -36,23 +32,20 @@ def log_frame_example(frame):
 
 def align_procrustes(target, prediction):
     """
-    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
-    often referred to as "Protocol #2" in many papers.
-    Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
+    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation).
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
     :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
     :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
     :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
     :return error_count: Error count of failed alignments
     """
-    gt_all = []
-    pred_all = []
+    gt_all, pred_all = [], []
     error_count = 0
     joint_number = target.shape[1]
 
-    for (gt, pred) in (zip(target, prediction)):
+    for gt, pred in zip(target, prediction):
         gt_raw = gt
-        if not (np.sum(np.abs(pred)) == 0):
+        if np.sum(np.abs(pred)) != 0:
             transposed = False
             if pred.shape[0] != 3 and pred.shape[0] != 2:
                 pred = pred.T
@@ -60,45 +53,27 @@ def align_procrustes(target, prediction):
                 transposed = True
             assert (gt.shape[1] == pred.shape[1]), "The number of joints must match."
 
-            # 1. Remove mean.
-            muX = np.mean(pred, axis=1, keepdims=True)
-            muY = np.mean(gt, axis=1, keepdims=True)
-            X0 = pred - muX
-            Y0 = gt - muY
-
-            # 2. Compute variance of X1 used for scale.
-            var1 = np.sum(X0 ** 2)
-
-            # 3. The outer product of X1 and X2.
-            K = X0.dot(Y0.T)
-
-            # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are singular vectors of K.
             try:
+                muX = np.mean(pred, axis=1, keepdims=True)
+                muY = np.mean(gt, axis=1, keepdims=True)
+                X0 = pred - muX
+                Y0 = gt - muY
+                var1 = np.sum(X0 ** 2)
+                K = X0.dot(Y0.T)
                 U, s, Vh = np.linalg.svd(K)
+                V = Vh.T
+                Z = np.eye(U.shape[0])
+                Z[-1, -1] *= np.sign(np.linalg.det(U.dot(V.T)))
+                R = V.dot(Z.dot(U.T))
+                scale = np.trace(R.dot(K)) / var1
+                t = muY - scale * (R.dot(muX))
+                pred_hat = scale * R.dot(pred) + t
+                if transposed:
+                    pred_hat = pred_hat.T
             except np.linalg.LinAlgError:
-                # print("SVD did not converge")
                 error_count += 1
-                continue
-
-            V = Vh.T
-            # Construct Z that fixes the orientation of R to get det(R)=1.
-            Z = np.eye(U.shape[0])
-            Z[-1, -1] *= np.sign(np.linalg.det(U.dot(V.T)))
-            # Construct R.
-            R = V.dot(Z.dot(U.T))
-
-            # 5. Recover scale.
-            scale = np.trace(R.dot(K)) / var1
-
-            # 6. Recover translation.
-            t = muY - scale * (R.dot(muX))
-
-            # 7. Error:
-            pred_hat = scale * R.dot(pred) + t
-
-            if transposed:
-                pred_hat = pred_hat.T
-
+                pred_hat = np.tile(np.mean(gt, axis=0), (joint_number, 1))
+                R = np.identity(3)
         else:
             pred_hat = np.tile(np.mean(gt, axis=0), (joint_number, 1))
             R = np.identity(3)
@@ -118,6 +93,7 @@ def align_procrustes(target, prediction):
 class Framework:
     def __init__(self, model_name, model_type, sample_rate, directory, sweep_id=None):
         # Access the parsed arguments
+        self.joint_names = None
         self.model_name = model_name
         self.model_type = model_type
         self.sample_rate = sample_rate
@@ -138,9 +114,8 @@ class Framework:
 
         morph = [5, 6, 12, 15, 16, 18, 20, 21, 22, 24, 25]
 
-
-        self.participants = ['par4', 'par19', 'par11', 'par23' ]
-        #self.participants = ['par4']
+        self.participants = ['par4', 'par19', 'par11', 'par23']
+        self.participants = ['par4']
 
         # Defines movement number in dataset related to different movement categories
         self.movement_category = {
@@ -192,14 +167,13 @@ class Framework:
         Load the morphing model for the specified model name
         :return model_skel_morph: Morphing model for the specified model name
         """
-        morph_model_path = "skeletonMorphing/models/morph_" + str(self.model_name) + ".pth"
+        morph_model_path = f"skeletonMorphing/models/morph_{self.model_name}.pth"
         model_skel_morph = modelSkeletonMorphing.Synthesizer()
         if os.path.isfile(morph_model_path):
             model_skel_morph.load_state_dict(torch.load(morph_model_path))
             model_skel_morph.eval()
         else:
             raise ValueError('Morphing model is missing')
-
         return model_skel_morph
 
     def apply_morphing(self, input_pose):
@@ -216,6 +190,11 @@ class Framework:
         return morphed_pose.view(-1, input_pose.size(1), input_pose.size(2)).cpu().detach().numpy()
 
     def convert_keypoints_dicts_to_array(self, keypoints_all):
+        """
+        Convert a list of dictionaries containing keypoints to a list of numpy arrays.
+        :param keypoints_all: List of dictionaries where each dictionary contains keypoints.
+        :return: all_keypoints_array: List of numpy arrays with keypoints.
+        """
         all_keypoints_array = []
         for keypoints_dict in keypoints_all:
             keypoints_list = [keypoints_dict[key] for key in sorted(keypoints_dict.keys())]
@@ -230,21 +209,16 @@ class Framework:
         :param pred_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
         :param inference_times: [inference_time0, inference_time1, inference_time2, ]
         """
-
-        ###########################################
-        # MAYBE CALCULATE PROCRUSTES BEFORE ONCE ##
-        ###########################################
-
-        # Prepare input
         gt_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(gt_keypoints)
         pred_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(pred_keypoints)
         joint_names = list(gt_keypoints[0].keys())
         assert joint_names == list(gt_keypoints[0].keys()), "Joint names of target and prediction do not match."
 
-        metrics_dict = {metric: {joint: [] for joint in joint_names} for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "pcc", "pvalue"]}
-        all_metrics_dict = {metric: [] for metric in ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "angular_m", "angular_s", "r2", "cps", "cps_auc", "pcc", "pvalue"]}
-
-        frame_num = 0
+        metrics_dict = {metric: {joint: [] for joint in joint_names} for metric in
+                        ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "pcc", "pvalue"]}
+        all_metrics_dict = {metric: [] for metric in
+                            ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "angular_m", "angular_s", "r2", "cps",
+                             "cps_auc", "pcc", "pvalue"]}
 
         # Calculate metrics for each movement type, to avoid jumps between movement segments
         for gt_movement, pred_movement in zip(gt_keypoints_all_arrays, pred_keypoints_all_arrays):
@@ -278,8 +252,6 @@ class Framework:
             all_metrics_dict["pvalue"].append(
                 np.mean([np.mean(metrics_dict["pvalue"][joint]) for joint in joint_names]))
 
-            frame_num += np.size(gt_movement, 0)
-
         gt_keypoints_all_arrays = np.concatenate(gt_keypoints_all_arrays, axis=0)
         pred_keypoints_all_arrays = np.concatenate(pred_keypoints_all_arrays, axis=0)
         gt_movement_dict = {joint: gt_keypoints_all_arrays[:, joint_names.index(joint)] for joint in joint_names}
@@ -295,9 +267,7 @@ class Framework:
 
         # Log metrics for each joint
         for metric, values in metrics_dict.items():
-             wandb.log({f"{metric}_joint": {joint: np.mean(vals) for joint, vals in values.items()}})
-
-        # Log overall metrics
+            wandb.log({f"{metric}_joint": {joint: np.mean(vals) for joint, vals in values.items()}})
 
         # Log each metric from all_metrics_dict
         for metric, values in all_metrics_dict.items():
@@ -344,18 +314,15 @@ class Framework:
         # Log number (n) of frames metrics are based on:
         wandb.log({"sample_number": len(pred_keypoints)})
 
-
     def main(self, config=None):
         """
         Run inference on the chosen model with sweep parameters and log results to wandb project.
         """
-        with wandb.init(config=config) as run:
-            # If called by wandb.agent, as below,
-            # this config will be set by Sweep Controller
+        with (wandb.init(config=config) as run):
+            # If called by wandb.agent, as below, this config will be set by Sweep Controller
             config = wandb.config
-
-            # Overwrite the random name of the run with the sweep name
-            run.name = config.model_name + "-" + config.movement + "-" + str(config.augmentation) + "-" + str(config.cameras)
+            run.name = config.model_name + "-" + config.movement + "-" + str(config.augmentation) + "-" + str(
+                config.cameras)
 
             # Generate cv2 video API and load respective ground truth keypoints
             gt_keypoints_all = []
@@ -372,15 +339,14 @@ class Framework:
                         continue
 
                     # Open model based on name and run inference
-                    # Monocular models
                     if self.model_type == "mono":
                         # Just load the first (and only) camera
                         gt_keypoints = gt_keypoints[0][1]
                         caps = caps[0][1]
-
                         if self.model_name == "mediapipe":
                             pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
-                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31] # Select only relevant keypoints and put them in the right order
+                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32,
+                                                31]  # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, 1:]
 
                             # Joint names mapping for MediaPipe (kinda redundant, as names are included in gt)
@@ -390,7 +356,6 @@ class Framework:
                                 8: 'right_knee', 9: 'left_knee', 10: 'right_ankle', 11: 'left_ankle',
                                 12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
                             }
-
                         if self.model_name == "motionbert":
                             print("MotionBERT not implemented yet")
                             # pred_keypoints, inference_times, frame = alphaPoseMono.inference_video(caps, self)
@@ -406,15 +371,9 @@ class Framework:
                         if self.model_name == "openpose":
                             print("OpenPose not implemented yet")
                             # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
-
                         if self.model_name == "LWCDR":
                             print("LWCDR not implemented yet")
                             # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
-
-                    # Postprocess predicted keypoints
-                    pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
-                                                                                  self.interpolation_fun,
-                                                                                  self.smoothing_fun)
 
                     # Procrustes Alignment
                     gt_keypoints, pred_keypoints, proc_error = align_procrustes(gt_keypoints, pred_keypoints)
@@ -422,47 +381,45 @@ class Framework:
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
                     #pred_keypoints = self.apply_morphing(pred_keypoints)
 
+                    # Postprocess predicted keypoints
+                    pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
+                                                                       self.interpolation_fun,
+                                                                       self.smoothing_fun)
+
                     # Add joint names
                     pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
                                       range(pred_keypoints.shape[1])}
 
                     gt_keypoints = {self.joint_names_gt[i]: gt_keypoints[:, i, :] for i in
-                                      range(gt_keypoints.shape[1])}
+                                    range(gt_keypoints.shape[1])}
 
                     # Collect pred_keypoints for each movement iteration
                     gt_keypoints_all.append(gt_keypoints)
                     pred_keypoints_all.append(pred_keypoints)
                     inference_times_all.append(inference_times)
 
-                    # Collect last good frame for visualization
+                    # Collect last good frame and keypoints for visualization
                     if frame is not None or frame.size != 0:
-                        frame_example = frame
+                        if gt_keypoints is not None and pred_keypoints is not None:
+                            frame_example = frame
+                            gt_keypoints_example = {key: value[-1] for key, value in gt_keypoints.items()}
+                            pred_keypoints_example = {key: value[-1] for key, value in pred_keypoints.items()}
 
             # Save data for debugging
-            data_to_save= {'gt_keypoints': gt_keypoints_all,
-                           'pred_keypoints': pred_keypoints_all,
-                           'inference_time': inference_times_all,
-                           'frame': frame_example
-                           }
+            data_to_save = {'gt_keypoints': gt_keypoints_all,
+                            'pred_keypoints': pred_keypoints_all,
+                            'inference_time': inference_times_all,
+                            'frame': frame_example
+                            }
 
-            with open(run.name + '.pkl', 'wb') as file:
-                 pickle.dump(data_to_save, file)
-
-
-            # Calculate the metrics, generate plots and log them to wandb
-            with open('results.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
-                pickle.dump([gt_keypoints_all, pred_keypoints_all, inference_times_all], f)
-            print("Calculating metrics and logging to wandb")
-
+            # Save calculate keypoints for later
+            with open('results/' + run.name + '.pkl', 'wb') as file:
+                pickle.dump(data_to_save, file)
 
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
-            # plot metrics
-
-            plot_3d_keypoints_validation(gt_keypoints_all, pred_keypoints_all, self.model_name)
+            plot_3d_keypoints_validation(gt_keypoints_example, pred_keypoints_example, self.model_name)
             log_frame_example(frame_example)
             print("Calculating metrics and logging to wandb")
-
-            # Save metrics for each movement for later calculations
 
     def initiate_wandb_sweep(self):
         """
@@ -476,7 +433,7 @@ class Framework:
 
         if self.model_type == 'mono':
             if self.model_name not in ['mediapipe', 'motionbert']:
-                raise ValueError('Choose a valid monooccular model, or change the model type to multi')
+                raise ValueError('Choose a valid mono-ocular model, or change the model type to multi')
         elif self.model_type == 'multi':
             if self.model_name not in ['openpose', 'LWCDR']:
                 raise ValueError('Choose a valid multioccular model, or change the model type to mono')
@@ -537,14 +494,14 @@ class Framework:
         # Training complete
         print("Testing complete")
 
-
     def run_sweep_agent(self):
         print(f"Starting wandb agent for sweep ID: {self.sweep_id}")
         wandb.agent(self.sweep_id, function=self.main)
 
 
 # Run the framework
-framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25, directory="/media/emanu/LaCie/MoCap/segmented", sweep_id=None)
+framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
+                      directory="/media/emanu/LaCie/MoCap/segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 

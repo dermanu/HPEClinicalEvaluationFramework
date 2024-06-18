@@ -1,7 +1,6 @@
 import numpy as np
-from scipy import signal, stats
+from scipy import signal
 from sklearn.metrics import auc
-import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
