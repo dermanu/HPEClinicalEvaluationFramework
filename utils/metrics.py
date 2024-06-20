@@ -411,21 +411,25 @@ def calculate_joint_angles(keypoints, Y_vector=np.array([0, 1, 0])):
 
     # Trunk angles
     angles['trunk_angle'] = 90 - calculate_angle_vector(hip_mid - shoulder_mid, D_h)
-    angles['trunk_twist'] = calculate_angle_vector(
+    angles['trunk_twist'] = 180 - calculate_angle_vector(
         orthogonal_projection(keypoints['left_hip'] - keypoints['right_hip'], shoulder_mid - hip_mid),
         orthogonal_projection(keypoints['right_shoulder'] - keypoints['left_shoulder'], shoulder_mid - hip_mid))
-    angles['trunk_bend'] = calculate_angle_vector(Y_vector, orthogonal_projection(shoulder_mid - hip_mid, D_h))
+    angles['trunk_bend'] = 90 - calculate_angle_vector(Y_vector, orthogonal_projection(shoulder_mid - hip_mid, D_h))
 
     # Lower limb angles
-    angles['knee_angle_l'] = calculate_angle_point(keypoints['left_hip'], hip_mid, keypoints['left_ankle']) # Really mid hip here?
+    angles['knee_angle_l'] = 90 + calculate_angle_point(keypoints['left_hip'], hip_mid, keypoints['left_ankle']) # Really mid hip here?
+    angles['knee_angle_r'] = 90 + calculate_angle_point(keypoints['right_hip'], hip_mid, keypoints['right_ankle'])  # Really mid hip here?
     angles['ankle_angle_l'] = calculate_angle_point(keypoints['left_knee'], keypoints['left_ankle'], keypoints['left_foot_index'])
-    angles['knee_angle_r'] = calculate_angle_point(keypoints['right_hip'], hip_mid, keypoints['right_ankle'])  # Really mid hip here?
     angles['ankle_angle_r'] = calculate_angle_point(keypoints['right_knee'], keypoints['right_ankle'], keypoints['right_foot_index'])
 
     # Upper limb angles
-    angles['shoulder_angle_l'] = calculate_angle_vector(orthogonal_projection(keypoints['left_elbow'] - keypoints['left_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['left_elbow'] - keypoints['left_shoulder'], D_s.T))[1]  # Not sure if this is right
+    # angles['shoulder_side_l'] = calculate_angle_vector(orthogonal_projection(keypoints['left_elbow'] - keypoints['left_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['left_elbow'] - keypoints['left_shoulder'], D_s.T))[1]  # Not sure if this is right
+    # angles['shoulder_side_r'] = calculate_angle_vector(orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s.T))[1]  # Not sure if this is right
+    angles['shoulder_abduc_l'] = calculate_angle_vector( keypoints['right_elbow'] - keypoints['right_shoulder'],keypoints['right_hip'] - keypoints['right_shoulder'])
+    angles['shoulder_abduc_r'] = calculate_angle_vector( keypoints['left_elbow'] - keypoints['left_shoulder'],keypoints['left_hip'] - keypoints['left_shoulder'])
+    angles['shoulder_flex_l'] = 90 - calculate_angle_vector( keypoints['right_elbow'] - keypoints['right_shoulder'], D_s)
+    angles['shoulder_flex_r'] = 90 - calculate_angle_vector( keypoints['left_elbow'] - keypoints['left_shoulder'], D_s)
     angles['elbow_angle_l'] = calculate_angle_point(keypoints['left_shoulder'], keypoints['left_elbow'], keypoints['left_wrist'])
-    angles['shoulder_angle_r'] = calculate_angle_vector(orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s.T))[1]  # Not sure if this is right
     angles['elbow_angle_r'] = calculate_angle_point(keypoints['right_shoulder'], keypoints['right_elbow'], keypoints['right_wrist'])
 
     return angles

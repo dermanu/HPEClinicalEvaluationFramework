@@ -318,7 +318,7 @@ class Framework:
         """
         Run inference on the chosen model with sweep parameters and log results to wandb project.
         """
-        with (wandb.init(config=config) as run):
+        with wandb.init(config=config) as run:
             # If called by wandb.agent, as below, this config will be set by Sweep Controller
             config = wandb.config
             run.name = config.model_name + "-" + config.movement + "-" + str(config.augmentation) + "-" + str(
@@ -405,11 +405,17 @@ class Framework:
                             gt_keypoints_example = {key: value[-1] for key, value in gt_keypoints.items()}
                             pred_keypoints_example = {key: value[-1] for key, value in pred_keypoints.items()}
 
+                            data = {'gt': gt_keypoints_example,
+                                    'pred': pred_keypoints_example,
+                                    'frame': frame_example}
+                            with open('results/' + str(mov) + '.pkl', 'wb') as file:
+                                pickle.dump(data, file)
+
             # Save data for debugging
             data_to_save = {'gt_keypoints': gt_keypoints_all,
                             'pred_keypoints': pred_keypoints_all,
                             'inference_time': inference_times_all,
-                            'frame': frame_example
+                            'frame': frame
                             }
 
             # Save calculate keypoints for later
