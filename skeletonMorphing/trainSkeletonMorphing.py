@@ -237,7 +237,6 @@ class NetworkTrainer:
 
                 pose.append((pred_poses[0], pose_gt_batch[0], pose_inf_batch[0], par[0], conf_inf[0]))
 
-
         return losses, pose[idx][0], pose[idx][1], pose[idx][2], pose[idx][3], pose[idx][4]
         #return losses, pred_poses, pose_gt_batch, pose_inf_batch, par, np.mean(np.mean(joints, axis=0)), conf_inf
     
@@ -258,19 +257,15 @@ class NetworkTrainer:
 
         for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
             # Access data for each batch
-            #print(batch)
             pose_gt_batch = batch['pose_gt'].clone()
             pose_inf_batch = batch['pose_inf'].clone()
             par = batch['par']
-            #conf_inf = batch['confidences_inf'].cuda()
 
             inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2) * pose_inf_batch.size(3)).cuda().float().clone()
             output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float().clone()
 
-
             # Forward pass through the model
             pred_poses = model(inp_poses)
-            #print(pred_poses)
 
             # Iterate through each participant to find the correct scaling and scale the predicted and output poses accordingly
             for i, p in enumerate(par):
@@ -314,7 +309,7 @@ class NetworkTrainer:
 
     @staticmethod
     def train_model(model, train_loader, validation_loader, optimizer, criterion, epochs=10, pars=np.arange(10, 27),
-                    config=None, scaler=None, debug = False, fold_id = -1):
+                    config=None, scaler=None, best_loss_mean=float('inf'), debug = False, fold_id = -1):
         """
         Method to train model
         :param validation_loader:
@@ -326,7 +321,7 @@ class NetworkTrainer:
         :param pars:
         :return:
         """
-        last_loss_mean = 10000000
+        best_loss_mean = float('inf')
         # Training loop
         for epoch in range(epochs):
             # time.sleep(15) #??
@@ -344,12 +339,9 @@ class NetworkTrainer:
             NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch, fold_id=fold_id)
 
             # Saving the model after each epoch
-
-            if np.mean(losses) < last_loss_mean:
-                last_loss_mean = np.mean(losses)
-                i = list_to_file_name(pars)
-                torch.save(model.state_dict(),
-                           f'models/trained/model_skeleton_morph_mediapipe_id_{fold_id}_mediapipe_mpjpe.pth')
+            if np.mean(losses) < best_loss_mean:
+                best_loss_mean = np.mean(losses)
+                torch.save(model.state_dict(), f'models/trained/model_skeleton_morph_mediapipe_best.pth')
 
 
     @staticmethod
@@ -485,10 +477,10 @@ def load_train_test_all(data_folder: str, pars=np.arange(10, 27)):
     #scaler.save("standardizer")
     print("Length of train dict", len(train_dict))
     print("Length of test dict", len(test_dict))
-    return train_dict, test_dict, scaler 
+    return train_dict, test_dict, scaler
 
 
-def concat_dataset(dataset_dict: dict, pars=np.arange(10, 27)):
+def concat_dataset(dataset_dict: dict, pars=np.arange(5, 27)):
     """
     Method to concatenate datasets with the main idea being to concatenate all the participants data in one dataset
     Minus the participant that is to be used for testing
@@ -505,7 +497,7 @@ def concat_dataset(dataset_dict: dict, pars=np.arange(10, 27)):
 
     return dataset
 
-def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False):
+def train_single_fold(config, datasets: tuple, scaler, missing_par, best_loss_mean, debug=False):
     """
     Method to train a single fold where a new wandb initation is done for each fold to keep track of the results
     This is also better for visualization and tracking of the results in wandb due to limited data per run
@@ -516,11 +508,9 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False)
     :param debug:
     :return:
     """
-    wandb.init(project="skeleton-morphing--moved", config=config, notes="Added center and rotation in dataset preparation", mode="online")
 
     # Splitting the data into train and test
     train, test = datasets
-    scaler = scaler
     sampler = EveryNthSampler(train, config.n_samples)
     shuffled_sampler = SubsetRandomSampler(list(sampler))
     sampler_test = EveryNthSampler(test, config.n_samples)
@@ -551,20 +541,20 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False)
 
     # Namespace to store losses during training
 
-    NetworkTrainer.train_model(model=model,
-                               train_loader=train_loader,
-                               validation_loader=test_loader,
-                               optimizer=optimizer,
-                               criterion=criterion,
-                               epochs=config.N_epochs,
-                               pars=config.pars,
-                               config=None,
-                               scaler=scaler,
-                               debug = debug,
-                               fold_id=missing_par)
+    best_loss_mean = NetworkTrainer.train_model(model=model,
+                                                train_loader=train_loader,
+                                                validation_loader=test_loader,
+                                                optimizer=optimizer,
+                                                criterion=criterion,
+                                                epochs=config.N_epochs,
+                                                pars=config.pars,
+                                                config=None,
+                                                scaler=scaler,
+                                                best_loss_mean=best_loss_mean,
+                                                debug = debug,
+                                                fold_id=missing_par)
 
-    wandb.finish()
-
+    return best_loss_mean
 
 
 
@@ -620,24 +610,24 @@ def train(datapath: str, pars, rand, mode, debug = False):
     }
 
     # WandB – Initialize a new run
-    #wandb.init(project="skeleton-morphing--moved", config=init_config, mode=mode)
-    # config = wandb.config['parameters']
+
     config = SimpleNamespace()
     config.learning_rate = 0.0001
     config.BATCH_SIZE = 64
     config.N_epochs = 100
     config.log_interval = 100
     config.weight_decay = 0.00002
-    # config.pars = np.array([12])
     config.pars = pars
     config.model_type = "mediapipe"
     config.n_samples = 10
+
     print("PAR", pars)
     print("Estimating ", len(pars), "folds")
     train_dict, test_dict, scaler = load_train_test_all(datapath, pars)
-    print('scaler')
-    print(scaler)
 
+    wandb.init(project="skeleton-morphing--moved", config=config, notes="Added center and rotation in dataset preparation", mode="online")
+
+    best_loss_mean = float('inf')  # Track the best validation loss across all folds
 
     for index in range(1, len(pars), 2):
         par = [pars[index-1], pars[index]]
@@ -648,16 +638,16 @@ def train(datapath: str, pars, rand, mode, debug = False):
         
         # All pars except the current par in the loop
         train = concat_dataset(train_dict, [y for y in pars if y not in par])
+        print('Train participants: ', [y for y in pars if y not in par])
         # The current par in the loop
         test = concat_dataset(train_dict, par)
+        print('Test participants: ', par)
 
         # Train fold
-        train_single_fold(config, (train, test), scaler, f"{par[0]}_{par[1]}", debug)
-
-
-    # Folder containing data
-    # data_folder = '/home/emanu/Desktop/SegmentedData'
-    print('done')
+        best_loss_mean = train_single_fold(config, (train, test), scaler, f"{par[0]}_{par[1]}", best_loss_mean, debug)
+    # Finish WandB run after all folds
+    wandb.finish()
+    print('Training on all folds completed.')
 
 def sweep(config, datasets: tuple, scaler, missing_par, debug=False):
     """
