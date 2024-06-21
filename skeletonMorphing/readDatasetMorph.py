@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from scipy.spatial import procrustes
 import models.mediapipeMono as MediaPipe
 #import models.openposeMono as OpenPose
 import multiprocessing
@@ -58,7 +59,6 @@ class ReadDatasetFiles(Dataset):
                 # Check if the file is a CSV file
                 if file_name.endswith('.csv') and any(camera in file_name for camera in cameras) and any(
                         movement in file_name for movement in movements):
-
 
                     if file_path in csv_file_paths:
                         print(file_path)
@@ -179,6 +179,7 @@ class SingleCSVFileDataset(Dataset):
 
         return csv_data
 
+
     def procrustes(self, X, Y, scaling=False):
         """
         A port of MATLAB's `procrustes` function to Numpy.
@@ -212,6 +213,7 @@ class SingleCSVFileDataset(Dataset):
 
         Z = b * np.matmul(Y0, T) + muX
         return d, Z
+
 
     def align(self, pose_inf, pose_gt):
         """

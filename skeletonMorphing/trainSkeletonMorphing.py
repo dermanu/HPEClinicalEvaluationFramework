@@ -277,7 +277,6 @@ class NetworkTrainer:
                 pred_poses[i] = scaler.descale(pred_poses[i], f"pose_gt_{p}")
                 output_poses[i] = scaler.descale(output_poses[i], f"pose_gt_{p}")
 
-
             # Calculating MSE loss
             loss = criterion(pred_poses, output_poses)
 
@@ -327,7 +326,7 @@ class NetworkTrainer:
         :param pars:
         :return:
         """
-        last_loss_mean = 100000
+        last_loss_mean = 10000000
         # Training loop
         for epoch in range(epochs):
             # time.sleep(15) #??
@@ -529,7 +528,7 @@ def train_single_fold(config, datasets: tuple, scaler, missing_par, debug=False)
 
     wandb.log({"train_size": len(sampler), "test_size": len(sampler_test), "fold_id": missing_par})
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, num_workers=8, pin_memory=True, sampler=shuffled_sampler)
-    test_loader = data.DataLoader(test, batch_size=32, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
+    test_loader = data.DataLoader(test, batch_size=64, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
 
 
     print('Data loader created')
@@ -589,16 +588,16 @@ def train(datapath: str, pars, rand, mode, debug = False):
         },
         'parameters': {
             'learning_rate': {
-                'value': 0.00001  # Learning rate: 1e-4 0.000
+                'value': 0.0001  # Learning rate: 1e-4 0.000
             },
             'BATCH_SIZE': {
-                'value': 32  # Batch size: 32
+                'value': 64  # Batch size: 32
             },
             'weight_decay': {
-                'value': 1e-5  # Weight decay: 1e-5
+                'value': 0.00002  # Weight decay: 1e-5
             },
             'epochs': {
-                'value': 75
+                'value': 100
             },
             'datafolder': {
                 'value': datapath
@@ -624,18 +623,20 @@ def train(datapath: str, pars, rand, mode, debug = False):
     #wandb.init(project="skeleton-morphing--moved", config=init_config, mode=mode)
     # config = wandb.config['parameters']
     config = SimpleNamespace()
-    config.learning_rate = 0.00001
-    config.BATCH_SIZE = 32
+    config.learning_rate = 0.0001
+    config.BATCH_SIZE = 64
     config.N_epochs = 100
     config.log_interval = 100
-    config.weight_decay = 1e-5
+    config.weight_decay = 0.00002
     # config.pars = np.array([12])
     config.pars = pars
     config.model_type = "mediapipe"
-    config.n_samples = 15
+    config.n_samples = 10
     print("PAR", pars)
     print("Estimating ", len(pars), "folds")
     train_dict, test_dict, scaler = load_train_test_all(datapath, pars)
+    print('scaler')
+    print(scaler)
 
 
     for index in range(1, len(pars), 2):
@@ -682,7 +683,7 @@ def sweep(config, datasets: tuple, scaler, missing_par, debug=False):
 
     wandb.log({"train_size": len(sampler), "test_size": len(sampler_test), "fold_id": missing_par})
     train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, num_workers=8, pin_memory=True, sampler=shuffled_sampler)
-    test_loader = data.DataLoader(test, batch_size=32, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
+    test_loader = data.DataLoader(test, batch_size=64, num_workers=8, pin_memory=True, sampler=shuffled_sampler_test)
 
     print('Data loader created')
     # Initializing the model (Synthesizer) and moving it to GPU
@@ -723,26 +724,23 @@ def sweep(config, datasets: tuple, scaler, missing_par, debug=False):
 def init_sweep(datapath: str, pars, fold_id):
     wandb.login()
     sweep_configuration = {
-        'method': 'bayes',
+        'method': 'grid',
         'metric': {
             'name': 'validation_loss',
             'goal': 'minimize'
         },
         'parameters': {
             'learning_rate': {
-                'max': 0.001,
-                'min': 0.000001
+                'value': 0.0001
             },
             'BATCH_SIZE': {
-                'values': [16, 32, 64, 128, 256]
+                'value': 64
             },
             'weight_decay': {
-                'max': 0.0001,
-                'min': 0.00001
+                'value': 0.00002
             },
             'N_epochs': {
-                'max': 150,
-                'min': 50
+                'value': 100,
             },
             'datafolder': {
                 'value': datapath
@@ -757,10 +755,10 @@ def init_sweep(datapath: str, pars, fold_id):
                 'value': 'mediapipe'
             },
             'n_samples': {
-                'values': [5, 10, 15, 20, 25]
+                'value': 10
             },
             'dropout_rate': {
-                'values': [0.1, 0.2]
+                'value': 0.1
             }
         },
         'early_terminate': {
