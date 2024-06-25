@@ -2,6 +2,7 @@ import numpy as np
 from scipy import signal
 from sklearn.metrics import auc
 from scipy.stats import pearsonr
+from scipy.spatial import procrustes
 import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
@@ -34,8 +35,31 @@ def calculate_mpjpe(target, prediction):
 
     return mean, std
 
-
 def align_procrustes(target, prediction):
+    """
+    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
+    often referred to as "Protocol #2" in many papers.
+    Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
+    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
+    :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
+    :return error_count: Error count of failed alignments
+    """
+    # Check the original scale
+    scale_gt = np.max(target, axis=0) - np.min(target, axis=0)
+    scale_pred = np.max(prediction, axis=0) - np.min(prediction, axis=0)
+
+    # Perform Procrustes analysis for 3D coordinates
+    mtx1_3d, mtx2_3d, disparity_3d = procrustes(target, prediction)
+
+    # Optional: Manual scaling adjustment if needed
+    manual_scale = scale_gt / scale_pred
+    mtx2_3d = mtx2_3d * manual_scale
+    return mtx1_3d, mtx2_3d
+
+
+def align_procrustes_old(target, prediction):
     """
     Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers.
@@ -170,7 +194,7 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
     :param sample_rate: Sample rate in Hz
     :param procrustes: Weather Procrustes alignment should be used
     :param procrustes: Whether to use procrustes alignment
-    :return: Mean and standard deviation of the mean per-joint velocity error
+    :return: Mean and standard deviation of the mean per-joint velocity error in m/s
     """
 
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
@@ -183,7 +207,7 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
     else:
         mean, std = calculate_mpjpe(velocity_target, velocity_predicted)
 
-    return mean, std
+    return mean/1000, std/1000
 
 
 def mean_acceleration_error(prediction, target, sample_rate, procrustes=False):

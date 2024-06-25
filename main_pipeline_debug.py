@@ -11,6 +11,8 @@ from utils.plotKeypoints import plot_3d_keypoints_validation
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
 import pickle
+from scipy.spatial import procrustes
+
 
 
 def log_frame_example(frame):
@@ -29,8 +31,49 @@ def log_frame_example(frame):
     image = wandb.Image(frame)
     wandb.log({"Example_Frame": image})
 
-
 def align_procrustes(target, prediction):
+    """
+    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
+    often referred to as "Protocol #2" in many papers.
+    Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
+    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
+    :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
+    :return error_count: Error count of failed alignments
+    """
+    assert target.shape[0] == prediction.shape[0], 'Input must have the same number of frames'
+
+    gt_all = []
+    pred_all = []
+    error_count = 0
+
+    for i in range(target.shape[0]):
+        gt = target[0]
+        pred = prediction[0]
+
+        try:
+            # Check the original scale
+            #scale_gt = np.max(gt, axis=0) - np.min(gt, axis=0)
+            #scale_pred = np.max(pred, axis=0) - np.min(pred, axis=0)
+            # Perform Procrustes analysis for 3D coordinates
+            mtx1, mtx2, disparity = procrustes(gt, pred)
+            # Optional: Manual scaling adjustment if needed
+            #manual_scale = scale_gt / scale_pred
+            #mtx2 = mtx2 * manual_scale
+            gt_all.append(mtx1)
+            pred_all.append(mtx2)
+        except Exception as e:
+            error_count += 1
+            continue
+
+    gt_all = np.array(gt_all)
+    pred_all = np.array(pred_all)
+
+    return gt_all, pred_all, error_count
+
+
+def align_procrustes_old(target, prediction):
     """
     Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation).
     :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
@@ -123,6 +166,12 @@ class Framework:
             "lower": [5, 6, 7, 8],
             "complex": [9, 10, 11, 12, 13],
             "sitting": [14, 15, 16, 17]
+        }
+        self.movement_category = {
+            "upper": [1, 2],
+            "lower": [5, 6],
+            "complex": [9, 10],
+            "sitting": [14, 15]
         }
 
         # Defines body segments
@@ -311,9 +360,6 @@ class Framework:
         inference_time_std = np.std(np.array(flattened_inference_times))
         wandb.log({"inference_time_mean": inference_time_mean, "inference_time_std": inference_time_std})
 
-        # Log number (n) of frames metrics are based on:
-        wandb.log({"sample_number": len(pred_keypoints)})
-
     def main(self, config=None):
         """
         Run inference on the chosen model with sweep parameters and log results to wandb project.
@@ -328,6 +374,7 @@ class Framework:
             gt_keypoints_all = []
             pred_keypoints_all = []
             inference_times_all = []
+            error_count_all = 0
 
             for par in tqdm(self.participants, ascii=True, desc="Participant:"):
                 for mov in tqdm(self.movement_category[config['movement']], ascii=True, desc="Movement:"):
@@ -376,15 +423,16 @@ class Framework:
                             # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
 
                     # Procrustes Alignment
-                    gt_keypoints, pred_keypoints, proc_error = align_procrustes(gt_keypoints, pred_keypoints)
+                    #gt_keypoints, pred_keypoints, error_count = align_procrustes(gt_keypoints, pred_keypoints)
+                    #error_count_all += error_count
 
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
                     #pred_keypoints = self.apply_morphing(pred_keypoints)
 
                     # Postprocess predicted keypoints
-                    pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
-                                                                       self.interpolation_fun,
-                                                                       self.smoothing_fun)
+                    #pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
+                    #                                                   self.interpolation_fun,
+                    #                                                   self.smoothing_fun)
 
                     # Add joint names
                     pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
@@ -422,10 +470,21 @@ class Framework:
             with open('results/' + run.name + '.pkl', 'wb') as file:
                 pickle.dump(data_to_save, file)
 
+            print("Calculating metrics and logging to wandb")
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
             plot_3d_keypoints_validation(gt_keypoints_example, pred_keypoints_example, self.model_name)
             log_frame_example(frame_example)
-            print("Calculating metrics and logging to wandb")
+            samples = self.total_frames(data)
+            wandb.log({"sample_number": samples})
+            wandb.log({"procrustes_number": samples-error_count_all})
+
+    def total_frames(self, data):
+        key = 'right_shoulder'
+        total = 0
+        for item in data:
+            if key in item:
+                total += item[key].shape[0]
+        return total
 
     def initiate_wandb_sweep(self):
         """
