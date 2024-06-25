@@ -1,25 +1,25 @@
 import cv2
-import mediapipe as mp
 import numpy as np
 import time
 from utils.frameAugmentation import FrameAugmentor
+import mediapipe as mp
+from mediapipe.tasks.python import vision
+
+# Load the pose landmarker model once to avoid reloading it multiple times
+options = mp.tasks.vision.PoseLandmarkerOptions(
+    base_options=mp.tasks.BaseOptions(model_asset_path='models/pose_landmarker_heavy.task'),
+    running_mode=mp.tasks.vision.RunningMode.IMAGE)
+PoseLandmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
 
 
 # Currently runs on CPU as per default.
-def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
+def inference_video(cap, sweep_config=None, dimensions=3):
     if sweep_config is not None:
         # Initialize frame augmentor
         frameaug = FrameAugmentor()
 
-    # Initialize MediaPipe Pose
-    mp_pose = mp.solutions.pose
-    # Model complexity set to 2 for mono-ocular. Minimum detection and tracking confidence set to 0.5 as default.
-    pose = mp_pose.Pose(static_image_mode=False, model_complexity=mp_complexity, min_detection_confidence=0.5,
-                        min_tracking_confidence=0.5)
-
     keypoints_data = []
     inference_time = []
-
     frame_number = 0
 
     while cap.isOpened():
@@ -37,8 +37,11 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
         # Record start time
         start_time = time.time()
 
-        # Process the frame
-        results = pose.process(rgb_frame)
+        # Convert the frame to a MediaPipe Image object
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+
+        # Detect pose landmarks from the input image
+        results = PoseLandmarker.detect(mp_image)
 
         # Record end time
         end_time = time.time()
@@ -46,15 +49,19 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
         inference_time.append(end_time - start_time)
 
         # If pose detected, save keypoints to data list
-        if results.pose_landmarks:
-            # Save array dependent on wanted dimensions
-            if dimensions == 3:
-                frame_data = np.array([[i, landmark.x, landmark.y, landmark.z] for i, landmark in
-                                       enumerate(results.pose_landmarks.landmark)])
-            elif dimensions == 2:
-                frame_data = np.array([[i, landmark.x, landmark.y] for i, landmark in
-                                       enumerate(results.pose_landmarks.landmark)])
-            keypoints_data.append(frame_data)
+        if results.pose_world_landmarks:
+            landmarks = results.pose_world_landmarks
+
+            for idx in range(len(landmarks)):
+                pose_landmarks = landmarks[idx]
+
+                # Save array dependent on wanted dimensions
+                if dimensions == 3:
+                    frame_data = np.array([[i, landmark.x, landmark.y, landmark.z]
+                                           for i, landmark in enumerate(pose_landmarks)])
+                elif dimensions == 2:
+                    frame_data = np.array([[i, landmark.x, landmark.y] for i, landmark in enumerate(pose_landmarks)])
+                keypoints_data.append(frame_data)
 
         frame_number += 1
 
