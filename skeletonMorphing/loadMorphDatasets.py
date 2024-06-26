@@ -73,5 +73,5 @@ def run_load(datapath: str):
         file_name = f"{datapath}/morph_dataset/par_{list_to_file_name(p)}_{model_type}_dataset.pth"
         torch.save(my_dataset, file_name)
 
-
-
+if __name__ == '__main__':
+    run_load('E:\MoCap')

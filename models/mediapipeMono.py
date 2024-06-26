@@ -1,26 +1,25 @@
 import cv2
-import mediapipe as mp
 import numpy as np
 import time
 from utils.frameAugmentation import FrameAugmentor
+import mediapipe as mp
+from mediapipe.tasks.python import vision
 
+# Load the pose landmarker model once to avoid reloading it multiple times
+options = mp.tasks.vision.PoseLandmarkerOptions(
+    base_options=mp.tasks.BaseOptions(model_asset_path='..\models\pose_landmarker_heavy.task'),
+    running_mode=mp.tasks.vision.RunningMode.IMAGE)
+PoseLandmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
 
 # Currently runs on CPU as per default.
-def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
+def inference_video(cap, sweep_config=None, dimensions=3):
     if sweep_config is not None:
         # Initialize frame augmentor
         frameaug = FrameAugmentor()
 
-    # Initialize MediaPipe Pose
-    mp_pose = mp.solutions.pose
-    # Model complexity set to 2 for mono-ocular. Minimum detection and tracking confidence set to 0.5 as default.
-    pose = mp_pose.Pose(static_image_mode=False, model_complexity=mp_complexity, min_detection_confidence=0.5,
-                        min_tracking_confidence=0.5)
-
     keypoints_data = []
     confidence_data = []  # List to store confidence scores
     inference_time = []
-
     frame_number = 0
 
     while cap.isOpened():
@@ -28,18 +27,21 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
         if not ret:
             break
 
+        # Convert the BGR image to RGB - Is this really needed?
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
         if sweep_config is not None:
             # Augment frame
-            frame = frameaug.augment_frames(frame, sweep_config)
+            rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
         # Record start time
         start_time = time.time()
 
-        # Convert the BGR image to RGB - Is this really needed?
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Convert the frame to a MediaPipe Image object
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-        # Process the frame
-        results = pose.process(rgb_frame)
+        # Detect pose landmarks from the input image
+        results = PoseLandmarker.detect(mp_image)
 
         # Record end time
         end_time = time.time()
@@ -47,17 +49,20 @@ def inference_video(cap, sweep_config=None, mp_complexity=2, dimensions=3):
         inference_time.append(end_time - start_time)
 
         # If pose detected, save keypoints to data list
-        if results.pose_landmarks:
-            # Save array dependent on wanted dimensions
-            if dimensions == 3:
-                frame_data = np.array([[i, landmark.x, landmark.y, landmark.z] for i, landmark in
-                                       enumerate(results.pose_landmarks.landmark)])
-            elif dimensions == 2:
-                frame_data = np.array([[i, landmark.x, landmark.y] for i, landmark in
-                                       enumerate(results.pose_landmarks.landmark)])
+        if results.pose_world_landmarks:
+            landmarks = results.pose_world_landmarks
 
-            confidences = [landmark.visibility for landmark in results.pose_landmarks.landmark]
+            for idx in range(len(landmarks)):
+                pose_landmarks = landmarks[idx]
 
+                # Save array dependent on wanted dimensions
+                if dimensions == 3:
+                    frame_data = np.array([[i, landmark.x, landmark.y, landmark.z]
+                                           for i, landmark in enumerate(pose_landmarks)])
+                elif dimensions == 2:
+                    frame_data = np.array([[i, landmark.x, landmark.y] for i, landmark in enumerate(pose_landmarks)])
+
+                confidences = np.array([landmark.visibility for landmark in pose_landmarks])
 
             #print(np.mean(np.array(confidences), axis=0))
             confidence_data.append(confidences)
