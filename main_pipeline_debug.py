@@ -128,7 +128,8 @@ def align_procrustes_old(target, prediction):
 
 class Normalize:
     """
-    Normalization class to handle scaling of the data.
+    Normalization class to handle scaling of the data. Unnecessary complicated. Based on an old normalization method for
+    the training of the morphing model, where the scaling factors needed to be saved.
     """
     def __init__(self):
         self.dict = {}
@@ -190,7 +191,6 @@ class Framework:
         morph = [5, 6, 12, 15, 16, 18, 20, 21, 22, 24, 25]
 
         self.participants = ['par4', 'par19', 'par11', 'par23']
-        self.participants = ['par4']
 
         # Defines movement number in dataset related to different movement categories
         self.movement_category = {
