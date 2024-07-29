@@ -46,16 +46,9 @@ def align_procrustes(target, prediction):
     :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
     :return error_count: Error count of failed alignments
     """
-    # Check the original scale
-    scale_gt = np.max(target, axis=0) - np.min(target, axis=0)
-    scale_pred = np.max(prediction, axis=0) - np.min(prediction, axis=0)
-
     # Perform Procrustes analysis for 3D coordinates
     mtx1_3d, mtx2_3d, disparity_3d = procrustes(target, prediction)
 
-    # Optional: Manual scaling adjustment if needed
-    manual_scale = scale_gt / scale_pred
-    mtx2_3d = mtx2_3d * manual_scale
     return mtx1_3d, mtx2_3d
 
 
@@ -194,7 +187,7 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
     :param sample_rate: Sample rate in Hz
     :param procrustes: Weather Procrustes alignment should be used
     :param procrustes: Whether to use procrustes alignment
-    :return: Mean and standard deviation of the mean per-joint velocity error in m/s
+    :return: Mean and standard deviation of the mean per-joint velocity error in mm/s
     """
 
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
@@ -231,7 +224,7 @@ def mean_acceleration_error(prediction, target, sample_rate, procrustes=False):
 
     mean, std, err = calculate_pmpjpe(acceleration_target, acceleration_predicted)
 
-    return mean, std
+    return mean/1000, std/1000
 
 
 def calculate_correlation(target, prediction, axes_to_use=None, procrustes=False):
@@ -263,6 +256,7 @@ def calculate_correlation(target, prediction, axes_to_use=None, procrustes=False
         pred = prediction[:, coordinate]
 
         if np.std(gt) == 0 or np.std(pred) == 0:
+            print('There is no variation in the data for the correlation')
             continue  # Skip if no variance in the data
 
         corr, pvalue = pearsonr(gt, pred)
@@ -447,12 +441,12 @@ def calculate_joint_angles(keypoints, Y_vector=np.array([0, 1, 0])):
     angles['ankle_angle_r'] = calculate_angle_point(keypoints['right_knee'], keypoints['right_ankle'], keypoints['right_foot_index'])
 
     # Upper limb angles
-    # angles['shoulder_side_l'] = calculate_angle_vector(orthogonal_projection(keypoints['left_elbow'] - keypoints['left_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['left_elbow'] - keypoints['left_shoulder'], D_s.T))[1]  # Not sure if this is right
-    # angles['shoulder_side_r'] = calculate_angle_vector(orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s.T))[1]  # Not sure if this is right
-    angles['shoulder_abduc_l'] = calculate_angle_vector( keypoints['right_elbow'] - keypoints['right_shoulder'],keypoints['right_hip'] - keypoints['right_shoulder'])
-    angles['shoulder_abduc_r'] = calculate_angle_vector( keypoints['left_elbow'] - keypoints['left_shoulder'],keypoints['left_hip'] - keypoints['left_shoulder'])
-    angles['shoulder_flex_l'] = 90 - calculate_angle_vector( keypoints['right_elbow'] - keypoints['right_shoulder'], D_s)
-    angles['shoulder_flex_r'] = 90 - calculate_angle_vector( keypoints['left_elbow'] - keypoints['left_shoulder'], D_s)
+    angles['shoulder_side_l'] = calculate_angle_vector(orthogonal_projection(keypoints['left_elbow'] - keypoints['left_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['left_elbow'] - keypoints['left_shoulder'], D_s.T))[1]  # Not sure if this is right
+    angles['shoulder_side_r'] = calculate_angle_vector(orthogonal_projection(keypoints['right_elbow'] - keypoints['right_shoulder'], np.cross(D_s, shoulder_mid - hip_mid)), shoulder_mid - hip_mid) * np.sign(np.dot(keypoints['right_elbow'] - keypoints['right_shoulder'], D_s.T))[1]  # Not sure if this is right
+    angles['shoulder_abduc_l'] = calculate_angle_vector( keypoints['left_elbow'] - keypoints['left_shoulder'],keypoints['left_hip'] - keypoints['left_shoulder'])
+    angles['shoulder_abduc_r'] = calculate_angle_vector( keypoints['right_elbow'] - keypoints['right_shoulder'],keypoints['right_hip'] - keypoints['right_shoulder'])
+    angles['shoulder_flex_l'] = 90 - calculate_angle_vector( keypoints['left_elbow'] - keypoints['left_shoulder'], D_s)
+    angles['shoulder_flex_r'] = 90 - calculate_angle_vector( keypoints['right_elbow'] - keypoints['right_shoulder'], D_s)
     angles['elbow_angle_l'] = calculate_angle_point(keypoints['left_shoulder'], keypoints['left_elbow'], keypoints['left_wrist'])
     angles['elbow_angle_r'] = calculate_angle_point(keypoints['right_shoulder'], keypoints['right_elbow'], keypoints['right_wrist'])
 
