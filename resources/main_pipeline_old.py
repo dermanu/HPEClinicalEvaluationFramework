@@ -7,7 +7,8 @@ import torch
 from utils import cameraCalibration as camCali
 from utils import frameAugmentation as frameAug
 from utils import metrics, postprocessing
-from models import mediapipeMono, alphaPoseMono
+from models import mediapipeMono
+from resources import alphaPoseMono
 
 
 def log_frame_example(frames):

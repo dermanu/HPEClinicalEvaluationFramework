@@ -10,6 +10,9 @@ from utils import frameAugmentation as frameAug
 from utils.plotKeypoints import plot_3d_keypoints_validation
 from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
+from models import mediapipeMulti
+
+
 import pickle
 from scipy.spatial import procrustes
 
@@ -454,23 +457,46 @@ class Framework:
                                 8: 'right_knee', 9: 'left_knee', 10: 'right_ankle', 11: 'left_ankle',
                                 12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
                             }
-                        if self.model_name == "motionbert":
-                            print("MotionBERT not implemented yet")
-                            # pred_keypoints, inference_times, frame = alphaPoseMono.inference_video(caps, self)
+                            self.joint_num_total = 33
 
                     # Multioccular models
                     elif self.model_type == "multi":
+                        if self.model_name == 'mediapipe':
+                            self.joint_num_total = 33
+
                         # Desynchronize video streams
-                        if self.sweep_config['desynchronizer']:
+                        if config._items['augmentation'] == 'desynchronize':
                             caps = self.cam_desynchronizer.desynchronize(caps)
-                            # Load camera parameter matrix and add noise if specified so
-                            p_matrix = camCali.get_projection_matrix(cameras, self.sweep_config['decalibration'])
+
+                        # Load camera parameter matrix and add noise if specified so
+                        if config._items['augmentation'] == 'decalibration':
+                            p_matrix_raw, _, _ = camCali.get_projection_matrix(cameras, True)
+                        else:
+                            p_matrix_raw, _, _ = camCali.get_projection_matrix(cameras, False)
+
+                            p_matrix = torch.zeros((self.joint_num_total, len(cameras), 3, 4), dtype=torch.float32)
+                            for i, cam in enumerate(p_matrix_raw):
+                                p_matrix[:, i, :, :] = torch.tensor(p_matrix_raw[cam], dtype=torch.float32)
+                            p_matrix = p_matrix.cuda()
+
                         if self.model_name == "openpose":
                             print("OpenPose not implemented yet")
                             # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
-                        if self.model_name == "LWCDR":
-                            print("LWCDR not implemented yet")
-                            # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
+
+                        if self.model_name == "mediapipe":
+                            pred_keypoints, inference_times = mediapipeMulti.inference_video(caps, p_matrix, config)
+                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32,
+                                                31]  # Select only relevant keypoints and put them in the right order
+                            pred_keypoints = pred_keypoints[:, selected_columns, 1:]
+
+                            # Joint names mapping for MediaPipe (kinda redundant, as names are included in gt)
+                            self.joint_names = {
+                                0: 'right_shoulder', 1: 'left_shoulder', 2: 'right_elbow', 3: 'left_elbow',
+                                4: 'right_wrist', 5: 'left_wrist', 6: 'right_hip', 7: 'left_hip',
+                                8: 'right_knee', 9: 'left_knee', 10: 'right_ankle', 11: 'left_ankle',
+                                12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
+                            }
+
 
                     # Add min and max values for normalization of pose_gt
                     gt_keypoints_np = np.array(gt_keypoints)
@@ -554,11 +580,11 @@ class Framework:
             if self.model_name not in ['mediapipe', 'motionbert']:
                 raise ValueError('Choose a valid mono-ocular model, or change the model type to multi')
         elif self.model_type == 'multi':
-            if self.model_name not in ['openpose', 'LWCDR']:
+            if self.model_name not in ['mediapipe', 'LWCDR']:
                 raise ValueError('Choose a valid multioccular model, or change the model type to mono')
 
-            if self.sample_rate is None:
-                raise ValueError('Sample rate missing (Hz)')
+        if self.sample_rate is None:
+            raise ValueError('Sample rate missing (Hz)')
 
         if self.dataset_path is None:
             raise ValueError('Dataset path is missing')
@@ -622,7 +648,7 @@ class Framework:
 
 
 # Run the framework
-framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
+framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
                       directory="/media/emanu/Emanuel Lorenz1/MoCap/segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
