@@ -229,7 +229,7 @@ class Framework:
         #     "right_foot": ['ankle_right', 'toe_right']
         # }
 
-        # Joint names mapping for MoCap ground truth
+        # Joint names mapping for MoCap ground truth-
         self.joint_names_gt = {
             0: 'right_shoulder', 1: 'left_shoulder', 2: 'right_elbow', 3: 'left_elbow',
             4: 'right_wrist', 5: 'left_wrist', 6: 'right_hip', 7: 'left_hip',
