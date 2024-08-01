@@ -10,7 +10,7 @@ ia.seed(1)
 
 def occlusion(frame):
     # Create moving occlusion of 10-20% of the image size and fill it with gaussian noise.
-    aug = iaa.Cutout(size=(0.05, 0.2), nb_iterations=(2, 3), fill_mode="gaussian", fill_per_channel=True)
+    aug = iaa.Cutout(size=(0.2, 0.3), nb_iterations=(2, 3), fill_mode="gaussian", fill_per_channel=True)
     return aug(image=frame)
 
 
