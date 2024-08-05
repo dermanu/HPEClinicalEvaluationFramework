@@ -89,6 +89,8 @@ def triangulate_from_multiple_views_svd(proj_matricies, points):
     batch_size = points.shape[0]
     n_views = points.shape[1]
 
+    points = torch.tensor(points, dtype=torch.float).cuda()
+
     A = proj_matricies[:, :, 2:3].expand(batch_size, n_views, 2, 4) * points.view(-1, n_views, 2, 1)
     A -= proj_matricies[:, :, :2]
 

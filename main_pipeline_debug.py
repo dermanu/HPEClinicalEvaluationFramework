@@ -104,7 +104,7 @@ def align_procrustes_old(target, prediction):
                 U, s, Vh = np.linalg.svd(K)
                 V = Vh.T
                 Z = np.eye(U.shape[0])
-                Z[-1, -1] *= np.sign(np.linalg.det(U.dot(V.T)))
+                Z[-1, -1] *= np.sign(np.linalg.det(U.dot(Vh)))
                 R = V.dot(Z.dot(U.T))
                 scale = np.trace(R.dot(K)) / var1
                 t = muY - scale * (R.dot(muX))
@@ -194,6 +194,7 @@ class Framework:
         morph = [5, 6, 12, 15, 16, 18, 20, 21, 22, 24, 25]
 
         self.participants = ['par4', 'par19', 'par11', 'par23']
+        self.participants = ['par4']
 
         # Defines movement number in dataset related to different movement categories
         self.movement_category = {
@@ -484,10 +485,9 @@ class Framework:
                             # pred_keypoints, inference_times = canonPoseMulti.inference_video(caps)
 
                         if self.model_name == "mediapipe":
-                            pred_keypoints, inference_times = mediapipeMulti.inference_video(caps, p_matrix, config)
-                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32,
-                                                31]  # Select only relevant keypoints and put them in the right order
-                            pred_keypoints = pred_keypoints[:, selected_columns, 1:]
+                            pred_keypoints, inference_times, frame = mediapipeMulti.inference_video(caps, p_matrix, config)
+                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]  # Select only relevant keypoints and put them in the right order
+                            pred_keypoints = pred_keypoints[:, selected_columns, :]
 
                             # Joint names mapping for MediaPipe (kinda redundant, as names are included in gt)
                             self.joint_names = {
@@ -497,13 +497,12 @@ class Framework:
                                 12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
                             }
 
-
                     # Add min and max values for normalization of pose_gt
-                    gt_keypoints_np = np.array(gt_keypoints)
+                    gt_keypoints_np = np.array(gt_keypoints[0][1])
                     self.scaler.add_key_from_vector(gt_keypoints_np, "pose_gt")
 
                     # Procrustes Alignment
-                    gt_keypoints, pred_keypoints, error_count = align_procrustes_old(gt_keypoints, pred_keypoints)
+                    gt_keypoints, pred_keypoints, error_count = align_procrustes_old(gt_keypoints_np, pred_keypoints)
                     error_count_all += error_count
 
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
@@ -649,7 +648,7 @@ class Framework:
 
 # Run the framework
 framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
-                      directory="/media/emanu/Emanuel Lorenz1/MoCap/segmented", sweep_id=None)
+                      directory="/media/emanu/LaCie/MoCap/segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 
