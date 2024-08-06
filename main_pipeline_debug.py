@@ -652,5 +652,3 @@ framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 
-# To start a new run enter this into a console:
-# python /home/emanu/Documents/PycharmProjects/HPEClinicalEvaluation/main_pipeline_debug.py
