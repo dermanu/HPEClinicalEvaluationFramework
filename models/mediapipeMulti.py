@@ -89,12 +89,3 @@ def inference_video(caps, projections, sweep_config=None):
 
     inference_time = np.array(inference_time)
     return np.array(keypoints_data), inference_time, last_rgb_frame
-
-# Example usage
-# caps = [cv2.VideoCapture(0), cv2.VideoCapture(1)]  # Add more cameras as needed
-# projections = [...]  # Your camera projection matrices
-# sweep_config = ...  # Your sweep configuration if any
-
-# points_3d, inference_time, last_frame = inference_video(caps, projections, sweep_config)
-
-# Process points_3d, inference_time, and last_frame as needed
