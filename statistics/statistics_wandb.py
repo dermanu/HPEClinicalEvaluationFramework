@@ -3,7 +3,6 @@ import wandb
 import ast
 import scipy.stats as stats
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
-import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -21,8 +20,29 @@ def extract_stats(summary):
 
     means = {k: v for k, v in summary_dict.items() if 'mean' in k or '_m_' in k}
     stds = {k: v for k, v in summary_dict.items() if 'std' in k or '_s_' in k}
-    return means, stds
 
+    # Handle nested dictionaries for pmpjpe_m_joint and velocity_m_joint
+    for key in ['pmpjpe_m_joint', 'velocity_m_joint']:
+        if key in summary_dict:
+            joint_means = {f"{key}_{joint}": val for joint, val in summary_dict[key].items()}
+            key_std = key.replace("_m_", "_s_")
+            joint_stds = {f"{key_std}_{joint}": val for joint, val in summary_dict[key_std].items()}
+            means.update(joint_means)
+            stds.update(joint_stds)
+
+    pccs = {}
+    for key in ["pcc_joint"]:
+        if key in summary_dict:
+            joint_pcc = {f"{key}_{joint}": val for joint, val in summary_dict[key].items()}
+            pccs.update(joint_pcc)
+
+    pvalues = {}
+    for key in ["pvalue_joint"]:
+        if key in summary_dict:
+            joint_pvalue = {f"{key}_{joint}": val for joint, val in summary_dict[key].items()}
+            pvalues.update(joint_pvalue)
+
+    return means, stds, pccs, pvalues
 
 # Function to fetch data from W&B
 def fetch_wandb_data(entity, project, sweep_id):
@@ -46,6 +66,14 @@ def pair_keys(means_keys, stds_keys):
                 paired_keys.append((mean_key, std_key))
     return paired_keys
 
+def pair_keys_stats(pcc_keys, pvalue_keys):
+    paired_keys = []
+    for pcc_key in pcc_keys:
+        for pvalue_key in pvalue_keys:
+            if pcc_key.replace("pcc_", "pvalue_") == pvalue_key:
+                paired_keys.append((pcc_key, pvalue_key))
+    return paired_keys
+
 
 # Main function to perform the analysis
 def main():
@@ -53,20 +81,25 @@ def main():
     runs_df = fetch_wandb_data(entity, project, sweep_id)
 
     # Apply the extraction function to the data
-    runs_df['means'], runs_df['stds'] = zip(*runs_df['summary'].apply(extract_stats))
+    runs_df['means'], runs_df['stds'], runs_df['pccs'], runs_df['p_values'] = zip(*runs_df['summary'].apply(extract_stats))
 
-    # Identify common keys across all 'means' and 'stds' dictionaries, skipping the first run
-    common_means_keys = set.intersection(*(set(d.keys()) for i, d in enumerate(runs_df['means']) if d and i != 0))
-    common_stds_keys = set.intersection(*(set(d.keys()) for i, d in enumerate(runs_df['stds']) if d and i != 0))
+    # Identify common keys across all 'means' and 'stds' dictionaries
+    common_means_keys = set.intersection(*(set(d.keys()) for d in runs_df['means']))
+    common_stds_keys = set.intersection(*(set(d.keys()) for d in runs_df['stds']))
+
+    # Identify common keys across all 'pccs' and 'p_values' dictionaries
+    common_pcc_keys = set.intersection(*(set(d.keys()) for d in runs_df['pccs']))
+    common_pvalues_keys = set.intersection(*(set(d.keys()) for d in runs_df['p_values']))
 
     # Pair mean and std keys based on a common prefix
     paired_keys = pair_keys(common_means_keys, common_stds_keys)
 
+    # Pair mean and std keys based on a common prefix
+    paired_keys_stat = pair_keys_stats(common_pcc_keys, common_pvalues_keys)
+
     # Ensure that we only process rows where the key is present in both means and stds
     structured_data = []
     for idx, row in runs_df.iterrows():
-        if idx == 0:
-            continue
         for mean_key, std_key in paired_keys:
             if mean_key in row['means'] and std_key in row['stds']:
                 structured_data.append({
@@ -77,11 +110,22 @@ def main():
                     'sample_number': row['summary'].get('sample_number', None)  # Using 'sample_number' as a sample number
                 })
 
+        for pcc_key, pvalue_key in paired_keys_stat:
+            structured_data.append({
+                'condition': row['name'],
+                'metric': pcc_key,
+                'pcc': row['pccs'][pcc_key],
+                'pvalue': row['p_values'][pvalue_key],
+                'sample_number': row['summary'].get('sample_number', None)
+            })
+
     structured_df = pd.DataFrame(structured_data)
 
     structured_df['mean'] = pd.to_numeric(structured_df['mean'], errors='coerce')
     structured_df['std'] = pd.to_numeric(structured_df['std'], errors='coerce')
 
+    # Save the structured dataframe
+    structured_df.to_csv("results/structured_project.csv", index=False)
 
     # Perform ANOVA tests for each metric
     anova_results = {}
@@ -101,7 +145,6 @@ def main():
         except TypeError as e:
             print(f"Skipping ANOVA for {metric} due to error: {e}")
 
-
     # Convert ANOVA results to DataFrame for better visualization
     anova_results_df = pd.DataFrame.from_dict(anova_results, orient='index')
 
@@ -115,32 +158,32 @@ def main():
     print(significant_anova)
 
     # Save the ANOVA results to a CSV file
-    anova_results_df.to_csv("anova_results.csv", index=True)
+    anova_results_df.to_csv("results/anova_results.csv", index=True)
 
     # Prepare to perform post-hoc tests
     significant_metrics = significant_anova.index
 
     posthoc_results = {}
+
     for metric in significant_metrics:
         metric_data = structured_df[structured_df['metric'] == metric]
-        print(f"Processing Tukey HSD for metric: {metric}")
-        print(metric_data[['mean', 'condition']])  # Print the data being passed to Tukey HSD
         try:
             tukey = pairwise_tukeyhsd(endog=metric_data['mean'], groups=metric_data['condition'], alpha=0.05)
-            posthoc_results[metric] = tukey.summary()
+            tukey_summary = tukey.summary()
+            posthoc_results[metric] = tukey_summary
 
-            # Print Tukey HSD results
-            print(f"Tukey HSD results for {metric}")
-            print(tukey.summary())
+            # Filter results for groups ending with -none
+            none_rows = [row for row in tukey_summary.data[1:] if row[0].endswith('-none') or row[1].endswith('-none')]
+            none_df = pd.DataFrame(data=none_rows, columns=tukey_summary.data[0])
+            none_df.to_csv(f"results/tukey_results_{metric}.csv", index=False)
 
             # Convert Tukey HSD results to DataFrame and save to CSV
-            tukey_df = pd.DataFrame(data=tukey.summary().data[1:], columns=tukey.summary().data[0])
-            tukey_df.to_csv(f"tukey_hsd_results_{metric}.csv", index=False)
+            tukey_df = pd.DataFrame(data=tukey_summary.data[1:], columns=tukey_summary.data[0])
+            tukey_df.to_csv(f"results/tukey_all_{metric}.csv", index=False)
         except Exception as e:
             print(f"Skipping Tukey HSD test for {metric} due to error: {e}")
 
-    # Save the structured dataframe
-    structured_df.to_csv("structured_project.csv", index=False)
+    print('Done')
 
 
 if __name__ == "__main__":
