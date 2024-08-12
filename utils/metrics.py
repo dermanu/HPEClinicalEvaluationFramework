@@ -134,7 +134,7 @@ def align_procrustes_old(target, prediction):
     return gt_all, pred_all, error_count
 
 
-def calculate_pmpjpe(target, prediction):
+def calculate_pmpjpe(target, prediction, procrustes=True):
     """
     Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers..
@@ -145,7 +145,10 @@ def calculate_pmpjpe(target, prediction):
     """
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
-    target, prediction, error_count = align_procrustes(target, prediction)
+    if procrustes:
+        target, prediction, error_count = align_procrustes(target, prediction)
+    else:
+        error_count = 0
     mean, std = calculate_mpjpe(target, prediction)
 
     return mean, std, error_count
