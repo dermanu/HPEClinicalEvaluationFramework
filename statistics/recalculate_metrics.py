@@ -5,6 +5,9 @@ from utils import metrics
 from scipy import stats
 import statsmodels.stats.api as sms
 import multiprocessing
+from cliffs_delta import cliffs_delta
+import pandas as pd
+from utils import angle_metrics_tpose
 
 
 def sliding_window(arr, window_size, step_size):
@@ -98,32 +101,45 @@ def compare_metrics_with_none_group(data, alpha=0.05):
             # Check for normality using Shapiro-Wilk test
             stat_aug, p_value_aug = stats.shapiro(aug_data[:2000])
 
+            # Calculate the difference in percent and unit
+            base_mean = np.mean(base_data)
+            aug_mean = np.mean(aug_data)
+            diff_percent = ((base_mean - aug_mean)/base_mean)*100
+            diff_total = aug_mean - base_mean
+
+            # As the different conditions are independent of each others
+            # (focus on artifacts, not on same participants)
             if p_value_orig > alpha and p_value_aug > alpha:
                 # Data is normally distributed, use t-test
                 print('The data is normal distributed -> t-test test')
                 t_stat, p_value = stats.ttest_ind(aug_data, base_data)
                 test_used = 't-test'
             else:
-                # Data is not normally distributed, use Wilcoxon test
-                print('The data is not normal distributed -> Wilcoxon test')
+                # Data is not normally distributed, use Mann-Whitney U test
+                print('The data is not normal distributed -> Mann-Whitney U')
                 t_stat, p_value = stats.mannwhitneyu(aug_data, base_data, alternative='two-sided')
-                test_used = 'Wilcoxon test (Mann-Whitney U)'
+                test_used = 'Mann-Whitney U'
 
-            # Calculate effect size (Cohen's d or rank-biserial correlation)
+            # Calculate effect size (Cohen's d or Cliff's delta)
             if test_used == 't-test':
                 effect_size = (np.mean(aug_data) - np.mean(base_data)) / np.std(
                     np.concatenate([aug_data, base_data]))
+
+                if np.abs(effect_size) <= 0.2:
+                    effect_interpret = 'small'
+                elif np.abs(effect_size) > 0.2 & np.abs(effect_size) <= 0.5:
+                    effect_interpret = 'medium'
+                else:
+                    effect_size = 'large'
             else:
-                n1, n2 = len(aug_data), len(base_data)
-                U = t_stat
-                effect_size = 1 - (2 * U) / (n1 * n2)  # rank-biserial correlation
+                effect_size, effect_interpret = cliffs_delta(aug_data, base_data)   # Cliff's delta
 
             # Calculate confidence interval (if applicable)
             if test_used == 't-test':
                 cm = sms.CompareMeans(sms.DescrStatsW(aug_data), sms.DescrStatsW(base_data))
                 conf_int = cm.tconfint_diff(usevar='unequal')  # Use 'unequal' if variances are different
             else:
-                conf_int = (None, None)  # Confidence interval is not typically calculated for non-parametric tests
+                conf_int = (None, None)
 
             if p_value < 0.05:
                 significant = True
@@ -137,7 +153,10 @@ def compare_metrics_with_none_group(data, alpha=0.05):
                 'Significant': significant,
                 'p_value': p_value,
                 'confidence_interval': conf_int,
-                'effect_size': effect_size
+                'effect_size': effect_size,
+                'effect_interpretation': effect_interpret,
+                'difference_percent': diff_percent,
+                'difference_total': diff_total
             })
 
     return results
@@ -287,6 +306,13 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         aligned_pred = np.moveaxis(aligned_pred, [0, 1, 2], [2, 0, 1])
 
         # Calculate metrics (adapt this part based on the metrics you want)
+        angles_gt = angle_metrics_tpose.calculate_angles_tpose(aligned_gt)
+        angles_pred = angle_metrics_tpose.calculate_angles_tpose(aligned_pred)
+        angle_errors = {joint: np.degrees(np.abs(angles_gt[joint] - angles_pred[joint])) for joint in angles_gt.keys()}
+        all_angle_errors = np.concatenate([angle_errors[joint].flatten() for joint in angle_errors.keys()])
+        angle_m = np.mean(all_angle_errors)
+        angle_s = np.std(all_angle_errors)
+
         pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(aligned_gt, aligned_pred)
         velocity_m, velocity_s = metrics.mean_velocity_error(aligned_gt, aligned_pred, sample_rate=25)
         pcc, pvalue = calculate_joint_correlations(aligned_gt, aligned_pred)
@@ -298,6 +324,8 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         all_metrics[suffix] = {
             'pmpjpe_m': pmpjpe_m,
             'pmpjpe_s': pmpjpe_s,
+            'angle_m': angle_m,
+            'angle_s': angle_s,
             'velocity_m': velocity_m,
             'velocity_s': velocity_s,
             'pcc': pcc,
@@ -310,6 +338,7 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         # Store the metrics for each single sample
         all_metrics_single[suffix] = {
             'pmpjpe': pmpjpe,
+            'angle': angle_errors,
             'velocity': velocity,
             'pcc': pcc_single,
         }
@@ -370,6 +399,28 @@ def main():
 
     # Compare metrics of each group with 'none.pkl' group
     p_values = compare_metrics_with_none_group(all_metrics_single)
+
+    # Convert results to DataFrames and save to CSV
+    all_metrics_df = pd.DataFrame.from_dict(all_metrics, orient='index')
+    all_metrics_df.to_csv('all_metrics.csv')
+
+    keypoints_metrics_df = pd.DataFrame.from_dict({(i, j): keypoints_metrics[i][j]
+                                                   for i in keypoints_metrics.keys()
+                                                   for j in keypoints_metrics[i].keys()}, orient='index')
+    keypoints_metrics_df.to_csv('keypoints_metrics.csv')
+
+    all_metrics_single_df = pd.DataFrame.from_dict(all_metrics_single, orient='index')
+    all_metrics_single_df.to_csv('all_metrics_single.csv')
+
+    keypoints_metrics_single_df = pd.DataFrame.from_dict({(i, j): keypoints_metrics_single[i][j]
+                                                          for i in keypoints_metrics_single.keys()
+                                                          for j in keypoints_metrics_single[i].keys()}, orient='index')
+    keypoints_metrics_single_df.to_csv('keypoints_metrics_single.csv')
+
+    p_values_df = pd.DataFrame.from_dict({(i, j): p_values[i][j]
+                                          for i in p_values.keys()
+                                          for j in range(len(p_values[i]))}, orient='index')
+    p_values_df.to_csv('p_values.csv')
 
     # Print the p-values to see if any differences are statistically significant
     for suffix, pvals in p_values.items():
