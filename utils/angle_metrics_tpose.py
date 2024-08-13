@@ -1,101 +1,70 @@
 import numpy as np
-import sys
-import angle_metrics_tpose_utils as utils
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-
-def read_keypoints(filename):
-
-    num_keypoints = 12
-    fin = open(filename, 'r')
-
-    kpts = []
-    while(True):
-        line = fin.readline()
-        if line == '': break
-
-        line = line.split()
-        line = [float(s) for s in line]
-
-        line = np.reshape(line, (num_keypoints, -1))
-        kpts.append(line)
-
-    kpts = np.array(kpts)
-    return kpts
+from utils import angle_metrics_tpose_utils as utils
+from scipy.signal import medfilt
+import gc
+import multiprocessing
 
 
-def convert_to_dictionary(kpts):
+def convert_to_dictionary(keypoints):
+    # Convert keypoints to float32 to save memory
+    keypoints = keypoints.astype(np.float32)
+
     #its easier to manipulate keypoints by joint name
-    keypoints_to_index = {'lefthip': 6, 'leftknee': 8, 'leftfoot': 10,
-                          'righthip': 7, 'rightknee': 9, 'rightfoot': 11,
-                          'leftshoulder': 0, 'leftelbow': 2, 'leftwrist': 4,
-                          'rightshoulder': 1, 'rightelbow': 3, 'rightwrist': 5}
+    joint_names = ['right_shoulder', 'left_shoulder', 'right_elbow', 'left_elbow',
+                   'right_wrist', 'left_wrist', 'right_hip', 'left_hip',
+                   'right_knee', 'left_knee', 'right_ankle', 'left_ankle',
+                   'right_heel', 'left_heel', 'right_foot_index', 'left_foot_index']
 
-    kpts_dict = {}
-    for key, k_index in keypoints_to_index.items():
-        kpts_dict[key] = kpts[:,k_index]
+    # Transpose the input to have shape (frames, keypoints, 3)
+    keypoints = np.transpose(keypoints, (2, 0, 1))
 
-    kpts_dict['joints'] = list(keypoints_to_index.keys())
+    # Create a dictionary mapping joint names to their (frames, 3) data
+    kpts_dict = {joint: keypoints[:, i, :] for i, joint in enumerate(joint_names)}
+    kpts_dict['joints'] = joint_names
 
     return kpts_dict
 
 
+def calculate_midpoint(kpt1, kpt2):
+    return (kpt1 + kpt2) / 2
+
 def add_hips_and_neck(kpts):
     #we add two new keypoints which are the mid point between the hips and mid point between the shoulders
+    kpts['hips'] = calculate_midpoint(kpts['left_hip'], kpts['right_hip'])
+    kpts['neck'] = calculate_midpoint(kpts['left_shoulder'], kpts['right_shoulder'])
 
-    #add hips kpts
-    difference = kpts['lefthip'] - kpts['righthip']
-    difference = difference/2
-    hips = kpts['righthip'] + difference
-    kpts['hips'] = hips
-    kpts['joints'].append('hips')
-
-
-    #add neck kpts
-    difference = kpts['leftshoulder'] - kpts['rightshoulder']
-    difference = difference/2
-    neck = kpts['rightshoulder'] + difference
-    kpts['neck'] = neck
-    kpts['joints'].append('neck')
+    kpts['joints'].extend(['hips', 'neck'])
 
     #define the hierarchy of the joints
-    hierarchy = {'hips': [],
-                 'lefthip': ['hips'], 'leftknee': ['lefthip', 'hips'], 'leftfoot': ['leftknee', 'lefthip', 'hips'],
-                 'righthip': ['hips'], 'rightknee': ['righthip', 'hips'], 'rightfoot': ['rightknee', 'righthip', 'hips'],
-                 'neck': ['hips'],
-                 'leftshoulder': ['neck', 'hips'], 'leftelbow': ['leftshoulder', 'neck', 'hips'], 'leftwrist': ['leftelbow', 'leftshoulder', 'neck', 'hips'],
-                 'rightshoulder': ['neck', 'hips'], 'rightelbow': ['rightshoulder', 'neck', 'hips'], 'rightwrist': ['rightelbow', 'rightshoulder', 'neck', 'hips']
-                }
-
+    hierarchy = {
+        'hips': [],
+        'left_hip': ['hips'], 'left_knee': ['left_hip', 'hips'], 'left_ankle': ['left_knee', 'left_hip', 'hips'], 'left_heel': ['left_ankle', 'left_knee', 'left_hip', 'hips'], 'left_foot_index': ['left_heel', 'left_ankle', 'left_knee', 'left_hip', 'hips'],
+        'right_hip': ['hips'], 'right_knee': ['right_hip', 'hips'], 'right_ankle': ['right_knee', 'right_hip', 'hips'], 'right_heel': ['right_ankle', 'right_knee', 'right_hip', 'hips'], 'right_foot_index': ['right_heel', 'right_ankle', 'right_knee', 'right_hip', 'hips'],
+        'neck': ['hips'],
+        'left_shoulder': ['neck', 'hips'], 'left_elbow': ['left_shoulder', 'neck', 'hips'], 'left_wrist': ['left_elbow', 'left_shoulder', 'neck', 'hips'],
+        'right_shoulder': ['neck', 'hips'], 'right_elbow': ['right_shoulder', 'neck', 'hips'], 'right_wrist': ['right_elbow', 'right_shoulder', 'neck', 'hips']
+    }
     kpts['hierarchy'] = hierarchy
     kpts['root_joint'] = 'hips'
 
     return kpts
 
+
 #remove jittery keypoints by applying a median filter along each axis
-def median_filter(kpts, window_size = 3):
+def median_filter(kpts, window_size=3):
+    filtered = kpts.copy()  # A shallow copy should suffice here
 
-    import copy
-    filtered = copy.deepcopy(kpts)
-
-    from scipy.signal import medfilt
-
-
-    #apply median filter to get rid of poor keypoints estimations
-    for joint in filtered['joints']:
-        joint_kpts = filtered[joint]
-        xs = joint_kpts[:,0]
-        ys = joint_kpts[:,1]
-        zs = joint_kpts[:,2]
-        xs = medfilt(xs, window_size)
-        ys = medfilt(ys, window_size)
-        zs = medfilt(zs, window_size)
-        filtered[joint] = np.stack([xs, ys, zs], axis = -1)
+    for joint in kpts['joints']:
+        joint_kpts = kpts[joint]
+        xs = medfilt(joint_kpts[:, 0], window_size)
+        ys = medfilt(joint_kpts[:, 1], window_size)
+        zs = medfilt(joint_kpts[:, 2], window_size)
+        kpts[joint] = np.stack([xs, ys, zs], axis=-1)
 
     return filtered
 
-def get_bone_lengths(kpts):
 
+def get_bone_lengths(kpts):
     """
     We have to define an initial skeleton pose(T pose).
     In this case we need to known the length of each bone.
@@ -104,79 +73,55 @@ def get_bone_lengths(kpts):
 
     bone_lengths = {}
     for joint in kpts['joints']:
-        if joint == 'hips': continue
+        if joint == 'hips':
+            continue
         parent = kpts['hierarchy'][joint][0]
-
-        joint_kpts = kpts[joint]
-        parent_kpts = kpts[parent]
-
-        _bone = joint_kpts - parent_kpts
-        _bone_lengths = np.sqrt(np.sum(np.square(_bone), axis = -1))
+        _bone = kpts[joint] - kpts[parent]
+        _bone_lengths = np.sqrt(np.sum(np.square(_bone), axis=-1))
 
         _bone_length = np.median(_bone_lengths)
         bone_lengths[joint] = _bone_length
 
-        # plt.hist(bone_lengths, bins = 25)
-        # plt.title(joint)
-        # plt.show()
-
-    #print(bone_lengths)
     kpts['bone_lengths'] = bone_lengths
     return
 
-#Here we define the T pose and we normalize the T pose by the length of the hips to neck distance.
-def get_base_skeleton(kpts, normalization_bone = 'neck'):
 
+#Here we define the T pose and we normalize the T pose by the length of the hips to neck distance.
+def get_base_skeleton(kpts, normalization_bone='neck'):
     #this defines a generic skeleton to which we can apply rotations to
     body_lengths = kpts['bone_lengths']
-
-    #define skeleton offset directions
-    offset_directions = {}
-    offset_directions['lefthip'] = np.array([1,0,0])
-    offset_directions['leftknee'] = np.array([0,-1, 0])
-    offset_directions['leftfoot'] = np.array([0,-1, 0])
-
-    offset_directions['righthip'] = np.array([-1,0,0])
-    offset_directions['rightknee'] = np.array([0,-1, 0])
-    offset_directions['rightfoot'] = np.array([0,-1, 0])
-
-    offset_directions['neck'] = np.array([0,1,0])
-
-    offset_directions['leftshoulder'] = np.array([1,0,0])
-    offset_directions['leftelbow'] = np.array([1,0,0])
-    offset_directions['leftwrist'] = np.array([1,0,0])
-
-    offset_directions['rightshoulder'] = np.array([-1,0,0])
-    offset_directions['rightelbow'] = np.array([-1,0,0])
-    offset_directions['rightwrist'] = np.array([-1,0,0])
-
-    #set bone normalization length. Set to 1 if you dont want normalization
     normalization = kpts['bone_lengths'][normalization_bone]
-    #normalization = 1
 
+    directions = {
+        'left_hip': np.array([1, 0, 0]), 'left_knee': np.array([0, -1, 0]), 'left_ankle': np.array([0, -1, 0]),
+        'right_hip': np.array([-1, 0, 0]), 'right_knee': np.array([0, -1, 0]), 'right_ankle': np.array([0, -1, 0]),
+        'neck': np.array([0, 1, 0]),
+        'left_shoulder': np.array([1, 0, 0]), 'left_elbow': np.array([1, 0, 0]), 'left_wrist': np.array([1, 0, 0]),
+        'right_shoulder': np.array([-1, 0, 0]), 'right_elbow': np.array([-1, 0, 0]),
+        'right_wrist': np.array([-1, 0, 0]),
+        'left_heel': np.array([0, -1, 0]), 'right_heel': np.array([0, -1, 0]),
+        'left_foot_index': np.array([0.5, -0.5, 0]), 'right_foot_index': np.array([-0.5, -0.5, 0])
+    }
 
     #base skeleton set by multiplying offset directions by measured bone lengths. In this case we use the average of two sided limbs. E.g left and right hip averaged
-    base_skeleton = {'hips': np.array([0,0,0])}
-    def _set_length(joint_type):
-        base_skeleton['left' + joint_type] = offset_directions['left' + joint_type] * ((body_lengths['left' + joint_type] + body_lengths['right' + joint_type])/(2 * normalization))
-        base_skeleton['right' + joint_type] = offset_directions['right' + joint_type] * ((body_lengths['left' + joint_type] + body_lengths['right' + joint_type])/(2 * normalization))
+    base_skeleton = {'hips': np.array([0, 0, 0])}
 
-    _set_length('hip')
-    _set_length('knee')
-    _set_length('foot')
-    _set_length('shoulder')
-    _set_length('elbow')
-    _set_length('wrist')
-    base_skeleton['neck'] = offset_directions['neck'] * (body_lengths['neck']/normalization)
+    for joint_type in ['hip', 'knee', 'ankle', 'shoulder', 'elbow', 'wrist']:
+        base_skeleton['left_' + joint_type] = directions['left_' + joint_type] * (
+                (body_lengths['left_' + joint_type] + body_lengths['right_' + joint_type]) / (2 * normalization))
+        base_skeleton['right_' + joint_type] = directions['right_' + joint_type] * (
+                (body_lengths['left_' + joint_type] + body_lengths['right_' + joint_type]) / (2 * normalization))
 
-    kpts['offset_directions'] = offset_directions
+    base_skeleton['neck'] = directions['neck'] * (body_lengths['neck'] / normalization)
+
+    kpts['offset_directions'] = directions
     kpts['base_skeleton'] = base_skeleton
     kpts['normalization'] = normalization
 
-    return
+    return kpts
 
 #calculate the rotation of the root joint with respect to the world coordinates
-def get_hips_position_and_rotation(frame_pos, root_joint = 'hips', root_define_joints = ['lefthip', 'neck']):
+def get_hips_position_and_rotation(frame_pos, root_joint = 'hips', root_define_joints = ['left_hip', 'neck']):
 
     #root position is saved directly
     root_position = frame_pos[root_joint]
@@ -228,165 +173,83 @@ def get_rotation_chain(joint, hierarchy, frame_rotations):
 
     return R
 
+
 #calculate the joint angles frame by frame.
-def calculate_joint_angles(kpts):
+def calculate_joint_angles(keypoints):
+    # Initialize container for joint angles
+    for joint in keypoints['joints']:
+        keypoints[joint + '_angles'] = []
 
-    #set up emtpy container for joint angles
-    for joint in kpts['joints']:
-        kpts[joint+'_angles'] = []
+    num_frames = keypoints['hips'].shape[0]
 
-    for framenum in range(kpts['hips'].shape[0]):
-
-        #get the keypoints positions in the current frame
-        frame_pos = {}
-        for joint in kpts['joints']:
-            frame_pos[joint] = kpts[joint][framenum]
-
+    for framenum in range(num_frames):
+        frame_pos = {joint: keypoints[joint][framenum] for joint in keypoints['joints']}
         root_position, root_rotation = get_hips_position_and_rotation(frame_pos)
 
         frame_rotations = {'hips': root_rotation}
 
-        #center the body pose
-        for joint in kpts['joints']:
-            frame_pos[joint] = frame_pos[joint] - root_position
+        # Center the body pose
+        for joint in keypoints['joints']:
+            frame_pos[joint] -= root_position
 
-        #get the max joints connectsion
-        max_connected_joints = 0
-        for joint in kpts['joints']:
-            if len(kpts['hierarchy'][joint]) > max_connected_joints:
-                max_connected_joints = len(kpts['hierarchy'][joint])
+        # Ensure the hierarchy is respected in processing
+        for depth in range(1, max(len(keypoints['hierarchy'][joint]) for joint in keypoints['joints']) + 1):
+            for joint in [j for j in keypoints['joints'] if len(keypoints['hierarchy'][j]) == depth]:
+                if joint not in frame_rotations:
+                    joint_rs = get_joint_rotations(joint, keypoints['hierarchy'], keypoints['offset_directions'], frame_rotations, frame_pos)
+                    frame_rotations[joint] = joint_rs
 
-        depth = 2
-        while(depth <= max_connected_joints):
-            for joint in kpts['joints']:
-                if len(kpts['hierarchy'][joint]) == depth:
-                    joint_rs = get_joint_rotations(joint, kpts['hierarchy'], kpts['offset_directions'], frame_rotations, frame_pos)
-                    parent = kpts['hierarchy'][joint][0]
-                    frame_rotations[parent] = joint_rs
-            depth += 1
+        # Update dictionary with current angles
+        for joint in keypoints['joints']:
+            keypoints[joint + '_angles'].append(frame_rotations.get(joint, np.array([0., 0., 0.])))
 
-        #for completeness, add zero rotation angles for endpoints. This is not necessary as they are never used.
-        for _j in kpts['joints']:
-            if _j not in list(frame_rotations.keys()):
-                frame_rotations[_j] = np.array([0.,0.,0.])
+    # Convert joint angles list to numpy arrays
+    for joint in keypoints['joints']:
+        keypoints[joint + '_angles'] = np.array(keypoints[joint + '_angles'])
 
-        #update dictionary with current angles.
-        for joint in kpts['joints']:
-            kpts[joint + '_angles'].append(frame_rotations[joint])
+    return keypoints
 
+def process_chunk(keypoints_chunk, num_keypoints):
+    # Apply rotation, filtering, etc., on the chunk
+    R = utils.get_R_z(np.pi / 2)
+    for kpt_num in range(num_keypoints):
+        keypoints_chunk[kpt_num] = R @ keypoints_chunk[kpt_num]
 
-    #convert joint angles list to numpy arrays.
-    for joint in kpts['joints']:
-        kpts[joint+'_angles'] = np.array(kpts[joint + '_angles'])
-        #print(joint, kpts[joint+'_angles'].shape)
+    keypoints_dict = convert_to_dictionary(keypoints_chunk)
+    add_hips_and_neck(keypoints_dict)
+    filtered_keypoints = median_filter(keypoints_dict)
+    get_bone_lengths(filtered_keypoints)
+    get_base_skeleton(filtered_keypoints)
+    angles_chunk = calculate_joint_angles(filtered_keypoints)
 
-    return
+    angles_dict = {}
+    for joint in angles_chunk['joints']:
+        angles_dict[joint + '_angles'] = angles_chunk[joint + '_angles']
 
-#draw the pose from original data
-def draw_skeleton_from_joint_coordinates(kpts):
+    return angles_dict
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+def calculate_angles_tpose(keypoints, chunk_size=2500):
+    combined_angles = {}
+    num_frames = keypoints.shape[0]
+    num_keypoints = keypoints.shape[2]
 
-    connections = [['hips', 'lefthip'], ['lefthip', 'leftknee'], ['leftknee', 'leftfoot'],
-                   ['hips', 'righthip'], ['righthip', 'rightknee'], ['rightknee', 'rightfoot'],
-                   ['hips', 'neck'], ['neck', 'leftshoulder'], ['leftshoulder', 'leftelbow'], ['leftelbow', 'leftwrist'],
-                   ['neck', 'rightshoulder'], ['rightshoulder', 'rightelbow'], ['rightelbow', 'rightwrist']
-                  ]
+    # Transpose to (keypoints, 3, frames) for processing
+    keypoints = np.transpose(keypoints, (2, 1, 0))  # (keypoints, xyz, frames)
 
-    for framenum in range(kpts['lefthip'].shape[0]):
-        print(framenum)
-        if framenum%2 == 0: continue #skip every 2nd frame
+    # Prepare inputs for multiprocessing
+    chunks = [(keypoints[:, :, start:min(start + chunk_size, num_frames)], num_keypoints)
+              for start in range(0, num_frames, chunk_size)]
 
-        for _j in kpts['joints']:
-            if _j == 'hips': continue
-            _p = kpts['hierarchy'][_j][0] #get the name of the parent joint
-            r1 = kpts[_p][framenum]
-            r2 = kpts[_j][framenum]
-            plt.plot(xs = [r1[0], r2[0]], ys = [r1[1], r2[1]], zs = [r1[2], r2[2]], color = 'blue')
+    # Use multiprocessing to process each chunk in parallel
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        all_angles = pool.starmap(process_chunk, chunks)
 
-        #ax.set_axis_off()
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_zticks([])
+    # Combine all angles into a single dictionary
+    for d in all_angles:
+        for key, value in d.items():
+            if key in combined_angles:
+                combined_angles[key] = np.concatenate((combined_angles[key], value), axis=0)
+            else:
+                combined_angles[key] = value
 
-        ax.set_xlim3d(-10, 10)
-        ax.set_xlabel('x')
-        ax.set_ylim3d(-10, 10)
-        ax.set_ylabel('y')
-        ax.set_zlim3d(-10, 10)
-        ax.set_zlabel('z')
-        plt.pause(0.1)
-        ax.cla()
-    plt.close()
-
-#recalculate joint positions from calculated joint angles and draw
-def draw_skeleton_from_joint_angles(kpts):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    for framenum in range(kpts['hips'].shape[0]):
-
-        #get a dictionary containing the rotations for the current frame
-        frame_rotations = {}
-        for joint in kpts['joints']:
-            frame_rotations[joint] = kpts[joint+'_angles'][framenum]
-
-        #for plotting
-        for _j in kpts['joints']:
-            if _j == 'hips': continue
-
-            #get hierarchy of how the joint connects back to root joint
-            hierarchy = kpts['hierarchy'][_j]
-
-            #get the current position of the parent joint
-            r1 = kpts['hips'][framenum]/kpts['normalization']
-            for parent in hierarchy:
-                if parent == 'hips': continue
-                R = get_rotation_chain(parent, kpts['hierarchy'][parent], frame_rotations)
-                r1 = r1 + R @ kpts['base_skeleton'][parent]
-
-            #get the current position of the joint. Note: r2 is the final position of the joint. r1 is simply calculated for plotting.
-            r2 = r1 + get_rotation_chain(hierarchy[0], hierarchy, frame_rotations) @ kpts['base_skeleton'][_j]
-            plt.plot(xs = [r1[0], r2[0]], ys = [r1[1], r2[1]], zs = [r1[2], r2[2]], color = 'red')
-
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_zticks([])
-        ax.azim = 90
-        ax.elev = -85
-        ax.set_title('Pose from joint angles')
-        ax.set_xlim3d(-4, 4)
-        ax.set_xlabel('x')
-        ax.set_ylim3d(-4, 4)
-        ax.set_ylabel('y')
-        ax.set_zlim3d(-4, 4)
-        ax.set_zlabel('z')
-        plt.pause(0.01)
-        ax.cla()
-    plt.close()
-
-if __name__ == '__main__':
-
-    if len(sys.argv) != 2:
-        print('Call program with input pose file')
-        quit()
-
-    filename = sys.argv[1]
-    kpts = read_keypoints(filename)
-
-    #rotate to orient the pose better
-    R = utils.get_R_z(np.pi/2)
-    for framenum in range(kpts.shape[0]):
-        for kpt_num in range(kpts.shape[1]):
-            kpts[framenum,kpt_num] = R @ kpts[framenum,kpt_num]
-
-    kpts = convert_to_dictionary(kpts)
-    add_hips_and_neck(kpts)
-    filtered_kpts = median_filter(kpts)
-    get_bone_lengths(filtered_kpts)
-    get_base_skeleton(filtered_kpts)
-
-    calculate_joint_angles(filtered_kpts)
-    #draw_skeleton_from_joint_coordinates(filtered_kpts)
-    draw_skeleton_from_joint_angles(filtered_kpts)
+    return combined_angles

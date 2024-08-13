@@ -12,7 +12,6 @@ from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
 from models import mediapipeMulti
 
-
 import pickle
 from scipy.spatial import procrustes
 
