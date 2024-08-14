@@ -8,6 +8,7 @@ import multiprocessing
 from cliffs_delta import cliffs_delta
 import pandas as pd
 from utils import angle_metrics_tpose
+import matplotlib.pyplot as plt
 
 
 def sliding_window(arr, window_size, step_size):
@@ -79,7 +80,8 @@ def compare_metrics_with_none_group(data, alpha=0.05):
     - alpha: significance level for the normality test
 
     Returns:
-    - results: dictionary with p-values, confidence intervals, and effect sizes for each metric and augmentation
+    - results: dictionary with p-values, confidence intervals, and effect sizes, and differences
+     for each metric and augmentation
     """
     baseline = data['none.pkl']
     other_conditions = {k: v for k, v in data.items() if k != 'none.pkl'}
@@ -88,18 +90,20 @@ def compare_metrics_with_none_group(data, alpha=0.05):
 
     for i, metric in enumerate(metrics):
         results[metric] = []
+        p_values = []
+        test_results = []
         base_data = np.array(baseline[metric])
         if len(base_data.shape) > 1:
             base_data = base_data[:, 0]
-        # Check for normality using Shapiro-Wilk test
-        stat_orig, p_value_orig = stats.shapiro(base_data[:2000])
+        # Check for normality using Shapiro-Wilk test. Can't handle large samples.
+        stat_orig, p_value_orig = stats.shapiro(np.random.choice(base_data, size=1000, replace=False))
 
         for condition_name, condition_data in other_conditions.items():
             aug_data = np.array(condition_data[metric])
             if len(aug_data.shape) > 1:
                 aug_data = aug_data[:, 0]
-            # Check for normality using Shapiro-Wilk test
-            stat_aug, p_value_aug = stats.shapiro(aug_data[:2000])
+            # Check for normality using Shapiro-Wilk test. Can't handle large samples.
+            stat_aug, p_value_aug = stats.shapiro(np.random.choice(aug_data, size=1000, replace=False))
 
             # Calculate the difference in percent and unit
             base_mean = np.mean(base_data)
@@ -112,27 +116,39 @@ def compare_metrics_with_none_group(data, alpha=0.05):
             if p_value_orig > alpha and p_value_aug > alpha:
                 # Data is normally distributed, use t-test
                 print('The data is normal distributed -> t-test test')
-                t_stat, p_value = stats.ttest_ind(aug_data, base_data)
+                t_stat, p_value = stats.ttest_rel(aug_data, base_data)
                 test_used = 't-test'
             else:
                 # Data is not normally distributed, use Mann-Whitney U test
-                print('The data is not normal distributed -> Mann-Whitney U')
-                t_stat, p_value = stats.mannwhitneyu(aug_data, base_data, alternative='two-sided')
-                test_used = 'Mann-Whitney U'
+                print('The data is not normal distributed -> Wilcoxon')
+                t_stat, p_value = stats.wilcoxon(aug_data, base_data)
+                test_used = 'Wilcoxon'
+
+            p_values.append(p_value)
 
             # Calculate effect size (Cohen's d or Cliff's delta)
             if test_used == 't-test':
-                effect_size = (np.mean(aug_data) - np.mean(base_data)) / np.std(
-                    np.concatenate([aug_data, base_data]))
+                effect_size = (np.mean(aug_data) - np.mean(base_data)) / (np.sqrt((np.stdev(aug_data) ** 2 + np.stdev(base_data) ** 2) / 2))
 
-                if np.abs(effect_size) <= 0.2:
+                if np.abs(effect_size) < 0.2:
+                    effect_interpret = 'negligible'
+                elif np.abs(effect_size) >= 0.2 & np.abs(effect_size) < 0.5:
                     effect_interpret = 'small'
-                elif np.abs(effect_size) > 0.2 & np.abs(effect_size) <= 0.5:
+                elif np.abs(effect_size) >= 0.5 & np.abs(effect_size) < 0.8:
                     effect_interpret = 'medium'
                 else:
                     effect_size = 'large'
             else:
-                effect_size, effect_interpret = cliffs_delta(aug_data, base_data)   # Cliff's delta
+                effect_size = t_stat / np.sqrt(np.size(aug_data))
+
+                if np.abs(effect_size) < 0.1:
+                    effect_interpret = 'negligible'
+                elif np.abs(effect_size) >= 0.1 & np.abs(effect_size) < 0.3:
+                    effect_interpret = 'small'
+                elif np.abs(effect_size) >= 0.3 & np.abs(effect_size) < 0.5:
+                    effect_interpret = 'medium'
+                else:
+                    effect_size = 'large'
 
             # Calculate confidence interval (if applicable)
             if test_used == 't-test':
@@ -158,6 +174,18 @@ def compare_metrics_with_none_group(data, alpha=0.05):
                 'difference_percent': diff_percent,
                 'difference_total': diff_total
             })
+
+        # Apply Benjamini-Hochberg correction
+        p_values_sorted_indices = np.argsort(p_values)
+        m = len(p_values)
+        corrected_alpha_values = [(i + 1) / m * alpha for i in range(m)]
+        bh_significant = [p_value <= corrected_alpha_values[i] for i, p_value in enumerate(np.array(p_values)[p_values_sorted_indices])]
+
+        for i, idx in enumerate(p_values_sorted_indices):
+            test_results[idx]['Significant'] = bh_significant[i]
+            test_results[idx]['corrected_alpha'] = corrected_alpha_values[i]
+            results[metric].append(test_results[idx])
+
 
     return results
 
@@ -187,6 +215,7 @@ def calculate_joint_correlations(target_array, pred_array):
         joint_pvalues.append(pvalue)
 
     return np.mean(joint_correlations), np.mean(joint_pvalues)
+
 
 def align_procrustes_old(target, prediction):
     """
@@ -259,6 +288,12 @@ def group_files_by_suffix(files):
     for file in files:
         suffix = file.split('-')[-1]
         grouped_files[suffix].append(file)
+
+    for file in files:
+        if file.split('-')[-1] == 'none.pkl':
+            suffix = file.split('-')[-2]
+            grouped_files[suffix].append(file)
+
     return grouped_files
 
 
@@ -308,10 +343,15 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         # Calculate metrics (adapt this part based on the metrics you want)
         angles_gt = angle_metrics_tpose.calculate_angles_tpose(aligned_gt)
         angles_pred = angle_metrics_tpose.calculate_angles_tpose(aligned_pred)
-        angle_errors = {joint: np.degrees(np.abs(angles_gt[joint] - angles_pred[joint])) for joint in angles_gt.keys()}
+        angle_errors = {
+            joint: np.mean(np.degrees(np.abs(angles_gt[joint] - angles_pred[joint])), axis=-1) for joint in
+            angles_gt.keys()
+        }
         all_angle_errors = np.concatenate([angle_errors[joint].flatten() for joint in angle_errors.keys()])
         angle_m = np.mean(all_angle_errors)
         angle_s = np.std(all_angle_errors)
+        # Combine the results across all joints by averaging across the frames for all joints for the statistics
+        stat_angle_error = np.mean(list(angle_errors.values()), axis=0)
 
         pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(aligned_gt, aligned_pred)
         velocity_m, velocity_s = metrics.mean_velocity_error(aligned_gt, aligned_pred, sample_rate=25)
@@ -332,13 +372,13 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
             'pvalue': pvalue,
             'inference_time_mean': np.mean(combined_infer_time),
             'inference_time_std': np.std(combined_infer_time),
-            'sample_num': np.size(aligned_gt, 1)
+            'sample_num': np.size(aligned_gt, 0)
         }
 
         # Store the metrics for each single sample
         all_metrics_single[suffix] = {
             'pmpjpe': pmpjpe,
-            'angle': angle_errors,
+            'angle': stat_angle_error,
             'velocity': velocity,
             'pcc': pcc_single,
         }
@@ -395,7 +435,8 @@ def main():
     grouped_files = group_files_by_suffix(all_files)
 
     # Process each group and calculate metrics
-    all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single = process_and_calculate_metrics_for_groups(grouped_files, directory)
+    all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single = (
+        process_and_calculate_metrics_for_groups(grouped_files, directory))
 
     # Compare metrics of each group with 'none.pkl' group
     p_values = compare_metrics_with_none_group(all_metrics_single)
@@ -435,5 +476,6 @@ def main():
     for suffix, metrics in keypoints_metrics.items():
         print(f"Keypoint-specific metrics for group {suffix}:")
         print(metrics)
+
 
 main()
