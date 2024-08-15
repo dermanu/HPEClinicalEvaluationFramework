@@ -63,6 +63,16 @@ def inference_video(cap, sweep_config=None, dimensions=3):
                     frame_data = np.array([[i, landmark.x, landmark.y] for i, landmark in enumerate(pose_landmarks)])
                 keypoints_data.append(frame_data)
 
+        else:
+            # If no pose landmarks are detected, append NaN array
+            if dimensions == 3:
+                nan_frame_data = np.full((33, 4), np.nan)  # Assuming 33 landmarks with (index, x, y, z)
+
+            elif dimensions == 2:
+                nan_frame_data = np.full((33, 3), np.nan)  # Assuming 33 landmarks with (index, x, y)
+
+            keypoints_data.append(nan_frame_data)
+
         frame_number += 1
 
     # Release resources

@@ -4,7 +4,7 @@ import os
 import cv2
 
 
-def align_keypoints(keypoints_org, config):
+def align_keypoints(keypoints_org):
     """
     Aligns keypoints in a DataFrame based on different alignment identifiers.
     :param keypoints_org (pd.DataFrame or None): Original DataFrame containing the keypoints.
@@ -48,7 +48,7 @@ def align_keypoints(keypoints_org, config):
     return ordered_keypoints
 
 
-def load_csv(csv_file_path, model_type):
+def load_csv(csv_file_path):
     """
     Load keypoints from a CSV file.
     :param csv_file_path (str): Path to the CSV file.
@@ -60,12 +60,12 @@ def load_csv(csv_file_path, model_type):
     # Drop irrelevant columns
     keypoints_org.drop(columns=['Time', 'CameraFrame', 'Iteration'], inplace=True)
     # Align the columns
-    aligned_keypoints = align_keypoints(keypoints_org, model_type)
+    aligned_keypoints = align_keypoints(keypoints_org)
     keypoints = np.array(list(aligned_keypoints.values())).transpose((1, 0, 2))
     return keypoints
 
 
-def load_data(path, par, mov, cams, model_type):
+def load_data(path, par, mov, cams):
     """
     Load data for a participant.
     :param path (str): Root directory containing participant data.
@@ -90,7 +90,7 @@ def load_data(path, par, mov, cams, model_type):
             print(f"Warning: CSV or video file not found for camera {cam}.")
             return None, None, None
 
-        keypoints = load_csv(csv_path, model_type)
+        keypoints = load_csv(csv_path)
         cap = cv2.VideoCapture(video_path)
         return cam, keypoints, cap
 
