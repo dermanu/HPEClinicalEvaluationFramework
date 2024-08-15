@@ -42,7 +42,7 @@ def calculate_metrics_for_sample(aligned_gt, aligned_pred, sample_rate):
     step_size = 13  # Adjust for overlap between windows
 
     # Setup multiprocessing pool
-    pool = multiprocessing.Pool(processes=18)
+    pool = multiprocessing.Pool(processes=20)
 
     # Calculate MPJPE in parallel
     mpjpe_inputs = [(aligned_gt[j], aligned_pred[j]) for j in range(np.size(aligned_gt, 0))]
@@ -185,7 +185,6 @@ def compare_metrics_with_none_group(data, alpha=0.05):
             test_results[idx]['Significant'] = bh_significant[i]
             test_results[idx]['corrected_alpha'] = corrected_alpha_values[i]
             results[metric].append(test_results[idx])
-
 
     return results
 

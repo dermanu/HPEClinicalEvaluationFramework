@@ -9,9 +9,31 @@ ia.seed(1)
 
 
 def occlusion(frame):
-    # Create moving occlusion of 10-20% of the image size and fill it with gaussian noise.
-    aug = iaa.Cutout(size=(0.2, 0.3), nb_iterations=(2, 3), fill_mode="gaussian", fill_per_channel=True)
-    return aug(image=frame)
+    h, w = frame.shape[:2]
+
+    # Define the size of the occlusion
+    occlusion_size = np.random.uniform(0.05, 0.15)
+
+    # Compute the width and height of the occlusion
+    cutout_width = int(w * occlusion_size)
+    cutout_height = int(h * occlusion_size)
+
+    # Randomly pick a position within the central region
+    x1 = np.random.randint(w // 4, 3 * w // 4 - cutout_width)
+    y1 = np.random.randint(h // 4, 3 * h // 4 - cutout_height)
+
+    x2 = x1 + cutout_width
+    y2 = y1 + cutout_height
+
+    # Create the mask for the occlusion
+    mask = np.zeros_like(frame)
+    mask[y1:y2, x1:x2] = 1
+
+    # Apply Gaussian noise to the cutout region
+    noise = iaa.AdditiveGaussianNoise(scale=0.1 * 255).augment_image(frame)
+    frame[mask == 1] = noise[mask == 1]
+
+    return frame
 
 
 def motion_blur(frame):

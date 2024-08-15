@@ -202,6 +202,12 @@ class Framework:
             "complex": [9, 10, 11, 12, 13],
             "sitting": [14, 15, 16, 17]
         }
+        self.movement_category = {
+            "upper": [1, 2],
+            "lower": [5, 6],
+            "complex": [9, 10],
+            "sitting": [14, 15]
+        }
 
         # Defines body segments
         # self.body_segments = {
@@ -317,6 +323,9 @@ class Framework:
         all_metrics_dict = {metric: [] for metric in
                             ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "angular_m", "angular_s", "r2",
                              "pcc", "pvalue"]}
+
+        if len(gt_keypoints_all_arrays) != len(pred_keypoints_all_arrays):
+            raise ValueError("Ground truth and prediction arrays have different lengths!")
 
         # Calculate metrics for each movement type, to avoid jumps between movement segments
         for gt_movement, pred_movement in zip(gt_keypoints_all_arrays, pred_keypoints_all_arrays):
@@ -434,7 +443,7 @@ class Framework:
             for par in tqdm(self.participants, ascii=True, desc="Participant:"):
                 for mov in tqdm(self.movement_category[config.movement], ascii=True, desc="Movement:"):
 
-                    gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, cameras, self.model_name)
+                    gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, cameras)
                     if not gt_keypoints or not caps:
                         print(f"Participant {par} and movement {mov} not found")
                         continue
@@ -444,6 +453,7 @@ class Framework:
                         # Just load the first (and only) camera
                         gt_keypoints = gt_keypoints[0][1]
                         caps = caps[0][1]
+
                         if self.model_name == "mediapipe":
                             pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
                             selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32,
@@ -462,6 +472,7 @@ class Framework:
                     # Multioccular models
                     elif self.model_type == "multi":
                         if self.model_name == 'mediapipe':
+                            gt_keypoints = gt_keypoints[0][1]
                             self.joint_num_total = 33
 
                         # Desynchronize video streams
@@ -497,7 +508,12 @@ class Framework:
                             }
 
                     # Add min and max values for normalization of pose_gt
-                    gt_keypoints_np = np.array(gt_keypoints[0][1])
+                    gt_keypoints_np = np.array(gt_keypoints)
+                    if gt_keypoints_np.shape != pred_keypoints.shape:
+                        print(gt_keypoints.shape)
+                        print(pred_keypoints.shape)
+                        assert gt_keypoints_np.shape == pred_keypoints.shape, "Not the same shape. Bummer!"
+
                     self.scaler.add_key_from_vector(gt_keypoints_np, "pose_gt")
 
                     # Procrustes Alignment
@@ -506,6 +522,7 @@ class Framework:
 
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
                     pred_keypoints = self.apply_morphing(pred_keypoints)
+
 
                     # Postprocess predicted keypoints
                     pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
@@ -552,9 +569,12 @@ class Framework:
             self.calculate_log_metrics(gt_keypoints_all, pred_keypoints_all, inference_times_all)
             plot_3d_keypoints_validation(gt_keypoints_example, pred_keypoints_example, self.model_name)
             log_frame_example(frame_example)
-            samples = self.total_frames(gt_keypoints_all)
-            wandb.log({"sample_number": samples})
-            wandb.log({"procrustes_number": samples - error_count_all})
+            samples_gt = self.total_frames(gt_keypoints_all)
+            samples_pred = self.total_frames(pred_keypoints_all)
+            wandb.log({"sample_number_gt": samples_gt})
+            wandb.log({"sample_number_pred": samples_pred})
+            wandb.log({"procrustes_number": samples_gt - error_count_all})
+
 
     def total_frames(self, data):
         key = 'right_shoulder'  # Random keypoint to calculate number of frames
@@ -646,7 +666,7 @@ class Framework:
 
 
 # Run the framework
-framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
+framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
                       directory="/media/emanu/LaCie/MoCap/segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
