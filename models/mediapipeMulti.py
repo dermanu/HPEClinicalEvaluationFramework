@@ -14,25 +14,27 @@ options = mp.tasks.vision.PoseLandmarkerOptions(
     running_mode=mp.tasks.vision.RunningMode.IMAGE)
 PoseLandmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
 
-def process_frame(cap, frameaug, sweep_config):
+def process_frame(cap, frameaug=None, sweep_config=None):
     ret, frame = cap.read()
+    print(f"Frame read status: {ret}")  # Debug: Check if frame is read
     if not ret:
-        return None, None
+        return None
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    if sweep_config is not None:
+    if frameaug is not None and sweep_config is not None:
         rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
-    return frame, rgb_frame
+    return rgb_frame
 
 def detect_pose(rgb_frame):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = PoseLandmarker.detect(mp_image)
+    print(f"Landmarks detected: {results.pose_world_landmarks is not None}")  # Debug: Check detection
     return results.pose_world_landmarks if results.pose_world_landmarks else None
 
+
 def inference_video(caps, projections, sweep_config=None):
-    if sweep_config is not None:
-        frameaug = FrameAugmentor()
+    frameaug = FrameAugmentor() if sweep_config is not None else None
 
     keypoints_data = []
     inference_time = []
@@ -42,20 +44,25 @@ def inference_video(caps, projections, sweep_config=None):
 
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
         while all(cap.isOpened() for _, cap in caps):
+            print(f"Processing frame {frame_number}")  # Debug: Loop iteration
+
             futures = [executor.submit(process_frame, cap[1], frameaug, sweep_config) for cap in caps]
-            frames = []
             rgb_frames = []
             for future in as_completed(futures):
                 try:
-                    frame, rgb_frame = future.result()
-                    if frame is not None:
-                        frames.append(frame)
+                    rgb_frame = future.result()
+                    if rgb_frame is not None:
                         rgb_frames.append(rgb_frame)
                 except Exception as e:
                     print(f"Error processing frame: {e}")
 
-            if len(frames) != num_cameras:
-                break
+            if len(rgb_frame) != num_cameras:
+                keypoints_data.append(np.full((33, 3), np.nan))
+                inference_time.append(np.nan)
+                if rgb_frames:
+                    last_rgb_frame = rgb_frames[-1]  # Use the last valid frame if available
+                frame_number += 1
+                continue  # Skip to the next frame
 
             frame_keypoints = np.zeros((33, num_cameras, 2))
             valid_detections = True  # Flag to check if all cameras detected poses
@@ -64,30 +71,37 @@ def inference_video(caps, projections, sweep_config=None):
 
             pose_futures = [executor.submit(detect_pose, rgb_frame) for rgb_frame in rgb_frames]
             for cam_idx, future in enumerate(as_completed(pose_futures)):
-                if future.result():
-                    landmarks = future.result()
+                landmarks = future.result()
+                if landmarks:
                     for idx, pose_landmarks in enumerate(landmarks):
                         frame_keypoints[:, cam_idx, 0] = [landmark.x for landmark in pose_landmarks]
                         frame_keypoints[:, cam_idx, 1] = [landmark.y for landmark in pose_landmarks]
                 else:
                     valid_detections = False
+                    print(f"No valid detection from camera {cam_idx}. Skipping triangulation.")
                     break  # No need to continue if one camera fails to detect poses
 
-        if valid_detections:
-            points_3d = triangulate_from_multiple_views_sii(projections, frame_keypoints, number_of_iterations=2)
-            keypoints_data.append(points_3d.cpu().numpy())
+            if valid_detections:
+                print(f"Triangulating for frame {frame_number}")
+                points_3d = triangulate_from_multiple_views_sii(projections, frame_keypoints, number_of_iterations=2)
+                keypoints_data.append(points_3d.cpu().numpy())
 
-            end_time = time.time()
-            inference_time.append(end_time - start_time)
+                end_time = time.time()
+                inference_time.append(end_time - start_time)
+                frame_number += 1
+                print(f"Frame {frame_number} processed successfully.")
 
-            frame_number += 1
+                if len(rgb_frames) >= 2:
+                    last_rgb_frame = np.concatenate((rgb_frames[0], rgb_frames[1]), axis=1)
+                elif len(rgb_frames) == 1:
+                    last_rgb_frame = rgb_frames[0]
+            else:
+                keypoints_data.append(np.full((33, 3), np.nan))
+                inference_time.append(np.nan)
+                frame_number += 1
+                print(f"Skipping frame {frame_number} due to invalid detections.")
 
-            if len(rgb_frames) >= 2:
-                last_rgb_frame = np.concatenate((rgb_frames[0], rgb_frames[1]), axis=1)
-            elif len(rgb_frames) == 1:
-                last_rgb_frame = rgb_frames[0]
-
-        for _, cap in caps:
+    for _, cap in caps:
             cap.release()
 
     inference_time = np.array(inference_time)
