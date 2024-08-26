@@ -575,7 +575,6 @@ class Framework:
             wandb.log({"sample_number_pred": samples_pred})
             wandb.log({"procrustes_number": samples_gt - error_count_all})
 
-
     def total_frames(self, data):
         key = 'right_shoulder'  # Random keypoint to calculate number of frames
         total = 0
@@ -666,8 +665,8 @@ class Framework:
 
 
 # Run the framework
-framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
-                      directory="/media/emanu/LaCie/MoCap/segmented", sweep_id=None)
+framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
+                      directory="D:\MoCap\segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 
