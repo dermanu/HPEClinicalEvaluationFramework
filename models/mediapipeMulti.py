@@ -28,7 +28,7 @@ def process_frame(cap, frameaug, sweep_config):
 def detect_pose(rgb_frame):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = PoseLandmarker.detect(mp_image)
-    return results.pose_world_landmarks if results.pose_world_landmarks else []
+    return results.pose_world_landmarks if results.pose_world_landmarks else None
 
 def inference_video(caps, projections, sweep_config=None):
     if sweep_config is not None:
@@ -58,25 +58,28 @@ def inference_video(caps, projections, sweep_config=None):
                 break
 
             frame_keypoints = np.zeros((33, num_cameras, 2))
+            valid_detections = True  # Flag to check if all cameras detected poses
 
             start_time = time.time()
 
             pose_futures = [executor.submit(detect_pose, rgb_frame) for rgb_frame in rgb_frames]
             for cam_idx, future in enumerate(as_completed(pose_futures)):
-                try:
+                if future.result():
                     landmarks = future.result()
                     for idx, pose_landmarks in enumerate(landmarks):
                         frame_keypoints[:, cam_idx, 0] = [landmark.x for landmark in pose_landmarks]
                         frame_keypoints[:, cam_idx, 1] = [landmark.y for landmark in pose_landmarks]
-                except Exception as e:
-                    print(f"Error detecting pose: {e}")
+                else:
+                    valid_detections = False
+                    break  # No need to continue if one camera fails to detect poses
 
+        if valid_detections:
             points_3d = triangulate_from_multiple_views_sii(projections, frame_keypoints, number_of_iterations=2)
+            keypoints_data.append(points_3d.cpu().numpy())
 
             end_time = time.time()
             inference_time.append(end_time - start_time)
 
-            keypoints_data.append(points_3d.cpu().numpy())
             frame_number += 1
 
             if len(rgb_frames) >= 2:
@@ -84,8 +87,8 @@ def inference_video(caps, projections, sweep_config=None):
             elif len(rgb_frames) == 1:
                 last_rgb_frame = rgb_frames[0]
 
-    for _, cap in caps:
-        cap.release()
+        for _, cap in caps:
+            cap.release()
 
     inference_time = np.array(inference_time)
     return np.array(keypoints_data), inference_time, last_rgb_frame
