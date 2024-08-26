@@ -16,7 +16,7 @@ PoseLandmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
 
 def process_frame(cap, frameaug=None, sweep_config=None):
     ret, frame = cap.read()
-    print(f"Frame read status: {ret}")  # Debug: Check if frame is read
+    # print(f"Frame read status: {ret}")  # Debug: Check if frame is read
     if not ret:
         return None
 
@@ -29,7 +29,7 @@ def process_frame(cap, frameaug=None, sweep_config=None):
 def detect_pose(rgb_frame):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = PoseLandmarker.detect(mp_image)
-    print(f"Landmarks detected: {results.pose_world_landmarks is not None}")  # Debug: Check detection
+    # print(f"Landmarks detected: {results.pose_world_landmarks is not None}")  # Debug: Check detection
     return results.pose_world_landmarks if results.pose_world_landmarks else None
 
 
@@ -44,7 +44,7 @@ def inference_video(caps, projections, sweep_config=None):
 
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
         while all(cap.isOpened() for _, cap in caps):
-            print(f"Processing frame {frame_number}")  # Debug: Loop iteration
+            # print(f"Processing frame {frame_number}")  # Debug: Loop iteration
 
             futures = [executor.submit(process_frame, cap[1], frameaug, sweep_config) for cap in caps]
             rgb_frames = []
@@ -82,14 +82,14 @@ def inference_video(caps, projections, sweep_config=None):
                     break  # No need to continue if one camera fails to detect poses
 
             if valid_detections:
-                print(f"Triangulating for frame {frame_number}")
+                # print(f"Triangulating for frame {frame_number}")
                 points_3d = triangulate_from_multiple_views_sii(projections, frame_keypoints, number_of_iterations=2)
                 keypoints_data.append(points_3d.cpu().numpy())
 
                 end_time = time.time()
                 inference_time.append(end_time - start_time)
                 frame_number += 1
-                print(f"Frame {frame_number} processed successfully.")
+                # print(f"Frame {frame_number} processed successfully.")
 
                 if len(rgb_frames) >= 2:
                     last_rgb_frame = np.concatenate((rgb_frames[0], rgb_frames[1]), axis=1)
@@ -99,7 +99,7 @@ def inference_video(caps, projections, sweep_config=None):
                 keypoints_data.append(np.full((33, 3), np.nan))
                 inference_time.append(np.nan)
                 frame_number += 1
-                print(f"Skipping frame {frame_number} due to invalid detections.")
+               #  print(f"Skipping frame {frame_number} due to invalid detections.")
 
     for _, cap in caps:
             cap.release()

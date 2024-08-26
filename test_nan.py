@@ -1,3 +1,4 @@
+import numpy as np
 import os
 import wandb
 import numpy as np
@@ -15,6 +16,33 @@ from models import mediapipeMulti
 import pickle
 from scipy.spatial import procrustes
 
+def simulate_inference_video_output_with_nans(num_frames=20000, dimensions=3, frame_shape=(720, 1280, 3), nan_ratio=0.1):
+    # Initialize the keypoints array with indices and random values
+    if dimensions == 3:
+        keypoints_data = np.zeros((num_frames, 33, 4))
+        keypoints_data[:, :, 0] = np.arange(33)  # Set landmark index 0-32
+        keypoints_data[:, :, 1:] = np.random.rand(num_frames, 33, 3)  # Random x, y, z
+    elif dimensions == 2:
+        keypoints_data = np.zeros((num_frames, 33, 3))
+        keypoints_data[:, :, 0] = np.arange(33)  # Set landmark index 0-32
+        keypoints_data[:, :, 1:] = np.random.rand(num_frames, 33, 2)  # Random x, y
+
+    # Introduce NaN values into the keypoints data based on nan_ratio
+    num_nans = int(num_frames * 33 * nan_ratio)  # Total number of NaN values to introduce
+    nan_indices = np.random.choice(np.arange(num_frames * 33), num_nans, replace=False)
+
+    for idx in nan_indices:
+        frame_idx = idx // 33  # Frame index
+        landmark_idx = idx % 33  # Landmark index
+        keypoints_data[frame_idx, landmark_idx, 1:] = np.nan  # Introduce NaN to x, y, z or x, y
+
+    # Generate mock inference times (e.g., random times between 0.01 to 0.03 seconds)
+    inference_time = np.random.uniform(0.01, 0.03, num_frames)
+
+    # Generate a mock RGB frame (last frame of the video)
+    rgb_frame = np.random.randint(0, 255, frame_shape, dtype=np.uint8)
+
+    return keypoints_data, inference_time, rgb_frame
 
 def log_frame_example(frame):
     """
@@ -193,7 +221,7 @@ class Framework:
         morph = [5, 6, 12, 15, 16, 18, 20, 21, 22, 24, 25]
 
         self.participants = ['par4', 'par19', 'par11', 'par23']
-        # self.participants = ['par4']
+        self.participants = ['par4']
 
         # Defines movement number in dataset related to different movement categories
         self.movement_category = {
@@ -201,6 +229,12 @@ class Framework:
             "lower": [5, 6, 7, 8],
             "complex": [9, 10, 11, 12, 13],
             "sitting": [14, 15, 16, 17]
+        }
+        self.movement_category = {
+            "upper": [1, 2],
+            "lower": [5, 6],
+            "complex": [9, 10],
+            "sitting": [14, 15]
         }
 
         # Defines body segments
@@ -445,11 +479,11 @@ class Framework:
                     # Open model based on name and run inference
                     if self.model_type == "mono":
                         # Just load the first (and only) camera
-                        gt_keypoints = gt_keypoints[0][1]
+                        gt_keypoints, a, b = simulate_inference_video_output_with_nans(nan_ratio=0)
                         caps = caps[0][1]
 
                         if self.model_name == "mediapipe":
-                            pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
+                            pred_keypoints, inference_times, frame = simulate_inference_video_output_with_nans(nan_ratio=0.1)
                             selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32,
                                                 31]  # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, 1:]
@@ -501,11 +535,14 @@ class Framework:
                                 12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
                             }
 
+                    # Add min and max values for normalization of pose_gt
                     gt_keypoints_np = np.array(gt_keypoints)
+                    gt_keypoints_np = gt_keypoints_np[:, 0:16, 1:]
                     if gt_keypoints_np.shape != pred_keypoints.shape:
                         print(gt_keypoints.shape)
                         print(pred_keypoints.shape)
                         assert gt_keypoints_np.shape == pred_keypoints.shape, "Not the same shape. Bummer!"
+
 
                     # Postprocess predicted keypoints
                     pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
@@ -521,6 +558,7 @@ class Framework:
 
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
                     pred_keypoints = self.apply_morphing(pred_keypoints)
+
 
                     # Add joint names
                     pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
@@ -659,7 +697,7 @@ class Framework:
 
 
 # Run the framework
-framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
+framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
                       directory="D:\MoCap\segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()

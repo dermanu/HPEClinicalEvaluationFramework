@@ -5,6 +5,7 @@ from utils.frameAugmentation import FrameAugmentor
 import mediapipe as mp
 from mediapipe.tasks.python import vision
 
+
 # Load the pose landmarker model once to avoid reloading it multiple times
 options = mp.tasks.vision.PoseLandmarkerOptions(
     base_options=mp.tasks.BaseOptions(model_asset_path='models/pose_landmarker_heavy.task'),
