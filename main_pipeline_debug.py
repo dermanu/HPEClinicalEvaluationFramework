@@ -485,10 +485,12 @@ class Framework:
                         else:
                             p_matrix_raw, _, _ = camCali.get_projection_matrix(cameras, False)
 
-                            p_matrix = torch.zeros((self.joint_num_total, len(cameras), 3, 4), dtype=torch.float32)
-                            for i, cam in enumerate(p_matrix_raw):
-                                p_matrix[:, i, :, :] = torch.tensor(p_matrix_raw[cam], dtype=torch.float32)
-                            p_matrix = p_matrix.cuda()
+                        #p_matrix = torch.zeros((self.joint_num_total, len(cameras), 3, 4), dtype=torch.float32)
+                        #for i, cam in enumerate(p_matrix_raw):
+                        #    p_matrix[:, i, :, :] = torch.tensor(p_matrix_raw[cam], dtype=torch.float32)
+                        #p_matrix = p_matrix.cuda()
+
+                        p_matrix = list(p_matrix_raw.values())
 
                         if self.model_name == "openpose":
                             print("OpenPose not implemented yet")
@@ -666,7 +668,7 @@ class Framework:
 
 # Run the framework
 framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
-                      directory="D:\MoCap\segmented", sweep_id=None)
+                      directory="/media/emanu/Emanuel Backup/ClinicalMoCapEvaluation/MoCap/segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 
