@@ -1,102 +1,134 @@
-import torch
+import numpy as np
+from scipy import linalg
 
-def homogeneous_to_euclidean(points):
-    """Converts torch homogeneous points to euclidean
-    Args:
-        points torch tensor of shape (N, M + 1): N homogeneous points of dimension M
-    Returns:
-        torch tensor of shape (N, M): euclidean points
+
+def make_homogeneous_rep_matrix(R, t):
     """
-    if torch.is_tensor(points):
-        return (points.transpose(1, 0)[:-1] / points.transpose(1, 0)[-1]).transpose(1, 0)
-    else:
-        raise TypeError("This methods expects a PyTorch tensor.")
+    Creates a 4x4 homogeneous representation matrix from rotation and translation vectors.
 
-def euclidean_to_homogeneous(points):
-    """Converts torch euclidean points to homogeneous
-    Args:
-        points torch tensor of shape (N, M): N euclidean points of dimension M
+    Parameters:
+    R (ndarray): 3x3 rotation matrix.
+    t (ndarray): 3x1 translation vector.
+
     Returns:
-        torch tensor of shape (N, M+1): homogeneous points
+    ndarray: 4x4 homogeneous representation matrix.
     """
-    if torch.is_tensor(points):
-        return torch.cat((points, torch.ones(points.shape[0], 1).to(points.device)),-1)
-    else:
-        raise TypeError("This methods expects a PyTorch tensor.")
+    P = np.eye(4)
+    P[:3, :3] = R
+    P[:3, 3] = t.reshape(3)
+    return P
 
-def project(points, projections):
-    """Project batch of 3D points to 2D
-    Args:
-        points torch tensor of shape (B, 3)
-        projections torch tensor of shape (B, N, 3, 4)
+
+def DLT(projection_matrices, points_2d):
+    """
+    Performs Direct Linear Transform (DLT) to triangulate 3D points from multiple camera views.
+
+    Parameters:
+    projection_matrices (list of ndarray): List of 3x4 projection matrices for each camera.
+    points_2d (ndarray): Array of 2D points with shape (n_keypoints, n_cams, 2).
+
     Returns:
-        torch tensor of shape (B, N, 2)
+    ndarray: Array of triangulated 3D points with shape (n_keypoints, 3).
     """
-    points_homogeneous = euclidean_to_homogeneous(points)
-    points_homogeneous = points_homogeneous.unsqueeze(1).repeat(1, projections.shape[1], 1)
-    points_2d_homogeneous = torch.matmul(projections.reshape(-1,3,4), points_homogeneous.reshape(-1,4,1)).unsqueeze(-1)
-    points_2d = homogeneous_to_euclidean(points_2d_homogeneous)
-    return points_2d.reshape(projections.shape[0], projections.shape[1], 2)
+    n_keypoints = points_2d.shape[0]
+    n_views = points_2d.shape[1]
+    points_3d = []
+
+    # Loop over each keypoint
+    for k in range(n_keypoints):
+        A = []
+
+        # For each view/camera, add two equations to A for the current keypoint
+        for i in range(n_views):
+            P = projection_matrices[i]
+            point = points_2d[k, i]
+
+            # Create the two rows for this point/camera combination
+            A.append(point[1] * P[2, :] - P[1, :])
+            A.append(P[0, :] - point[0] * P[2, :])
+
+        A = np.array(A)
+
+        # Perform Singular Value Decomposition (SVD) to solve the system
+        U, s, Vh = linalg.svd(A)
+
+        # Normalize and store the triangulated 3D point
+        X = Vh[-1]
+        points_3d.append(X[:3] / X[3])
+
+    return np.array(points_3d)
 
 
-def triangulate_from_multiple_views_sii(proj_matricies, points, number_of_iterations = 2):
-    """This module lifts B 2d detections obtained from N viewpoints to 3D using the Direct Linear Transform method.
-    It computes the eigenvector associated to the smallest eigenvalue using the Shifted Inverse Iterations algorithm.
-    Args:
-        proj_matricies torch tensor of shape (B, N, 3, 4): sequence of projection matricies (3x4)
-        points torch tensor of shape (B, N, 2): sequence of points' coordinates
+def read_camera_parameters(camera_id, folder='camera_parameters/'):
+    """
+    Reads the camera intrinsic matrix and distortion coefficients from a file.
+
+    Parameters:
+    camera_id (int): The ID of the camera.
+    folder (str): Folder path where the camera parameter files are stored.
+
     Returns:
-        point_3d torch tensor of shape (B, 3): triangulated points
+    tuple: Camera intrinsic matrix and distortion coefficients.
     """
+    with open(f'{folder}c{camera_id}.dat', 'r') as inf:
+        cmtx = [list(map(float, inf.readline().split())) for _ in range(3)]
+        inf.readline()  # Skip a line
+        dist = list(map(float, inf.readline().split()))
 
-    batch_size = points.shape[0]
-    n_views = points.shape[1]
+    return np.array(cmtx), np.array(dist)
 
-    points = torch.tensor(points, dtype=torch.float).cuda()
 
-    # assemble linear system
-    A = proj_matricies[:,:, 2:3].expand(batch_size, n_views, 2, 4) * points.view(-1, n_views, 2, 1)
-    A -= proj_matricies[:, :, :2]
-    A = A.view(batch_size, -1, 4)
+def read_rotation_translation(camera_id, folder='camera_parameters/'):
+    """
+    Reads the camera rotation matrix and translation vector from a file.
 
-    AtA = A.permute(0,2,1).matmul(A).float()
-    I = torch.eye(4).reshape(1, 4, 4).repeat(batch_size, 1, 1).to(A.device)
-    B =  AtA + 0.001*I
-    # initialize normalized random vector
-    bk = torch.rand(batch_size, 4, 1).float().to(AtA.device)
-    norm_bk = torch.sqrt(bk.permute(0,2,1).matmul(bk))
-    bk = bk/norm_bk
-    for k in range(number_of_iterations):
-        bk = torch.linalg.solve(B, bk)
-        norm_bk = torch.sqrt(bk.permute(0,2,1).matmul(bk))
-        bk = bk/norm_bk
+    Parameters:
+    camera_id (int): The ID of the camera.
+    folder (str): Folder path where the rotation and translation files are stored.
 
-    point_3d_homo = -bk.squeeze(-1)
-    point_3d = homogeneous_to_euclidean(point_3d_homo)
-
-    return point_3d
-
-def triangulate_from_multiple_views_svd(proj_matricies, points):
-    """This module lifts B 2d detections obtained from N viewpoints to 3D using the Direct Linear Transform method.
-    It computes the eigenvector associated to the smallest eigenvalue using Singular Value Decomposition.
-    Args:
-        proj_matricies torch tensor of shape (B, N, 3, 4): sequence of projection matricies (3x4)
-        points torch tensor of shape (B, N, 2): sequence of points' coordinates
     Returns:
-        point_3d numpy torch tensor of shape (B, 3): triangulated point
+    tuple: Rotation matrix and translation vector.
     """
+    with open(f'{folder}rot_trans_c{camera_id}.dat', 'r') as inf:
+        inf.readline()  # Skip a line
+        rot = [list(map(float, inf.readline().split())) for _ in range(3)]
+        inf.readline()  # Skip a line
+        trans = [list(map(float, inf.readline().split())) for _ in range(3)]
 
-    batch_size = points.shape[0]
-    n_views = points.shape[1]
+    return np.array(rot), np.array(trans)
 
-    points = torch.tensor(points, dtype=torch.float).cuda()
 
-    A = proj_matricies[:, :, 2:3].expand(batch_size, n_views, 2, 4) * points.view(-1, n_views, 2, 1)
-    A -= proj_matricies[:, :, :2]
+def convert_to_homogeneous(pts):
+    """
+    Converts points to homogeneous coordinates.
 
-    _, _, vh = torch.svd(A.view(batch_size, -1, 4))
+    Parameters:
+    pts (ndarray): Array of 2D or 3D points.
 
-    point_3d_homo = -vh[:, :, 3]
-    point_3d = homogeneous_to_euclidean(point_3d_homo)
+    Returns:
+    ndarray: Homogeneous coordinates.
+    """
+    pts = np.array(pts)
+    if pts.ndim > 1:
+        w = np.ones((pts.shape[0], 1))
+        return np.concatenate([pts, w], axis=1)
+    return np.concatenate([pts, [1]], axis = 0)
 
-    return point_3d
+
+def get_projection_matrix(camera_id, folder='camera_parameters/'):
+    """
+    Computes the projection matrix for a given camera.
+
+    Parameters:
+    camera_id (int): The ID of the camera.
+    folder (str): Folder path where camera parameters are stored.
+
+    Returns:
+    ndarray: 3x4 projection matrix.
+    """
+    cmtx, dist = read_camera_parameters(camera_id, folder)
+    rvec, tvec = read_rotation_translation(camera_id, folder)
+
+    # Calculate projection matrix
+    projection_matrix = cmtx @ make_homogeneous_rep_matrix(rvec, tvec)[:3, :]
+    return projection_matrix
