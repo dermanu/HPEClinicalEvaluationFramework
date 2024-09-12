@@ -471,6 +471,7 @@ class Framework:
 
                         # Desynchronize video streams
                         if config._items['augmentation'] == 'desynchronize':
+                            caps = [cap for _, cap in caps]
                             caps = self.cam_desynchronizer.desynchronize(caps)
 
                         # Load camera parameter matrix and add noise if specified so
@@ -662,7 +663,7 @@ class Framework:
 
 # Run the framework
 framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
-                      directory="/media/emanu/Emanuel Backup/ClinicalMoCapEvaluation/MoCap/segmented", sweep_id=None)
+                      directory="C:/Users/vizlab_stud/emanuel/MoCap/segmented", sweep_id='gohgtomd')
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 
