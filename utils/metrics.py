@@ -7,6 +7,8 @@ import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 import wandb
+import pingouin as pg
+import pandas as pd
 
 
 def align_by_pelvis(joints):
@@ -30,8 +32,8 @@ def calculate_mpjpe(target, prediction):
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
     mpjpe = np.linalg.norm(prediction - target, axis=1)
-    mean = np.mean(mpjpe)
-    std = np.std(mpjpe)
+    mean = np.nanmean(mpjpe)
+    std = np.nanstd(mpjpe)
 
     return mean, std
 
@@ -198,10 +200,20 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
     velocity_predicted = np.diff(prediction, axis=0) * sample_rate
     velocity_target = np.diff(target, axis=0) * sample_rate
 
+    # Create valid mask for velocities
+    valid_mask = ~np.isnan(velocity_predicted) & ~np.isnan(velocity_target)
+
     if procrustes:
-        mean, std, err = calculate_pmpjpe(velocity_target, velocity_predicted)
+        # Replace NaNs with zeros temporarily for alignment
+        velocity_predicted_filled = np.where(valid_mask, velocity_predicted, 0)
+        velocity_target_filled = np.where(valid_mask, velocity_target, 0)
+
+        mean, std, err = calculate_pmpjpe(velocity_target_filled, velocity_predicted_filled)
     else:
-        mean, std = calculate_mpjpe(velocity_target, velocity_predicted)
+        # Compute MPJPE with NaN-aware functions
+        mpjpe = np.linalg.norm(velocity_predicted - velocity_target, axis=2)  # Shape: [batch, joints]
+        mean = np.nanmean(mpjpe)
+        std = np.nanstd(mpjpe)
 
     return mean/1000, std/1000
 
@@ -258,18 +270,26 @@ def calculate_correlation(target, prediction, axes_to_use=None, procrustes=False
         gt = target[:, coordinate]
         pred = prediction[:, coordinate]
 
-        if np.std(gt) == 0 or np.std(pred) == 0:
-            print('There is no variation in the data for the correlation')
-            continue  # Skip if no variance in the data
+        valid_mask = ~np.isnan(gt) & ~np.isnan(pred)
+        gt_valid = gt[valid_mask]
+        pred_valid = pred[valid_mask]
 
-        corr, pvalue = pearsonr(gt, pred)
+        if len(gt_valid) < 2:
+            # Not enough data to compute correlation
+            continue
+
+        if np.std(gt_valid) == 0 or np.std(pred_valid) == 0:
+            print('No variation in the data for the correlation')
+            continue
+
+        corr, pvalue = pearsonr(gt_valid, pred_valid)
         correlations.append(corr)
         pvalues.append(pvalue)
 
     if not correlations:
         return float('nan'), float('nan')  # Handle case where no valid correlations were calculated
 
-    return np.mean(correlations), np.mean(pvalues)
+    return np.nanmean(correlations), np.nanmean(pvalues)
 
 
 def compute_CP(target, prediction, threshold=180, joints_to_use=None):
@@ -674,3 +694,48 @@ def calculate_mpjphe(target, prediction):
     phase_diff = phase_diff[pad_width:-pad_width]
 
     return np.median(phase_diff), np.std(phase_diff), phase_target, phase_prediction, phase_diff
+
+
+def calculate_sem_mdc(sd, reliability, z_value=1.96):
+    """
+    Calculate the Standard Error of Measurement (SEM) and Minimal Detectable Change (MDC).
+
+    :param sd: Standard deviation of the measurements
+    :param reliability: Intraclass Correlation Coefficient (ICC) or other reliability metric
+    :param z_value: Z value for the desired confidence level (default 1.96 for 95% confidence)
+    :return: SEM and MDC
+    """
+    sem = sd * np.sqrt(1 - reliability)
+    mdc = sem * z_value * np.sqrt(2)
+    return sem, mdc
+
+
+def calculate_icc(gt_data, pred_data):
+    # Create a DataFrame for the ICC calculation
+    df = pd.DataFrame({
+        'subject': np.repeat(np.arange(len(gt_data)), 2),
+        'measurement': np.tile(['gt', 'pred'], len(gt_data)),
+        'score': np.concatenate([gt_data, pred_data])
+    })
+
+    # Calculate ICC
+    icc_results = pg.intraclass_corr(data=df, targets='subject', raters='measurement', ratings='score')
+
+    # Extract the ICC value, and the lower and upper bounds for ICC(A,1)
+    icc_a1 = icc_results.loc[(icc_results['Type'] == 'ICC1'), 'ICC'].values[0]
+    icc_lb = icc_results.loc[(icc_results['Type'] == 'ICC1'), 'CI95%'].values[0][0]
+    icc_up = icc_results.loc[(icc_results['Type'] == 'ICC1'), 'CI95%'].values[0][1]
+
+    return icc_a1, icc_lb, icc_up
+
+
+def calculate_bias(gt_data, pred_data):
+    return np.mean(pred_data - gt_data, axis=0)
+
+
+def calculate_pearson_r(gt_data, pred_data):
+    r_values, p_values = [], []
+    r, p = pearsonr(gt_data, pred_data)
+    r_values.append(r)
+    p_values.append(p)
+    return np.array(r_values), np.array(p_values)
