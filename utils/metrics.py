@@ -697,9 +697,9 @@ def calculate_mpjphe(target, prediction):
 
 
 def calculate_sem_mdc(sd, reliability, z_value=1.96):
-    """
-    Calculate the Standard Error of Measurement (SEM) and Minimal Detectable Change (MDC).
+    """nd Minimal Detectable Change (MDC).
 
+    Calculate the Standard Error of Measurement (SEM) a
     :param sd: Standard deviation of the measurements
     :param reliability: Intraclass Correlation Coefficient (ICC) or other reliability metric
     :param z_value: Z value for the desired confidence level (default 1.96 for 95% confidence)
@@ -722,9 +722,9 @@ def calculate_icc(gt_data, pred_data):
     icc_results = pg.intraclass_corr(data=df, targets='subject', raters='measurement', ratings='score')
 
     # Extract the ICC value, and the lower and upper bounds for ICC(A,1)
-    icc_a1 = icc_results.loc[(icc_results['Type'] == 'ICC1'), 'ICC'].values[0]
-    icc_lb = icc_results.loc[(icc_results['Type'] == 'ICC1'), 'CI95%'].values[0][0]
-    icc_up = icc_results.loc[(icc_results['Type'] == 'ICC1'), 'CI95%'].values[0][1]
+    icc_a1 = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'ICC'].values[0]
+    icc_lb = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'CI95%'].values[0][0]
+    icc_up = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'CI95%'].values[0][1]
 
     return icc_a1, icc_lb, icc_up
 

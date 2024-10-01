@@ -7,15 +7,85 @@ import multiprocessing
 import pandas as pd
 from utils import angle_metrics_tpose
 from utils import metrics
-
+import pingouin as pg
+from statsmodels.stats.multitest import multipletests
+from sklearn.utils import resample
 
 def is_data_normal(data, alpha=0.05):
     if len(data) > 5000:
         stat, p_value = stats.kstest(data, 'norm')
     else:
         stat, p_value = stats.shapiro(data)
-    return p_value > alpha
 
+    normal = p_value > alpha
+
+    # Dataset large enough, thus CLT applies
+    normal = True;
+    return normal
+
+
+def bootstrap_confidence_interval(data1, data2, n_resamples=1000, alpha=0.05, paired=True):
+    """
+    Calculate the bootstrap confidence interval for the mean difference.
+    """
+    boot_diffs = []
+    np.random.seed(0)  # For reproducibility
+    for _ in range(n_resamples):
+        if paired:
+            indices = np.random.choice(len(data1), len(data1), replace=True)
+            resample1 = data1[indices]
+            resample2 = data2[indices]
+            diff = np.mean(resample1 - resample2)
+        else:
+            resample1 = np.random.choice(data1, size=len(data1), replace=True)
+            resample2 = np.random.choice(data2, size=len(data2), replace=True)
+            diff = np.mean(resample1) - np.mean(resample2)
+        boot_diffs.append(diff)
+    lower = np.percentile(boot_diffs, (alpha/2)*100)
+    upper = np.percentile(boot_diffs, (1 - alpha/2)*100)
+    return lower, upper
+
+def effect_size_interpreter(effect_size, effect_size_type):
+    if effect_size_type == 'Cohen_d':
+        if np.abs(effect_size) < 0.2:
+            effect_interpret = 'negligible'
+        elif 0.2 <= np.abs(effect_size) < 0.5:
+            effect_interpret = 'small'
+        elif 0.5 <= np.abs(effect_size) < 0.8:
+            effect_interpret = 'medium'
+        else:
+            effect_interpret = 'large'
+    elif effect_size_type == 'RBC':  # Rank-Biserial Correlation
+        if np.abs(effect_size) < 0.1:
+            effect_interpret = 'negligible'
+        elif 0.1 <= np.abs(effect_size) < 0.3:
+            effect_interpret = 'small'
+        elif 0.3 <= np.abs(effect_size) < 0.5:
+            effect_interpret = 'medium'
+        else:
+            effect_interpret = 'large'
+    elif effect_size_type == 'Rosenthal':
+        if np.abs(effect_size) < 0.1:
+            effect_interpret = 'negligible'
+        elif 0.1 <= np.abs(effect_size) < 0.3:
+            effect_interpret = 'small'
+        elif 0.3 <= np.abs(effect_size) < 0.5:
+            effect_interpret = 'medium'
+        else:
+            effect_interpret = 'large'
+    elif effect_size_type == 'Cliff':
+        if np.abs(effect_size) < 0.147:
+            effect_interpret = 'negligible'
+        elif 0.147 <= np.abs(effect_size) < 0.33:
+            effect_interpret = 'small'
+        elif 0.33 <= np.abs(effect_size) < 0.474:
+            effect_interpret = 'medium'
+        else:
+            effect_interpret = 'large'
+    else:
+        effect_interpret = np.nan
+
+    return effect_interpret
 
 def apply_bh_correction(p_values, alpha=0.05):
     m = len(p_values)
@@ -102,103 +172,148 @@ def compare_metrics_with_none_group(data, alpha=0.05):
     - results: dictionary with p-values, confidence intervals, and effect sizes, and differences
      for each metric and augmentation
     """
-    baseline = data['none.pkl']
-    other_conditions = {k: v for k, v in data.items() if k != 'none.pkl'}
+    baseline = data['none']
+    other_conditions = {k: v for k, v in data.items() if k != 'none'}
     metrics_data = baseline.keys()
     results = {}
+    unpaired_conditions = ['lower', 'upper', 'complex', 'sitting']
 
-    for i, metric in enumerate(metrics_data):
+    for metric in metrics_data:
         results[metric] = []
         p_values = []
         test_results = []
-        base_data = np.array(baseline[metric])
-        if len(base_data.shape) > 1:
-            base_data = base_data[:, 0]
+        base_data = np.array(baseline[metric]).flatten()
 
         normal_base = is_data_normal(base_data)
 
         for condition_name, condition_data in other_conditions.items():
-            aug_data = np.array(condition_data[metric])
-            if len(aug_data.shape) > 1:
-                aug_data = aug_data[:, 0]
+            aug_data = np.array(condition_data[metric]).flatten()
 
             normal_aug = is_data_normal(aug_data)
 
-            if len(base_data) != len(aug_data):
-                print(len(base_data))
-                print(len(aug_data))
-                ValueError("Ground truth and augmented data are not of same length")
-
             base_mean = np.mean(base_data)
             aug_mean = np.mean(aug_data)
-            diff_percent = ((base_mean - aug_mean) / base_mean) * 100
+            diff_percent = ((base_mean - aug_mean) / base_mean) * 100 if base_mean != 0 else 0
             diff_total = aug_mean - base_mean
 
-            if normal_base and normal_aug:
-                print('The data is normally distributed -> t-test')
-                t_stat, p_value = stats.ttest_ind(aug_data, base_data)
-                test_used = 't-test'
+            if condition_name in unpaired_conditions:
+                # Unpaired data
+                if normal_base and normal_aug:
+                    t_result = pg.ttest(base_data, aug_data, paired=False, alternative='two-sided', correction='auto',
+                                        r=0.5, confidence=0.95)
+                    p_value = t_result['p-val'].iloc[0]
+                    effect_size = t_result['cohen-d'].iloc[0]
+                    if isinstance(t_result['CI95%'], pd.Series):
+                        ci_lower = t_result['CI95%'].iloc[0][0]
+                        ci_upper = t_result['CI95%'].iloc[0][1]
+                    else:
+                        ci_lower = t_result['CI95%'][0][0]
+                        ci_upper = t_result['CI95%'][0][1]
+                    effect_interpret = effect_size_interpreter(effect_size, 'Cohen_d')
+                    test_used = 'Independent Samples t-test'
+                else:
+                    # Mann-Whitney U test with Scipy
+                    mwu_result = pg.mwu(base_data, aug_data, alternative='two-sided')
+                    p_value = mwu_result['p-val'].iloc[0]
+                    effect_size = mwu_result['RBC'].iloc[0]
+                    ci_lower, ci_upper = None, None
+                    effect_interpret = effect_size_interpreter(effect_size,
+                                                               'RBC')
+                    test_used = 'Mann-Whitney U'
+
+                p_values.append(p_value)
+
+                # Bootstrap CI for mean difference
+                # conf_int = bootstrap_confidence_interval(base_data, aug_data, n_resamples=1000, alpha=alpha,
+                #                                         paired=False)
+
+                # Significant flag will be updated after correction
+                test_results.append({
+                    'augmentation': condition_name,
+                    'test_used': test_used,
+                    'Significant': None,
+                    'p_value': p_value,
+                    'confidence_interval': conf_int,
+                    'effect_size': effect_size,
+                    'effect_size_ci': (ci_lower, ci_upper),
+                    'effect_interpretation': effect_interpret,
+                    'bias_percent': diff_percent,
+                    'bias': diff_total,
+                    # Paired metrics set to None
+                    'pearsons_r': None,
+                    'icc': None,
+                    'icclb': None,
+                    'iccup': None,
+                    'sem': None,
+                    'mdc': None
+                })
+
             else:
-                print('The data is not normally distributed -> Mann-Whitney U test')
-                t_stat, p_value = stats.mannwhitneyu(aug_data, base_data)
-                test_used = 'Mann-Whitney U'
+                # Paired data
+                if len(base_data) != len(aug_data):
+                    print(
+                        f"Warning: Length mismatch for {metric} - {condition_name}. Expected paired data but lengths differ.")
+                    continue
 
-            p_values.append(p_value)
+                if normal_base and normal_aug and is_data_normal(base_data - aug_data):
+                    t_result = pg.ttest(base_data, aug_data, paired=True, alternative='two-sided', correction='auto',
+                                        r=0.5, confidence=0.95)
+                    p_value = t_result['p-val'].iloc[0]
+                    effect_size = t_result['cohen-d'].iloc[0]
+                    if isinstance(t_result['CI95%'], pd.Series):
+                        ci_lower = t_result['CI95%'].iloc[0][0]
+                        ci_upper = t_result['CI95%'].iloc[0][1]
+                    else:
+                        ci_lower = t_result['CI95%'][0][0]
+                        ci_upper = t_result['CI95%'][0][1]
+                    effect_interpret = effect_size_interpreter(effect_size, 'Cohen_d')
+                    test_used = 'Paired t-test'
+                else:
+                    t_result = pg.wilcoxon(base_data, aug_data, alternative='two-sided')
+                    p_value = t_result['p-val']
+                    effect_size = t_result['RBC']
+                    ci_lower, ci_upper = None, None
+                    test_used = 'Wilcoxon signed-rank test'
 
-            if test_used == 't-test':
-                pooled_std = np.sqrt(
-                    ((np.size(base_data) - 1) * np.var(base_data) + (np.size(aug_data) - 1) * np.var(aug_data)) / (
-                                np.size(base_data) + np.size(aug_data) - 2))
-                effect_size = (aug_mean - base_mean) / pooled_std
-            else:
-                effect_size = t_stat / np.sqrt(np.size(aug_data))
+                p_values.append(p_value)
 
-            if np.abs(effect_size) < 0.2:
-                effect_interpret = 'negligible'
-            elif 0.2 <= np.abs(effect_size) < 0.5:
-                effect_interpret = 'small'
-            elif 0.5 <= np.abs(effect_size) < 0.8:
-                effect_interpret = 'medium'
-            else:
-                effect_interpret = 'large'
+                # Bootstrap CI for mean difference
+                conf_int = bootstrap_confidence_interval(base_data, aug_data, n_resamples=1000, alpha=alpha,
+                                                         paired=True)
 
-            if test_used == 't-test':
-                cm = sms.CompareMeans(sms.DescrStatsW(aug_data), sms.DescrStatsW(base_data))
-                conf_int = cm.tconfint_diff(usevar='unequal')
-            else:
-                conf_int = (None, None)
+                # Paired metrics calculations
+                icc, icclb, iccup = metrics.calculate_icc(base_data, aug_data)
+                sem, mdc = metrics.calculate_sem_mdc(np.std(aug_data - base_data), icc)
+                pearson_r = metrics.calculate_pearson_r(base_data, aug_data)
 
-            significant = p_value < alpha
+                # Significant flag will be updated after correction
+                test_results.append({
+                    'augmentation': condition_name,
+                    'test_used': test_used,
+                    'Significant': None,
+                    'p_value': p_value,
+                    'confidence_interval': conf_int,
+                    'effect_size': effect_size,
+                    'effect_size_ci': (ci_lower, ci_upper),
+                    'effect_interpretation': effect_interpret,
+                    'bias_percent': diff_percent,
+                    'bias': diff_total,
+                    'pearsons_r': pearson_r,
+                    'icc': icc,
+                    'icclb': icclb,
+                    'iccup': iccup,
+                    'sem': sem,
+                    'mdc': mdc
+                })
 
-            icc, icclb, iccup = metrics.calculate_icc(base_data, aug_data)
-            sem, mdc = metrics.calculate_sem_mdc(np.std(aug_data - base_data), icc)
-            bias = metrics.calculate_bias(base_data, aug_data)
-            pearson_r = metrics.calculate_pearson_r(base_data, aug_data)
+        # Apply multiple comparison correction
+        bh_significant, corrected_p_values, _, _ = multipletests(p_values, alpha=alpha, method='fdr_bh')
 
-            test_results.append({
-                'augmentation': condition_name,
-                'test_used': test_used,
-                'Significant': significant,
-                'p_value': p_value,
-                'confidence_interval': conf_int,
-                'effect_size': effect_size,
-                'effect_interpretation': effect_interpret,
-                'difference_percent': diff_percent,
-                'difference_total': diff_total,
-                'bias': bias,
-                'pearsons_r': pearson_r,
-                'icc': icc,
-                'icclb': icclb,
-                'iccup': iccup,
-                'sem': sem,
-                'mdc': mdc
-            })
-
-        bh_significant, corrected_p_values = apply_bh_correction(np.array(p_values), alpha)
-
+        # Update significance and corrected p-values
         for i, idx in enumerate(np.argsort(p_values)):
             test_results[idx]['Significant'] = bh_significant[i]
-            test_results[idx]['corrected_alpha'] = corrected_p_values[i]
+            test_results[idx]['corrected_p_value'] = corrected_p_values[i]
+            # You can interpret effect size here if needed
             results[metric].append(test_results[idx])
 
     return results
@@ -292,20 +407,26 @@ def align_procrustes_old(target, prediction):
 
 def group_files_by_suffix(files):
     """
-    Group files by the suffix after the last '-'.
+    Group files by the augmentation (modifier), e.g., 'background', 'defocus', etc.
     :param files: List of filenames.
-    :return: Dictionary where keys are suffixes and values are lists of files with that suffix.
+    :return: Dictionary where keys are augmentations (modifiers) and values are lists of files.
     """
     from collections import defaultdict
     grouped_files = defaultdict(list)
-    for file in files:
-        suffix = file.split('-')[-1]
-        grouped_files[suffix].append(file)
 
     for file in files:
-        if file.split('-')[-1] == 'none.pkl':
-            suffix = file.split('-')[-2]
-            grouped_files[suffix].append(file)
+        # Remove the '.pkl' extension and split the filename
+        parts = file.replace('.pkl', '').split('-')
+
+        # Extract the modifier (augmentation)
+        modifier = '-'.join(parts[2:])
+        grouped_files[modifier].append(file)
+
+        # Extract the modifier (task)
+        if modifier == 'none':
+            modifier = '-'.join(parts[1:2])
+            grouped_files[modifier].append(file)
+
 
     return grouped_files
 
@@ -346,10 +467,10 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         combined_gt_keypoints = np.concatenate(combined_gt_keypoints, axis=1)
         combined_infer_time = np.concatenate(combined_infer_time, axis=0)
 
-        print('GT_length input')
-        print(np.size(combined_gt_keypoints, 1))
-        print('Pred_length input')
-        print(np.size(combined_pred_keypoints, 1))
+        #print('GT_length input')
+        #print(np.size(combined_gt_keypoints, 1))
+        #print('Pred_length input')
+        #print(np.size(combined_pred_keypoints, 1))
 
         # Align keypoints using Procrustes alignment
         aligned_gt, aligned_pred, error_count = align_procrustes_old(combined_gt_keypoints, combined_pred_keypoints)
@@ -358,16 +479,16 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         aligned_gt = np.moveaxis(aligned_gt, [0, 1, 2], [2, 0, 1])
         aligned_pred = np.moveaxis(aligned_pred, [0, 1, 2], [2, 0, 1])
 
-        print('GT_length proc')
-        print(np.size(aligned_gt, 0))
-        print('Pred_length proc')
-        print(np.size(aligned_pred, 0))
+        #print('GT_length proc')
+        #print(np.size(aligned_gt, 0))
+        #print('Pred_length proc')
+        #print(np.size(aligned_pred, 0))
 
         # Calculate metrics (adapt this part based on the metrics you want)
         angles_gt = angle_metrics_tpose.calculate_angles_tpose(aligned_gt)
         angles_pred = angle_metrics_tpose.calculate_angles_tpose(aligned_pred)
         angle_errors = {
-            joint: np.mean(np.degrees(np.abs(angles_gt[joint] - angles_pred[joint])), axis=-1) for joint in
+            joint: np.mean(np.abs(np.degrees(np.abs(angles_gt[joint] - angles_pred[joint]))), axis=-1) for joint in
             angles_gt.keys()
         }
         all_angle_errors = np.concatenate([angle_errors[joint].flatten() for joint in angle_errors.keys()])
@@ -375,16 +496,16 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         angle_s = np.std(all_angle_errors)
 
         # Combine the results across all joints by averaging across the frames for all joints for the statistics
-        stat_angle_error = np.mean(list(angle_errors.values()), axis=0)
+        stat_angle_error = np.std(list(angle_errors.values()), axis=0)
 
         pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(aligned_gt, aligned_pred)
         velocity_m, velocity_s = metrics.mean_velocity_error(aligned_gt, aligned_pred, sample_rate=25)
         pcc, pvalue = calculate_joint_correlations(aligned_gt, aligned_pred)
 
-        print('GT_length angle')
-        print(np.size(angles_gt['right_shoulder_angles'], 0))
-        print('Pred_length angle')
-        print(np.size(angles_pred['right_shoulder_angles'], 0))
+        #print('GT_length angle')
+        #print(np.size(angles_gt['right_shoulder_angles'], 0))
+        #print('Pred_length angle')
+        #print(np.size(angles_pred['right_shoulder_angles'], 0))
 
         # Calculate metrics in parallel using multiprocessing
         pmpjpe, velocity, pcc_single = calculate_metrics_for_sample(aligned_gt, aligned_pred, sample_rate=25)
@@ -448,7 +569,7 @@ def main():
     """
     Run inference on the chosen model with sweep parameters and log results to wandb project.
     """
-    directory = '/home/emanu/Downloads/MediapipeSingle/combined'
+    directory = '/home/emanu/Desktop/MediapipeSingle/combined'
 
     # List of all files in the directory
     all_files = os.listdir(directory)
@@ -460,8 +581,24 @@ def main():
     all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single = (
         process_and_calculate_metrics_for_groups(grouped_files, directory))
 
+    # Saving the variables as .pkl files
+    with open('all_metrics.pkl', 'wb') as f:
+        pickle.dump(all_metrics, f)
+
+    with open('keypoints_metrics.pkl', 'wb') as f:
+        pickle.dump(keypoints_metrics, f)
+
+    with open('all_metrics_single.pkl', 'wb') as f:
+        pickle.dump(all_metrics_single, f)
+
+    with open('keypoints_metrics_single.pkl', 'wb') as f:
+        pickle.dump(keypoints_metrics_single, f)
+
     # Compare metrics of each group with 'none.pkl' group
     p_values = compare_metrics_with_none_group(all_metrics_single)
+
+    with open('p_values.pkl', 'wb') as f:
+        pickle.dump(p_values, f)
 
     # Convert results to DataFrames and save to CSV
     all_metrics_df = pd.DataFrame.from_dict(all_metrics, orient='index')
@@ -490,7 +627,64 @@ def main():
         print(f"Statistical significance of differences for group {suffix}:")
         print(pvals)
 
-    # Now, metrics_results contains metrics for each group, you can log them to wandb or print them
+    # Plot metrics_results contains metrics for each group
+    for suffix, metrics_data in all_metrics.items():
+        print(f"Overall metrics for group {suffix}:")
+        print(metrics_data)
+
+    for suffix, metrics_data in keypoints_metrics.items():
+        print(f"Keypoint-specific metrics for group {suffix}:")
+        print(metrics_data)
+
+def main_load():
+    # Load metrics
+    with open('all_metrics_single.pkl', 'rb') as f:
+        all_metrics_single = pickle.load(f)
+
+    with open('all_metrics.pkl', 'rb') as f:
+        all_metrics = pickle.load(f)
+
+    with open('keypoints_metrics.pkl', 'rb') as f:
+        keypoints_metrics = pickle.load(f)
+
+    with open('keypoints_metrics_single.pkl', 'rb') as f:
+        keypoints_metrics_single = pickle.load(f)
+
+
+    # Compare metrics of each group with 'none.pkl' group
+    p_values = compare_metrics_with_none_group(all_metrics_single)
+
+    with open('p_values.pkl', 'wb') as f:
+        pickle.dump(p_values, f)
+
+    # Convert results to DataFrames and save to CSV
+    all_metrics_df = pd.DataFrame.from_dict(all_metrics, orient='index')
+    all_metrics_df.to_csv('all_metrics.csv')
+
+    keypoints_metrics_df = pd.DataFrame.from_dict({(i, j): keypoints_metrics[i][j]
+                                                   for i in keypoints_metrics.keys()
+                                                   for j in keypoints_metrics[i].keys()}, orient='index')
+    keypoints_metrics_df.to_csv('keypoints_metrics.csv')
+
+    all_metrics_single_df = pd.DataFrame.from_dict(all_metrics_single, orient='index')
+    all_metrics_single_df.to_csv('all_metrics_single.csv')
+
+    keypoints_metrics_single_df = pd.DataFrame.from_dict({(i, j): keypoints_metrics_single[i][j]
+                                                          for i in keypoints_metrics_single.keys()
+                                                          for j in keypoints_metrics_single[i].keys()}, orient='index')
+    keypoints_metrics_single_df.to_csv('keypoints_metrics_single.csv')
+
+    p_values_df = pd.DataFrame.from_dict({(i, j): p_values[i][j]
+                                          for i in p_values.keys()
+                                          for j in range(len(p_values[i]))}, orient='index')
+    p_values_df.to_csv('p_values.csv')
+
+    # Print the p-values to see if any differences are statistically significant
+    for suffix, pvals in p_values.items():
+        print(f"Statistical significance of differences for group {suffix}:")
+        print(pvals)
+
+    # Plot metrics_results contains metrics for each group
     for suffix, metrics_data in all_metrics.items():
         print(f"Overall metrics for group {suffix}:")
         print(metrics_data)
