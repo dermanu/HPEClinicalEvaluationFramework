@@ -174,6 +174,7 @@ class Normalize:
 class Framework:
     def __init__(self, model_name, model_type, sample_rate, directory, sweep_id=None):
         # Access the parsed arguments
+        self.default_camera_fallback = None
         self.joint_names = None
         self.model_name = model_name
         self.model_type = model_type
@@ -193,7 +194,7 @@ class Framework:
         morph = [5, 6, 12, 15, 16, 18, 20, 21, 22, 24, 25]
 
         self.participants = ['par4', 'par19', 'par11', 'par23']
-        self.participants = ['par4']
+        # self.participants = ['par4']
 
         # Defines movement number in dataset related to different movement categories
         self.movement_category = {
@@ -201,12 +202,6 @@ class Framework:
             "lower": [5, 6, 7, 8],
             "complex": [9, 10, 11, 12, 13],
             "sitting": [14, 15, 16, 17]
-        }
-        self.movement_category = {
-            "upper": [1, 2],
-            "lower": [5, 6],
-            "complex": [9, 10],
-            "sitting": [14, 15]
         }
 
         # Defines body segments
@@ -251,7 +246,7 @@ class Framework:
         Load the morphing model for the specified model name
         :return model_skel_morph: Morphing model for the specified model name
         """
-        morph_model_path = f"skeletonMorphing/models/model_skeleton_morph_{self.model_name}.pth"
+        morph_model_path = f"skeletonMorphing\models\model_skeleton_morph_{self.model_name}_best.pth"
         model_skel_morph = modelSkeletonMorphing.Synthesizer(dropout_rate=0)
         if os.path.isfile(morph_model_path):
             model_skel_morph.load_state_dict(torch.load(morph_model_path))
@@ -422,19 +417,28 @@ class Framework:
         Run inference on the chosen model with sweep parameters and log results to wandb project.
         """
         with wandb.init(config=config) as run:
-            # If called by wandb.agent, as below, this config will be set by Sweep Controller
             config = wandb.config
             run.name = f"{config.model_name}-{config.movement}-{config.augmentation}"
 
+            # Parse default_camera
+            if hasattr(config, 'default_camera'):
+                default_camera = [int(cam) for cam in config.default_camera.split('_')]
+            else:
+                # Fallback to default cameras if not set
+                default_camera = [int(cam) for cam in self.default_camera_fallback.split('_')]
+
             # Determine cameras based on augmentation type
             if 'cameras_' in config.augmentation:
-                cameras = list(map(int, config.augmentation.replace('cameras_', '').split('_')))
+                cameras = [int(cam) for cam in config.augmentation.replace('cameras_', '').split('_')]
+            elif config.augmentation == 'none':
+                cameras = default_camera
             else:
-                cameras = config.default_camera
+                # Handle other augmentation types if they affect camera selection
+                cameras = default_camera
 
+            print(f"Using cameras: {cameras}")
             wandb.log({'cameras': cameras})
 
-            # Generate cv2 video API and load respective ground truth keypoints
             gt_keypoints_all = []
             pred_keypoints_all = []
             inference_times_all = []
@@ -477,6 +481,7 @@ class Framework:
 
                         # Desynchronize video streams
                         if config._items['augmentation'] == 'desynchronize':
+                            #caps = [cap for _, cap in caps]
                             caps = self.cam_desynchronizer.desynchronize(caps)
 
                         # Load camera parameter matrix and add noise if specified so
@@ -509,13 +514,18 @@ class Framework:
                                 12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
                             }
 
-                    # Add min and max values for normalization of pose_gt
                     gt_keypoints_np = np.array(gt_keypoints)
                     if gt_keypoints_np.shape != pred_keypoints.shape:
                         print(gt_keypoints.shape)
                         print(pred_keypoints.shape)
                         assert gt_keypoints_np.shape == pred_keypoints.shape, "Not the same shape. Bummer!"
 
+                    # Postprocess predicted keypoints
+                    pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
+                                                                       self.interpolation_fun,
+                                                                       self.smoothing_fun)
+
+                    # Add min and max values for normalization of pose_gt
                     self.scaler.add_key_from_vector(gt_keypoints_np, "pose_gt")
 
                     # Procrustes Alignment
@@ -524,12 +534,6 @@ class Framework:
 
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
                     pred_keypoints = self.apply_morphing(pred_keypoints)
-
-
-                    # Postprocess predicted keypoints
-                    pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
-                                                                       self.interpolation_fun,
-                                                                       self.smoothing_fun)
 
                     # Add joint names
                     pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
@@ -577,6 +581,7 @@ class Framework:
             wandb.log({"sample_number_pred": samples_pred})
             wandb.log({"procrustes_number": samples_gt - error_count_all})
 
+
     def total_frames(self, data):
         key = 'right_shoulder'  # Random keypoint to calculate number of frames
         total = 0
@@ -621,6 +626,7 @@ class Framework:
                 },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
+                   # 'values': ['sitting']
                 }
             }
         }
@@ -634,9 +640,12 @@ class Framework:
                                'cameras_0', 'cameras_1', 'cameras_2', 'cameras_3', 'cameras_4', 'cameras_5']
                 },
                 'default_camera': {
-                    'value': [5]
+                    'value': '5'
                 }
             }
+        
+            self.default_camera_fallback = '5'
+            
         elif self.model_type == 'multi':
             # Sweep parameters
             parameters_dict = {
@@ -647,9 +656,11 @@ class Framework:
                                'cameras_0_4_3', 'cameras_5_4_1', 'cameras_0_4_3_2']
                 },
                 'default_camera': {
-                    'value': [4, 0]
+                    'value': '0_4'
                 }
             }
+
+            self.default_camera_fallback = '0_4'
 
         self.sweep_config['parameters'].update(parameters_dict)
 
@@ -667,8 +678,8 @@ class Framework:
 
 
 # Run the framework
-framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
-                      directory="/media/emanu/Emanuel Backup/ClinicalMoCapEvaluation/MoCap/segmented", sweep_id=None)
+framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
+                      directory="C:/Users/vizlab_stud/emanuel/MoCap/segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 

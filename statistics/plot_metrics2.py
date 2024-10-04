@@ -3,82 +3,237 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from setuptools.command.rotate import rotate
 
 # Load the necessary data (adjust the file paths as necessary)
-with open('multi/all_metrics_single.pkl', 'rb') as f:
+with open('all_metrics_single.pkl', 'rb') as f:
     all_metrics_single = pickle.load(f)
 
-with open('multi/keypoints_metrics.pkl', 'rb') as f:
+with open('keypoints_metrics.pkl', 'rb') as f:
     keypoints_metrics = pickle.load(f)
 
-with open('multi/p_values.pkl', 'rb') as f:
+with open('p_values.pkl', 'rb') as f:
     p_values = pickle.load(f)
 
+with open('angle_errors_metrics.pkl', 'rb') as f:
+    angle_errors_metrics = pickle.load(f)
 
-############################################
-## 1. Comparison of Joint-Specific Errors ##
-############################################
-## 1.1 Grouped Boxplot, for each joint (make left-right difference visible)
-def plot_boxplot_joint_errors(all_metrics_single):
-    data = []
-    for condition, metrics in all_metrics_single.items():
-        for joint, values in metrics['joint_errors'].items():
-            for value in values:
-                data.append(
-                    {'Condition': condition, 'Joint': joint, 'Error': value[0]})  # Assuming the first element is error
 
-    df = pd.DataFrame(data)
+# Preparing a dictionary to store data for each augmentation
+metrics_dict = {}
 
-    plt.figure(figsize=(12, 6))
-    sns.boxplot(data=df, x='Joint', y='Error', hue='Condition')
-    plt.title('Joint-Specific Error Comparison')
-    plt.ylabel('Error')
-    plt.xticks(rotation=45)
+for condition, metrics in all_metrics_single.items():
+    # Extract the augmentation name
+    augmentation = condition  # This assumes `condition` is the augmentation name
+
+    # Create a dictionary for this specific augmentation
+    augmentation_metrics = {}
+
+    # Extract 'pmpjpe' (mean) values
+    augmentation_metrics['pmpjpe'] = [pmpjpe_value[0] for pmpjpe_value in metrics['pmpjpe']]
+
+    # Extract 'angular' (angle metrics)
+    augmentation_metrics['angular'] = [angular_value for angular_value in metrics['angle']]
+
+    # Extract 'velocity' (mean) values
+    augmentation_metrics['velocity'] = [velocity_value[0] for velocity_value in metrics['velocity']]
+
+    # Extract 'pcc' values
+    augmentation_metrics['pcc'] = [pcc_value for pcc_value in metrics['pcc']]
+
+    # Add this augmentation's metrics to the main dictionary
+    metrics_dict[augmentation] = augmentation_metrics
+
+import pickle
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Predefine custom y-axis labels for each metric
+y_labels = {
+    'pmpjpe': 'Overall PMPJE in [mm]',
+    'angular': 'Overall joint angle in [°]',
+    'velocity': 'Overall joint speed in [m/s]',
+    'pcc': 'Overall PCC'
+}
+
+# Define the custom order for augmentations (using original names)
+augmentation_order = [
+    'background', 'defocus', 'occlusion', 'underexposure',
+    'cameras_0', 'cameras_1', 'cameras_2', 'cameras_3', 'cameras_4', 'cameras_5',
+    'upper', 'lower', 'complex', 'sitting'
+]
+
+# Define a mapping from the original names to the display names
+augmentation_display_names = {
+    'background': 'Background',
+    'defocus': 'Defocus',
+    'occlusion': 'Occlusion',
+    'underexposure': 'Underexposure',
+    'cameras_0': 'Camera 0',
+    'cameras_1': 'Camera 1',
+    'cameras_2': 'Camera 2',
+    'cameras_3': 'Camera 3',
+    'cameras_4': 'Camera 4',
+    'cameras_5': 'Camera 5',
+    'upper': 'Upper',
+    'lower': 'Lower',
+    'complex': 'Complex',
+    'sitting': 'Sitting'
+}
+
+# Create a dictionary to store DataFrames for each metric
+metric_dfs = {}
+
+# Prepare separate DataFrames for each metric
+for metric_name in ['pmpjpe', 'angular', 'velocity', 'pcc']:
+    augmentation_list = []
+    value_list = []
+
+    # Loop through the dictionary and unpack data into lists
+    for augmentation, metrics in metrics_dict.items():
+        if augmentation != 'none':
+            values = metrics[metric_name]
+            augmentation_list.extend([augmentation_display_names[augmentation]] * len(values))  # Apply display names
+            value_list.extend(values)
+
+    # Create a DataFrame for each metric and set augmentation as a categorical variable with a specific order
+    metric_dfs[metric_name] = pd.DataFrame({
+        'augmentation': pd.Categorical(augmentation_list,
+                                       categories=[augmentation_display_names[aug] for aug in augmentation_order],
+                                       ordered=True),
+        'value': value_list
+    })
+
+# Define a color palette for the plots
+palette = sns.color_palette("Set2")
+
+# Plot separate boxplots for each metric with enhanced readability
+metrics_to_plot = ['pmpjpe', 'angular', 'velocity', 'pcc']
+f, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 12))
+
+for i, metric in enumerate(metrics_to_plot):
+    row, col = divmod(i, 2)
+    # Create the boxplot with the specified order
+    sn = sns.boxplot(
+            x='augmentation',
+            y='value',
+            data=metric_dfs[metric],
+            palette=palette,
+            showfliers=False,
+            order=[augmentation_display_names[aug] for aug in augmentation_order],
+            ax = axes[row, col]
+    )
+
+
+    # Set the title and labels on the correct axis
+    axes[row, col].set_title(metric.capitalize(), fontsize=16)
+    axes[row, col].set_ylabel(y_labels[metric], fontsize=14)  # Use predefined y-axis labels
+    axes[row, col].set_xlabel('', fontsize=14)  # Use predefined y-axis labels
+    # Set the x-ticks to the augmentation names explicitly
+    #sn.set_xticks(range(len(augmentation_order)), labels = [augmentation_display_names[aug] for aug in augmentation_order], rotation=45, fontsize=12)
+
+    # Rotate x-tick labels for better readability
+    axes[row, col].tick_params(axis='x', rotation=45, labelsize=12)
+
+
+    # Tighten layout if needed
     plt.tight_layout()
-    plt.show()
 
-## 1.2 Skeleton Diagram with Keypoints Color-Coded
-def plot_skeleton_diagram(keypoints_metrics, condition_to_plot='Condition1'):
-    keypoint_coords = {
-        'head': (0, 10), 'neck': (0, 8),
-        'left_shoulder': (-2, 8), 'right_shoulder': (2, 8),
-        'left_elbow': (-3, 6), 'right_elbow': (3, 6),
-        'left_hand': (-4, 4), 'right_hand': (4, 4),
-        'torso': (0, 6), 'left_hip': (-1, 4), 'right_hip': (1, 4),
-        'left_knee': (-1, 2), 'right_knee': (1, 2),
-        'left_foot': (-1, 0), 'right_foot': (1, 0),
-    }
+# Show all plots
+plt.show()
 
-    keypoints = list(keypoints_metrics[condition_to_plot].keys())
-    metric_values = [keypoints_metrics[condition_to_plot][kp]['pmpjpe_m'] for kp in keypoints]
+# Select the condition
+condition = 'cameras_5'  # Replace with your condition
 
-    norm = plt.Normalize(min(metric_values), max(metric_values))
-    colors = plt.cm.viridis(norm(metric_values))
+# Get the angular errors for the selected condition
+angle_error_data = angle_errors_metrics[condition]
+angle_means = angle_error_data['all_angle_error_m']
+angle_stds = angle_error_data['all_angle_error_s']
 
-    plt.figure(figsize=(8, 8))
-    for i, kp in enumerate(keypoints):
-        x, y = keypoint_coords[kp]
-        plt.scatter(x, y, color=colors[i], s=100)
-        plt.text(x + 0.1, y, kp, fontsize=9, ha='left', va='center')
+# Define joint positions
+joints = {
+    'head': (0, 10),
+    'neck': (0, 8),
+    'left_shoulder': (-2, 8),
+    'right_shoulder': (2, 8),
+    'left_elbow': (-3, 6),
+    'right_elbow': (3, 6),
+    'left_wrist': (-4, 4),
+    'right_wrist': (4, 4),
+    'spine': (0, 6),
+    'left_hip': (-1, 4),
+    'right_hip': (1, 4),
+    'left_knee': (-1, 2),
+    'right_knee': (1, 2),
+    'left_ankle': (-1, 0),
+    'right_ankle': (1, 0),
+}
 
-    skeleton_edges = [('head', 'neck'), ('neck', 'left_shoulder'), ('neck', 'right_shoulder'),
-                      ('left_shoulder', 'left_elbow'), ('right_shoulder', 'right_elbow'),
-                      ('left_elbow', 'left_hand'), ('right_elbow', 'right_hand'),
-                      ('neck', 'torso'), ('torso', 'left_hip'), ('torso', 'right_hip'),
-                      ('left_hip', 'left_knee'), ('right_hip', 'right_knee'),
-                      ('left_knee', 'left_foot'), ('right_knee', 'right_foot')]
+# Define bones
+bones = [
+    ('head', 'neck'),
+    ('neck', 'left_shoulder'),
+    ('neck', 'right_shoulder'),
+    ('left_shoulder', 'left_elbow'),
+    ('right_shoulder', 'right_elbow'),
+    ('left_elbow', 'left_wrist'),
+    ('right_elbow', 'right_wrist'),
+    ('neck', 'spine'),
+    ('spine', 'left_hip'),
+    ('spine', 'right_hip'),
+    ('left_hip', 'left_knee'),
+    ('right_hip', 'right_knee'),
+    ('left_knee', 'left_ankle'),
+    ('right_knee', 'right_ankle'),
+]
 
-    for edge in skeleton_edges:
-        kp1, kp2 = edge
-        x1, y1 = keypoint_coords[kp1]
-        x2, y2 = keypoint_coords[kp2]
-        plt.plot([x1, x2], [y1, y2], 'k-', lw=2)
+# Map angles to joints
+angle_to_joint_map = {
+    'left_shoulder_angles': 'left_shoulder',
+    'right_shoulder_angles': 'right_shoulder',
+    'left_elbow_angles': 'left_elbow',
+    'right_elbow_angles': 'right_elbow',
+    'left_hip_angles': 'left_hip',
+    'right_hip_angles': 'right_hip',
+    'left_knee_angles': 'left_knee',
+    'right_knee_angles': 'right_knee',
+}
 
-    plt.title(f'Per-Keypoint PMPJPE Mean for {condition_to_plot}')
-    plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='viridis'), label='PMPJPE Mean')
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
+# Create the plot
+fig, ax = plt.subplots(figsize=(8, 12))
+
+# Plot bones
+for bone in bones:
+    joint1, joint2 = bone
+    x_values = [joints[joint1][0], joints[joint2][0]]
+    y_values = [joints[joint1][1], joints[joint2][1]]
+    ax.plot(x_values, y_values, 'k-', linewidth=2)
+
+# Plot joints
+for joint_name, (x, y) in joints.items():
+    ax.plot(x, y, 'ko', markersize=8)
+
+# Annotate joints with angular errors
+for angle_name, joint_name in angle_to_joint_map.items():
+    if angle_name in angle_means:
+        mean_error = angle_means[angle_name]
+        std_error = angle_stds[angle_name]
+        x, y = joints[joint_name]
+        ax.text(x + 0.3, y, f"{mean_error:.2f}° ({std_error:.2f}°)", fontsize=10, color='blue')
+
+# Adjust plot aesthetics
+ax.set_aspect('equal')
+ax.set_xlim(-5, 5)
+ax.set_ylim(-1, 11)
+ax.axis('off')
+ax.set_title(f"Mean (Std) Angular Errors for Condition: {condition}", fontsize=14)
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+
 
 
 #########################################################
@@ -189,8 +344,6 @@ def plot_heatmap_camera_placement(keypoints_metrics):
     plot_heatmap_augmentations(keypoints_metrics, metric='pmpjpe_m')
 
 # Running the plotting functions
-plot_boxplot_joint_errors(all_metrics_single)
-plot_skeleton_diagram(keypoints_metrics)
 plot_joint_center_similarity(all_metrics_single)
 plot_effect_size_forest(p_values)
 plot_boxplot_augmentations(all_metrics_single)
@@ -270,8 +423,7 @@ def plot_effect_size_forest_movement_types(p_values):
 
 
 # Running the plotting functions
-plot_boxplot_joint_errors(all_metrics_single)
-plot_skeleton_diagram(keypoints_metrics)
+
 plot_joint_center_similarity(all_metrics_single)
 plot_effect_size_forest(p_values)
 plot_boxplot_augmentations(all_metrics_single)

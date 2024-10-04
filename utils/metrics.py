@@ -729,6 +729,33 @@ def calculate_icc(gt_data, pred_data):
     return icc_a1, icc_lb, icc_up
 
 
+def calculate_ccc(data1, data2):
+    dct = {
+        'y_true': data1,
+        'y_pred': data2
+    }
+    df = pd.DataFrame(dct)
+    # Remove NaNs
+    df = df.dropna()
+    # Pearson product-moment correlation coefficients
+    y_true = df['y_true']
+    y_pred = df['y_pred']
+    cor = np.corrcoef(y_true, y_pred)[0][1]
+    # Means
+    mean_true = np.mean(y_true)
+    mean_pred = np.mean(y_pred)
+    # Population variances
+    var_true = np.var(y_true)
+    var_pred = np.var(y_pred)
+    # Population standard deviations
+    sd_true = np.std(y_true)
+    sd_pred = np.std(y_pred)
+    # Calculate CCC
+    numerator = 2 * cor * sd_true * sd_pred
+    denominator = var_true + var_pred + (mean_true - mean_pred) ** 2
+    ccc = numerator / denominator
+    return ccc
+
 def calculate_bias(gt_data, pred_data):
     return np.mean(pred_data - gt_data, axis=0)
 

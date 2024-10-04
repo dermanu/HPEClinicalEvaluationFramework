@@ -24,6 +24,20 @@ def is_data_normal(data, alpha=0.05):
     return normal
 
 
+def count_nan_frames(pred_frames):
+    """
+    Count the number of frames containing NaN values for all joints in both the ground truth and predicted arrays.
+    :param pred_frames: Ground truth keypoints array [frames, joints, 3]
+    :return: Number of frames with NaN values for any joint
+    """
+    # Check for NaN values in both the ground truth and predicted arrays
+    nan_pred_frames = np.all(np.isnan(pred_frames), axis=(0, 2))
+
+    # Count the total number of frames with NaN values
+    nan_frame_count = np.sum(nan_pred_frames)
+    return nan_frame_count
+
+
 def bootstrap_confidence_interval(data1, data2, n_resamples=1000, alpha=0.05, paired=True):
     """
     Calculate the bootstrap confidence interval for the mean difference.
@@ -157,7 +171,7 @@ def calculate_metrics_for_sample(aligned_gt, aligned_pred, sample_rate):
     return pmpjpe, velocity, pcc
 
 
-def compare_metrics_with_none_group(data, alpha=0.05):
+def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
     """
     Compare different data augmentation methods to the original data,
     including normality check to decide between t-test and Wilcoxon test.
@@ -172,8 +186,8 @@ def compare_metrics_with_none_group(data, alpha=0.05):
     - results: dictionary with p-values, confidence intervals, and effect sizes, and differences
      for each metric and augmentation
     """
-    baseline = data['none']
-    other_conditions = {k: v for k, v in data.items() if k != 'none'}
+    baseline = data[default_camera]
+    other_conditions = {k: v for k, v in data.items() if k != default_camera}
     metrics_data = baseline.keys()
     results = {}
     unpaired_conditions = ['lower', 'upper', 'complex', 'sitting']
@@ -195,6 +209,10 @@ def compare_metrics_with_none_group(data, alpha=0.05):
             aug_mean = np.mean(aug_data)
             diff_percent = ((base_mean - aug_mean) / base_mean) * 100 if base_mean != 0 else 0
             diff_total = aug_mean - base_mean
+
+            # Bootstrap CI for mean difference
+            conf_int = bootstrap_confidence_interval(base_data, aug_data, n_resamples=1000, alpha=alpha,
+                                                     paired=False)
 
             if condition_name in unpaired_conditions:
                 # Unpaired data
@@ -223,9 +241,8 @@ def compare_metrics_with_none_group(data, alpha=0.05):
 
                 p_values.append(p_value)
 
-                # Bootstrap CI for mean difference
-                # conf_int = bootstrap_confidence_interval(base_data, aug_data, n_resamples=1000, alpha=alpha,
-                #                                         paired=False)
+                # Unpaired metrics calculations
+                # ccc = metrics.calculate_ccc(base_data, aug_data)
 
                 # Significant flag will be updated after correction
                 test_results.append({
@@ -239,7 +256,7 @@ def compare_metrics_with_none_group(data, alpha=0.05):
                     'effect_interpretation': effect_interpret,
                     'bias_percent': diff_percent,
                     'bias': diff_total,
-                    # Paired metrics set to None
+                    # Paired-only metrics set to None
                     'pearsons_r': None,
                     'icc': None,
                     'icclb': None,
@@ -277,14 +294,10 @@ def compare_metrics_with_none_group(data, alpha=0.05):
 
                 p_values.append(p_value)
 
-                # Bootstrap CI for mean difference
-                conf_int = bootstrap_confidence_interval(base_data, aug_data, n_resamples=1000, alpha=alpha,
-                                                         paired=True)
-
                 # Paired metrics calculations
                 icc, icclb, iccup = metrics.calculate_icc(base_data, aug_data)
                 sem, mdc = metrics.calculate_sem_mdc(np.std(aug_data - base_data), icc)
-                pearson_r = metrics.calculate_pearson_r(base_data, aug_data)
+                pearson_r, _ = metrics.calculate_pearson_r(base_data, aug_data)
 
                 # Significant flag will be updated after correction
                 test_results.append({
@@ -442,6 +455,7 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
     all_metrics_single = {}
     keypoints_metrics = {}
     keypoints_metrics_single = {}
+    angle_errors_metrics = {}
 
     for suffix, files in grouped_files.items():
         print(f"Calculating metrics for conditions with suffix: {suffix}")
@@ -467,10 +481,8 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         combined_gt_keypoints = np.concatenate(combined_gt_keypoints, axis=1)
         combined_infer_time = np.concatenate(combined_infer_time, axis=0)
 
-        #print('GT_length input')
-        #print(np.size(combined_gt_keypoints, 1))
-        #print('Pred_length input')
-        #print(np.size(combined_pred_keypoints, 1))
+        # Count number of NANs
+        nan_frame_count = count_nan_frames(combined_pred_keypoints)
 
         # Align keypoints using Procrustes alignment
         aligned_gt, aligned_pred, error_count = align_procrustes_old(combined_gt_keypoints, combined_pred_keypoints)
@@ -484,13 +496,23 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
         #print('Pred_length proc')
         #print(np.size(aligned_pred, 0))
 
-        # Calculate metrics (adapt this part based on the metrics you want)
+        # Calculate metrics
         angles_gt = angle_metrics_tpose.calculate_angles_tpose(aligned_gt)
         angles_pred = angle_metrics_tpose.calculate_angles_tpose(aligned_pred)
         angle_errors = {
             joint: np.mean(np.abs(np.degrees(np.abs(angles_gt[joint] - angles_pred[joint]))), axis=-1) for joint in
             angles_gt.keys()
         }
+        all_angle_error_m = { joint: np.mean(angle_errors[joint], axis=0)
+                             for joint in angle_errors.keys() }
+        all_angle_error_s = { joint: np.std(angle_errors[joint], axis=0)
+                             for joint in angle_errors.keys() }
+
+        angle_errors_metrics[suffix] = {
+            'all_angle_error_m': all_angle_error_m,
+            'all_angle_error_s': all_angle_error_s
+        }
+
         all_angle_errors = np.concatenate([angle_errors[joint].flatten() for joint in angle_errors.keys()])
         angle_m = np.mean(all_angle_errors)
         angle_s = np.std(all_angle_errors)
@@ -519,12 +541,10 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
             'velocity_m': velocity_m,
             'velocity_s': velocity_s,
             'pcc': pcc,
-            'pvalue': pvalue,
-
-
             'inference_time_mean': np.mean(combined_infer_time),
             'inference_time_std': np.std(combined_infer_time),
-            'sample_num': np.size(aligned_gt, 0)
+            'sample_num': np.size(aligned_gt, 0),
+            'sample_nan_num': nan_frame_count
         }
 
         # Store the metrics for each single sample
@@ -562,7 +582,7 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
                 'sample_num': np.size(gt_keypoint, 1)
             }
 
-    return all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single
+    return all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single, angle_errors_metrics
 
 
 def main():
@@ -578,8 +598,12 @@ def main():
     grouped_files = group_files_by_suffix(all_files)
 
     # Process each group and calculate metrics
-    all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single = (
-        process_and_calculate_metrics_for_groups(grouped_files, directory))
+    all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single, angle_errors_metrics = (
+        process_and_calculate_metrics_for_groups(grouped_files, directory)
+    )
+
+    with open('angle_errors_metrics.pkl', 'wb') as f:
+        pickle.dump(angle_errors_metrics, f)
 
     # Saving the variables as .pkl files
     with open('all_metrics.pkl', 'wb') as f:
@@ -594,8 +618,10 @@ def main():
     with open('keypoints_metrics_single.pkl', 'wb') as f:
         pickle.dump(keypoints_metrics_single, f)
 
-    # Compare metrics of each group with 'none.pkl' group
-    p_values = compare_metrics_with_none_group(all_metrics_single)
+    # Compare metrics of each group with baseline group
+    perform_statistical_analysis(all_metrics_single)
+
+    p_values = compare_metrics_with_none_group(all_metrics_single, default_camera='cameras_5')
 
     with open('p_values.pkl', 'wb') as f:
         pickle.dump(p_values, f)
@@ -622,6 +648,23 @@ def main():
                                           for j in range(len(p_values[i]))}, orient='index')
     p_values_df.to_csv('p_values.csv')
 
+    data_for_df = []
+    for suffix, angle_data in angle_errors_metrics.items():
+        for angle_name in angle_data['all_angle_error_m'].keys():
+            data_for_df.append({
+                'suffix': suffix,
+                'angle_name': angle_name,
+                'angle_error_mean': angle_data['all_angle_error_m'][angle_name],
+                'angle_error_std': angle_data['all_angle_error_s'][angle_name]
+            })
+
+    # Create DataFrame
+    angle_errors_df = pd.DataFrame(data_for_df)
+
+    # Save to CSV
+    angle_errors_df.to_csv('angle_errors_metrics.csv', index=False)
+
+
     # Print the p-values to see if any differences are statistically significant
     for suffix, pvals in p_values.items():
         print(f"Statistical significance of differences for group {suffix}:")
@@ -636,26 +679,31 @@ def main():
         print(f"Keypoint-specific metrics for group {suffix}:")
         print(metrics_data)
 
+
+
+
 def main_load():
     # Load metrics
-    with open('all_metrics_single.pkl', 'rb') as f:
+    with open('single/all_metrics_single.pkl', 'rb') as f:
         all_metrics_single = pickle.load(f)
 
-    with open('all_metrics.pkl', 'rb') as f:
+    with open('single/all_metrics.pkl', 'rb') as f:
         all_metrics = pickle.load(f)
 
-    with open('keypoints_metrics.pkl', 'rb') as f:
+    with open('single/keypoints_metrics.pkl', 'rb') as f:
         keypoints_metrics = pickle.load(f)
 
-    with open('keypoints_metrics_single.pkl', 'rb') as f:
+    with open('single/keypoints_metrics_single.pkl', 'rb') as f:
         keypoints_metrics_single = pickle.load(f)
 
 
     # Compare metrics of each group with 'none.pkl' group
-    p_values = compare_metrics_with_none_group(all_metrics_single)
 
-    with open('p_values.pkl', 'wb') as f:
-        pickle.dump(p_values, f)
+    perform_statistical_analysis(all_metrics_single)
+    #p_values = compare_metrics_with_none_group(all_metrics_single, default_camera='cameras_5')
+
+    #with open('p_values.pkl', 'wb') as f:
+    #    pickle.dump(p_values, f)
 
     # Convert results to DataFrames and save to CSV
     all_metrics_df = pd.DataFrame.from_dict(all_metrics, orient='index')
@@ -693,5 +741,135 @@ def main_load():
         print(f"Keypoint-specific metrics for group {suffix}:")
         print(metrics_data)
 
+def perform_statistical_analysis(all_metrics_single, metric_name='angle'):
+    import pandas as pd
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    from scipy.stats import levene
+    import statsmodels.api as sm
+    from statsmodels.formula.api import ols
+    import pingouin as pg
+    from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    import numpy as np
+
+    # Prepare the DataFrame
+    metrics_list = []
+    movement_types = ['upper', 'lower', 'complex', 'sitting']
+
+    for movement_type in movement_types:
+        if movement_type in all_metrics_single:
+            metrics = all_metrics_single[movement_type]
+            metric_values = metrics[metric_name]  # Use the metric_name variable
+            for value in metric_values:
+                metrics_list.append({
+                    'movement_type': movement_type,
+                    'metric_value': value[0] if isinstance(value, (list, np.ndarray)) else value  # Adjust indexing if necessary
+                })
+        else:
+            print(f"Warning: Movement type '{movement_type}' not found in all_metrics_single.")
+
+    # Create DataFrame
+    df = pd.DataFrame(metrics_list)
+
+    # Save the DataFrame for reporting
+    df.to_csv(f'{metric_name}_movement_type_metrics.csv', index=False)
+
+    # Check homogeneity of variances
+    grouped_data = [group['metric_value'].values for _, group in df.groupby('movement_type')]
+    stat, p = levene(*grouped_data)
+    print(f"Levene's test p-value: {p}")
+
+    # Save Levene's test results
+    levene_results_df = pd.DataFrame({
+        'statistic': [stat],
+        'p_value': [p]
+    })
+    levene_results_df.to_csv(f'{metric_name}_levene_test_results.csv', index=False)
+
+    if p < 0.05:
+        print("Variances are unequal across groups. Proceeding with Welch's ANOVA.")
+        # Perform Welch's ANOVA
+        welch_anova_results = pg.welch_anova(dv='metric_value', between='movement_type', data=df)
+        print(welch_anova_results)
+        # Save Welch's ANOVA results
+        welch_anova_results.to_csv(f'{metric_name}_anova_results.csv', index=False)
+        # Extract Partial Eta Squared
+        eta_squared = welch_anova_results['np2'][0]
+        print(f"Partial Eta Squared: {eta_squared:.5f}")
+        interpretation = interpret_eta_squared(eta_squared)
+        # Save effect size with interpretation
+        effect_size_df = pd.DataFrame({
+            'Effect_Size_Type': ['Partial Eta Squared'],
+            'Effect_Size_Value': [eta_squared],
+            'Interpretation': [interpretation]
+        })
+        effect_size_df.to_csv(f'{metric_name}_effect_size.csv', index=False)
+        # Post-hoc test: Games-Howell
+        posthoc_results = pg.pairwise_gameshowell(dv='metric_value', between='movement_type', data=df)
+        print(posthoc_results)
+        # Save post-hoc test results
+        posthoc_results.to_csv(f'{metric_name}_posthoc_results.csv', index=False)
+    else:
+        print("Variances are equal across groups. Proceeding with One-Way ANOVA.")
+        # Fit the model
+        model = ols('metric_value ~ C(movement_type)', data=df).fit()
+        anova_table = sm.stats.anova_lm(model, typ=2)
+        print(anova_table)
+        # Save ANOVA table
+        anova_table.to_csv(f'{metric_name}_anova_results.csv', index=True)
+        # Calculate effect size (eta squared)
+        eta_squared = anova_table['sum_sq']['C(movement_type)'] / anova_table['sum_sq'].sum()
+        print(f"Eta Squared: {eta_squared:.5f}")
+        interpretation = interpret_eta_squared(eta_squared)
+        # Save effect size with interpretation
+        effect_size_df = pd.DataFrame({
+            'Effect_Size_Type': ['Eta Squared'],
+            'Effect_Size_Value': [eta_squared],
+            'Interpretation': [interpretation]
+        })
+        effect_size_df.to_csv(f'{metric_name}_effect_size.csv', index=False)
+        # Post-hoc test: Tukey's HSD
+        tukey = pairwise_tukeyhsd(endog=df['metric_value'], groups=df['movement_type'], alpha=0.05)
+        print(tukey)
+        # Convert tukey results to DataFrame for better display
+        tukey_df = pd.DataFrame(data=tukey._results_table.data[1:], columns=tukey._results_table.data[0])
+        print(tukey_df)
+        # Save Tukey HSD results
+        tukey_df.to_csv(f'{metric_name}_posthoc_results.csv', index=False)
+
+    # Visualize the results
+    sns.boxplot(x='movement_type', y='metric_value', data=df)
+    plt.title(f'Measurement Accuracy Across Movement Types ({metric_name.capitalize()})')
+    plt.xlabel('Movement Type')
+    plt.ylabel(metric_name.capitalize())
+    plt.tight_layout()
+    plt.savefig(f'{metric_name}_boxplot.png')
+    plt.show()
+
+def interpret_eta_squared(eta_squared):
+    if eta_squared < 0.01:
+        interpretation = 'small effect'
+    elif 0.01 <= eta_squared < 0.06:
+        interpretation = 'medium effect'
+    elif 0.06 <= eta_squared < 0.14:
+        interpretation = 'large effect'
+    else:
+        interpretation = 'very large effect'
+    print(f"Effect Size Interpretation: {interpretation}")
+    return interpretation
+
+
+def interpret_eta_squared(eta_squared):
+    if eta_squared < 0.01:
+        interpretation = 'small effect'
+    elif 0.01 <= eta_squared < 0.06:
+        interpretation = 'medium effect'
+    elif 0.06 <= eta_squared < 0.14:
+        interpretation = 'large effect'
+    else:
+        interpretation = 'very large effect'
+    print(f"Effect Size Interpretation: {interpretation}")
+
 
 main()
+
