@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.frameAugmentation import FrameAugmentor
 import mediapipe as mp
 from mediapipe.tasks.python import vision
-from models.dlt import DLT
+from models.dlt import DLT, weighted_DLT
 
 # Load the pose landmarker model once to avoid reloading it multiple times
 options = mp.tasks.vision.PoseLandmarkerOptions(
@@ -21,6 +21,7 @@ def process_frame(cap, frameaug=None, sweep_config=None):
         return None
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
     if frameaug is not None and sweep_config is not None:
         rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
@@ -58,6 +59,7 @@ def inference_video(caps, projections, sweep_config=None):
                     print(f"Error processing frame: {e}")
 
             frame_keypoints = np.zeros((33, num_cameras, 2))
+            confidences = np.zeros((33, num_cameras))
             valid_detections = True  # Flag to check if all cameras detected poses
 
             if len(rgb_frames) == num_cameras:
@@ -69,6 +71,7 @@ def inference_video(caps, projections, sweep_config=None):
                         for idx, pose_landmarks in enumerate(landmarks):
                             frame_keypoints[:, cam_idx, 0] = [landmark.x for landmark in pose_landmarks]
                             frame_keypoints[:, cam_idx, 1] = [landmark.y for landmark in pose_landmarks]
+                            confidences[:, cam_idx] =[landmark.visibility for landmark in pose_landmarks]
                     else:
                         valid_detections = False
                         print(f"No valid detection from camera {cam_idx}. Skipping triangulation.")
@@ -79,7 +82,7 @@ def inference_video(caps, projections, sweep_config=None):
 
             if valid_detections:
                 # print(f"Triangulating for frame {frame_number}")
-                points_3d = DLT(projections, frame_keypoints)
+                points_3d = weighted_DLT(projections, frame_keypoints, confidences)
                 # keypoints_data.append(points_3d.cpu().numpy())
                 keypoints_data.append(points_3d)
 
@@ -89,9 +92,11 @@ def inference_video(caps, projections, sweep_config=None):
                 # print(f"Frame {frame_number} processed successfully.")
 
                 if len(rgb_frames) >= 2:
+                    # Rotate each image in rgb_frames by 90 degrees clockwise
+                    rgb_frames = [np.rot90(frame, k=-1) for frame in rgb_frames]
                     last_rgb_frame = np.concatenate((rgb_frames), axis=1)
                 elif len(rgb_frames) == 1:
-                    last_rgb_frame = rgb_frames[0]
+                    last_rgb_frame = np.rot90(rgb_frames[0], k=-1)
             else:
                 keypoints_data.append(np.full((33, 3), np.nan))
                 inference_time.append(np.nan)

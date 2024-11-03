@@ -12,7 +12,7 @@ def occlusion(frame):
     h, w = frame.shape[:2]
 
     # Define the size of the occlusion
-    occlusion_size = np.random.uniform(0.05, 0.15)
+    occlusion_size = np.random.uniform(0.1, 0.25)
 
     # Compute the width and height of the occlusion
     cutout_width = int(w * occlusion_size)
@@ -30,7 +30,7 @@ def occlusion(frame):
     mask[y1:y2, x1:x2] = 1
 
     # Apply Gaussian noise to the cutout region
-    noise = iaa.AdditiveGaussianNoise(scale=0.1 * 255).augment_image(frame)
+    noise = iaa.AdditiveGaussianNoise(scale=0.5 * 255).augment_image(frame)
     frame[mask == 1] = noise[mask == 1]
 
     return frame
@@ -58,7 +58,7 @@ def underexposure(frame):
 
 def defocus(frame):
     # Add blur to simulate out of focus
-    aug = iaa.imgcorruptlike.DefocusBlur(severity=2)
+    aug = iaa.imgcorruptlike.DefocusBlur(severity=3)
     return aug(image=frame)
 
 

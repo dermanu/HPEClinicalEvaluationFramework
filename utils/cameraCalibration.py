@@ -2,6 +2,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import yaml
 
 
 def read_camera_parameters(camera_id, base_path='./utils/'):
@@ -65,33 +66,26 @@ def make_homogeneous_rep_matrix(R, t):
     return P
 
 
-def get_projection_matrix(camera_ids, noise=False):
+def get_projection_matrix(camera_ids, noise=False, file_path='P_values.yaml'):
     if isinstance(camera_ids, int):
         camera_ids = [camera_ids]
 
     projection_matrices = {}
-    camera_positions = []
-    camera_orientations = []
+    with open(file_path, 'r') as yaml_file:
+        P_dict = yaml.safe_load(yaml_file)
 
     for camera_id in camera_ids:
-        try:
-            cmtx, dist = read_camera_parameters(camera_id)
-            R, t = read_rotation_translation(camera_id)
+        cam_key = f"Camera_{camera_id}"
+        if cam_key in P_dict:
+            P = np.array(P_dict[cam_key])
+            P[:, 3] = P[:, 3] / 1000  # Convert translation to meters
+        if noise:
+            noise_percent = 0.05
+            rg = np.random.default_rng(1)
+            P[:, :3] = P[:, :3] + np.random.normal(size=P[:, :3].shape, loc=np.mean(P[:, :3]) * noise_percent, scale=np.std(P[:, :3]) * noise_percent)
+            P[:, 3] = P[:, 3] + np.random.normal(size=P[:, 3].shape, loc=np.mean(P[:, 3]) * noise_percent, scale=np.abs(np.mean(P[:, 3])) * noise_percent)
 
-            if noise:
-                rg = np.random.default_rng(1)
-                R = R + np.random.normal(size=R.shape, loc=np.mean(R) * 0.02, scale=np.std(R) * 0.02)
-                t = t + np.random.normal(size=t.shape, loc=np.mean(t) * 0.02, scale=np.abs(np.mean(t)) * 0.02)
-
-            P = cmtx @ make_homogeneous_rep_matrix(R, t)[:3, :]
-            projection_matrices[camera_id] = P
-            camera_positions.append(t)
-            camera_orientations.append(R)
-        except (IndexError, ValueError) as e:
-            print(f"Error processing camera {camera_id}: {e}")
-
-    return projection_matrices, camera_positions, camera_orientations
-
+    return P
 
 def plot_cameras(camera_positions, camera_orientations):
     fig = plt.figure()

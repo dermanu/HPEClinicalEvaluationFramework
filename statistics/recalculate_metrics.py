@@ -589,7 +589,7 @@ def main():
     """
     Run inference on the chosen model with sweep parameters and log results to wandb project.
     """
-    directory = '/home/emanu/Desktop/MediapipeSingle/combined'
+    directory = '/home/emanu/Desktop/MediapipeMulti3/combined'
 
     # List of all files in the directory
     all_files = os.listdir(directory)
@@ -621,7 +621,7 @@ def main():
     # Compare metrics of each group with baseline group
     perform_statistical_analysis(all_metrics_single)
 
-    p_values = compare_metrics_with_none_group(all_metrics_single, default_camera='cameras_5')
+    p_values = compare_metrics_with_none_group(all_metrics_single, default_camera='cameras_4_0')
 
     with open('p_values.pkl', 'wb') as f:
         pickle.dump(p_values, f)
