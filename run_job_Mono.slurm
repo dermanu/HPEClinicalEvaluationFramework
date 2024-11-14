@@ -7,8 +7,6 @@
 #SBATCH --mem=64G                  # Adjust memory if needed
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/%x_%j.log     # Save logs with job name and ID
-#SBATCH --mail-user=emanueal@ntnu.no
-#SBATCH --mail-type=ALL
 
 # Load required modules
 module purge
