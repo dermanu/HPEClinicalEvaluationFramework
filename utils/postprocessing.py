@@ -87,6 +87,7 @@ def postprocess_points(p3ds, filter_type='median', interpolation_type='Akima'):
         p3ds = np.apply_along_axis(akima_interpolation, 0, p3ds)
     else:
         p3ds = np.apply_along_axis(linear_interpolation, 0, p3ds)
+
     if filter_type == 'spline':
         p3ds = np.apply_along_axis(butterworth_smoothing, 0, p3ds, k=3)
     elif filter_type == 'kalman':

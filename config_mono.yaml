@@ -1,0 +1,22 @@
+program: evaluation_pipeline.py
+name: EvaluationFramework
+command:
+  - python
+  - -m
+  - skeletonMorphing.trainSkeletonMorphing
+method: grid
+parameters:
+  model_type:
+    value: mono
+  model_name:
+    value: mediapipe
+  sample_rate:
+    value: 25
+  dataset_path:
+    value: C:/Users/vizlab_stud/emanuel/MoCap/segmented
+  movement:
+    values: [upper, lower, sitting, complex]
+  augmentation:
+    values: [none, defocus, underexposure, occlusion, background, cameras_0, cameras_1, cameras_2, cameras_3, cameras_4, cameras_5]
+  default_camera:
+    value: [5]

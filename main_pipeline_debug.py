@@ -32,6 +32,55 @@ def log_frame_example(frame):
     image = wandb.Image(frame)
     wandb.log({"Example_Frame": image})
 
+    import numpy as np
+
+    def align_rigid(target, prediction):
+        """
+        Rigid alignment (translation and rotation) without scaling.
+        :param target: Ground truth 3D joint positions, shape [samples, joints, 3]
+        :param prediction: Predicted 3D joint positions, shape [samples, joints, 3]
+        :return: Aligned predictions, shape [samples, joints, 3]
+        """
+        assert target.shape == prediction.shape, 'Shapes of target and prediction must match'
+
+        pred_aligned = []
+        error_count = 0
+
+        for i in range(target.shape[0]):
+            gt = target[i]
+            pred = prediction[i]
+
+            try:
+                # Subtract mean (centroid alignment)
+                gt_mean = gt.mean(axis=0)
+                pred_mean = pred.mean(axis=0)
+                gt_centered = gt - gt_mean
+                pred_centered = pred - pred_mean
+
+                # Compute optimal rotation using SVD
+                H = pred_centered.T @ gt_centered
+                U, S, Vt = np.linalg.svd(H)
+                R = Vt.T @ U.T
+
+                # Ensure proper rotation (determinant should be +1)
+                if np.linalg.det(R) < 0:
+                    Vt[-1, :] *= -1
+                    R = Vt.T @ U.T
+
+                # Rotate prediction
+                pred_rotated = pred_centered @ R
+
+                # Translate prediction to match ground truth
+                pred_aligned_frame = pred_rotated + gt_mean
+                pred_aligned.append(pred_aligned_frame)
+            except Exception as e:
+                error_count += 1
+                pred_aligned.append(np.full_like(pred, np.nan))
+                continue
+
+        pred_aligned = np.array(pred_aligned)
+        return pred_aligned, error_count
+
 
 def align_procrustes(target, prediction):
     """
@@ -471,7 +520,7 @@ class Framework:
 
                         # Desynchronize video streams
                         if config._items['augmentation'] == 'desynchronize':
-                            caps = [cap for _, cap in caps]
+                            #caps = [cap for _, cap in caps]
                             caps = self.cam_desynchronizer.desynchronize(caps)
 
                         # Load camera parameter matrix and add noise if specified so
@@ -616,6 +665,7 @@ class Framework:
                 },
                 'movement': {
                     'values': ['upper', 'lower', 'sitting', 'complex']
+                   # 'values': ['sitting']
                 }
             }
         }
@@ -642,7 +692,7 @@ class Framework:
                                'cameras_0_4_3', 'cameras_5_4_1', 'cameras_0_4_3_2']
                 },
                 'default_camera': {
-                    'value': [4, 0]
+                    'value': [0, 4]
                 }
             }
 
@@ -661,9 +711,11 @@ class Framework:
         wandb.agent(self.sweep_id, function=self.main)
 
 
+if __main__ == "__main__":
 # Run the framework
-framework = Framework(model_name="mediapipe", model_type="multi", sample_rate=25,
-                      directory="C:/Users/vizlab_stud/emanuel/MoCap/segmented", sweep_id='gohgtomd')
+
+framework = Framework(model_name="mediapipe", model_type=sys.argv[1], sample_rate=25,
+                      directory="C:/Users/vizlab_stud/emanuel/MoCap/segmented", sweep_id='9lw5do54')
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 

@@ -9,7 +9,7 @@ from models.dlt import DLT
 
 # Load the pose landmarker model once to avoid reloading it multiple times
 options = mp.tasks.vision.PoseLandmarkerOptions(
-    base_options=mp.tasks.BaseOptions(model_asset_path='models/pose_landmarker_full.task'),
+    base_options=mp.tasks.BaseOptions(model_asset_path='models/pose_landmarker_heavy.task'),
     running_mode=mp.tasks.vision.RunningMode.IMAGE)
 PoseLandmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
 

@@ -12,7 +12,7 @@ def occlusion(frame):
     h, w = frame.shape[:2]
 
     # Define the size of the occlusion
-    occlusion_size = np.random.uniform(0.05, 0.15)
+    occlusion_size = np.random.uniform(0.1, 0.25)
 
     # Compute the width and height of the occlusion
     cutout_width = int(w * occlusion_size)
@@ -30,7 +30,7 @@ def occlusion(frame):
     mask[y1:y2, x1:x2] = 1
 
     # Apply Gaussian noise to the cutout region
-    noise = iaa.AdditiveGaussianNoise(scale=0.1 * 255).augment_image(frame)
+    noise = iaa.AdditiveGaussianNoise(scale=0.5 * 255).augment_image(frame)
     frame[mask == 1] = noise[mask == 1]
 
     return frame
@@ -58,7 +58,7 @@ def underexposure(frame):
 
 def defocus(frame):
     # Add blur to simulate out of focus
-    aug = iaa.imgcorruptlike.DefocusBlur(severity=2)
+    aug = iaa.imgcorruptlike.DefocusBlur(severity=3)
     return aug(image=frame)
 
 
@@ -95,15 +95,19 @@ class FrameAugmentor:
 
 class CameraDesynchronizer:
     def __init__(self):
-        self.rng = np.random.default_rng(1)
+        self.rng = np.random.default_rng(42)
 
     # Desynchronize frames for multiple cameras by starting at different frames. This should be sufficient to simulate
     # different offset. However, not desynchronisation of long recordings due to clock drift.
     def desynchronize(self, caps):
         # Open video file at different offset frames
         caps_offset = []
-        for cap in caps:
-            frame_offset = self.rng.integers(low=0, high=1, size=1)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_offset)
-            caps_offset.append(cap)
+
+        for cam_id, cap in caps:  # Unpack the tuple (camera_id, cap) from caps
+            frame_offset = self.rng.integers(low=0, high=1, size=1)  # This returns a NumPy array
+            frame_offset = int(frame_offset[0])  # Convert the array to a scalar integer
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_offset)  # Set the frame offset for the VideoCapture object
+            caps_offset.append((cam_id, cap))  # Append the tuple (camera_id, cap) to the offset list
+
         return caps_offset
