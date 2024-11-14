@@ -11,12 +11,11 @@
 
 # Load required modules
 module purge
-module load GCCcore/13.3.0
-module swap GCCcore/13.3.0 GCCcore/12.3.0
 module load Python/3.11.3-GCCcore-12.3.0
 module load FFmpeg/6.0-GCCcore-12.3.0
 module PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
-source ~/cluster/home/emanueal/HPE/bin/activate
+module torchvision/0.16.0-foss-2023a-CUDA-12.1.1
+source ~/cluster/home/emanueal/EVAL/bin/activate
 
 # Display job details
 echo "Job directory: $SLURM_SUBMIT_DIR"
@@ -32,4 +31,4 @@ video_path="/cluster/home/emanueal/Desktop/MoCap/segmented/"
 cd /cluster/home/emanueal/Documents/HPEClinicalEvaluationFramework
 python evaluation_pipeline.py "$video_path"
 
-deactivate
+python -m venv /cluster/home/emanueal/EVAL
