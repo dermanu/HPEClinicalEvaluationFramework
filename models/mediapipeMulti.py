@@ -1,10 +1,11 @@
 import cv2
+cv2.setUseOptimized(True)
+cv2.setNumThreads(2)
 import numpy as np
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.frameAugmentation import FrameAugmentor
 import mediapipe as mp
-from mediapipe.tasks.python import vision
 from models.dlt import DLT, weighted_DLT
 
 # Load the pose landmarker model once to avoid reloading it multiple times

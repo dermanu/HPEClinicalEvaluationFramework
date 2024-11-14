@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import os
 import cv2
+cv2.setUseOptimized(True)
+cv2.setNumThreads(2)
 
 
 def align_keypoints(keypoints_org):

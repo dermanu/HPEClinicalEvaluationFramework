@@ -1,5 +1,5 @@
 program: evaluation_pipeline.py
-name: EvaluationFramework
+name: MultiEval
 command:
   - python
   - -m
@@ -7,7 +7,7 @@ command:
 method: grid
 parameters:
   model_type:
-    values: multi
+    value: multi
   model_name:
     value: mediapipe
   sample_rate:

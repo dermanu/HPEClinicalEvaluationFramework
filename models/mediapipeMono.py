@@ -1,9 +1,10 @@
 import cv2
+cv2.setUseOptimized(True)
+cv2.setNumThreads(2)
 import numpy as np
 import time
 from utils.frameAugmentation import FrameAugmentor
 import mediapipe as mp
-from mediapipe.tasks.python import vision
 
 # Load the pose landmarker model once to avoid reloading it multiple times
 options = mp.tasks.vision.PoseLandmarkerOptions(

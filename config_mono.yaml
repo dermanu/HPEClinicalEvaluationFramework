@@ -1,5 +1,5 @@
 program: evaluation_pipeline.py
-name: EvaluationFramework
+name: MonoEval
 command:
   - python
   - -m

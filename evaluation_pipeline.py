@@ -5,6 +5,8 @@ import numpy as np
 import yaml
 import torch
 import cv2
+cv2.setUseOptimized(True)
+cv2.setNumThreads(2)
 from tqdm import tqdm
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
