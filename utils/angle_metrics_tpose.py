@@ -88,13 +88,14 @@ def get_bone_lengths(kpts):
 
 #Here we define the T pose and we normalize the T pose by the length of the hips to neck distance.
 def get_base_skeleton(kpts, normalization_bone='neck'):
-    #this defines a generic skeleton to which we can apply rotations to
     body_lengths = kpts['bone_lengths']
     normalization = kpts['bone_lengths'][normalization_bone]
 
     directions = {
-        'left_hip': np.array([1, 0, 0]), 'left_knee': np.array([0, -1, 0]), 'left_ankle': np.array([0, -1, 0]),
-        'right_hip': np.array([-1, 0, 0]), 'right_knee': np.array([0, -1, 0]), 'right_ankle': np.array([0, -1, 0]),
+        'left_hip': np.array([1, 0.2, 0]),
+        'left_knee': np.array([0, -1, 0]), 'left_ankle': np.array([0, -1, 0]),
+        'right_hip': np.array([-1, -0.2, 0]),
+        'right_knee': np.array([0, -1, 0]), 'right_ankle': np.array([0, -1, 0]),
         'neck': np.array([0, 1, 0]),
         'left_shoulder': np.array([1, 0, 0]), 'left_elbow': np.array([1, 0, 0]), 'left_wrist': np.array([1, 0, 0]),
         'right_shoulder': np.array([-1, 0, 0]), 'right_elbow': np.array([-1, 0, 0]),
@@ -103,14 +104,13 @@ def get_base_skeleton(kpts, normalization_bone='neck'):
         'left_foot_index': np.array([0.5, -0.5, 0]), 'right_foot_index': np.array([-0.5, -0.5, 0])
     }
 
-    #base skeleton set by multiplying offset directions by measured bone lengths. In this case we use the average of two sided limbs. E.g left and right hip averaged
+    # Use individual bone lengths for left and right sides
     base_skeleton = {'hips': np.array([0, 0, 0])}
 
-    for joint_type in ['hip', 'knee', 'ankle', 'shoulder', 'elbow', 'wrist']:
-        base_skeleton['left_' + joint_type] = directions['left_' + joint_type] * (
-                (body_lengths['left_' + joint_type] + body_lengths['right_' + joint_type]) / (2 * normalization))
-        base_skeleton['right_' + joint_type] = directions['right_' + joint_type] * (
-                (body_lengths['left_' + joint_type] + body_lengths['right_' + joint_type]) / (2 * normalization))
+    for side in ['left', 'right']:
+        for joint_type in ['hip', 'knee', 'ankle', 'shoulder', 'elbow', 'wrist']:
+            joint_name = f'{side}_{joint_type}'
+            base_skeleton[joint_name] = directions[joint_name] * (body_lengths[joint_name] / normalization)
 
     base_skeleton['neck'] = directions['neck'] * (body_lengths['neck'] / normalization)
 
@@ -119,6 +119,7 @@ def get_base_skeleton(kpts, normalization_bone='neck'):
     kpts['normalization'] = normalization
 
     return kpts
+
 
 #calculate the rotation of the root joint with respect to the world coordinates
 def get_hips_position_and_rotation(frame_pos, root_joint = 'hips', root_define_joints = ['left_hip', 'neck']):
@@ -176,9 +177,13 @@ def get_rotation_chain(joint, hierarchy, frame_rotations):
 
 #calculate the joint angles frame by frame.
 def calculate_joint_angles(keypoints):
-    # Initialize container for joint angles
+    # Joints to exclude from the final angles output
+    exclude_joints_from_output = ['hips', 'neck', 'left_heel', 'right_heel', 'left_foot_index', 'right_foot_index']
+
+    # Initialize container for joint angles for joints not in exclude list
     for joint in keypoints['joints']:
-        keypoints[joint + '_angles'] = []
+        if joint not in exclude_joints_from_output:
+            keypoints[joint + '_angles'] = []
 
     num_frames = keypoints['hips'].shape[0]
 
@@ -193,19 +198,26 @@ def calculate_joint_angles(keypoints):
             frame_pos[joint] -= root_position
 
         # Ensure the hierarchy is respected in processing
-        for depth in range(1, max(len(keypoints['hierarchy'][joint]) for joint in keypoints['joints']) + 1):
+        max_depth = max(len(keypoints['hierarchy'][joint]) for joint in keypoints['joints'])
+        for depth in range(1, max_depth + 1):
             for joint in [j for j in keypoints['joints'] if len(keypoints['hierarchy'][j]) == depth]:
                 if joint not in frame_rotations:
-                    joint_rs = get_joint_rotations(joint, keypoints['hierarchy'], keypoints['offset_directions'], frame_rotations, frame_pos)
+                    joint_rs = get_joint_rotations(joint, keypoints['hierarchy'], keypoints['offset_directions'],
+                                                   frame_rotations, frame_pos)
                     frame_rotations[joint] = joint_rs
 
         # Update dictionary with current angles
         for joint in keypoints['joints']:
-            keypoints[joint + '_angles'].append(frame_rotations.get(joint, np.array([0., 0., 0.])))
+            if joint not in exclude_joints_from_output:
+                keypoints[joint + '_angles'].append(frame_rotations.get(joint, np.array([0., 0., 0.])))
 
     # Convert joint angles list to numpy arrays
     for joint in keypoints['joints']:
-        keypoints[joint + '_angles'] = np.array(keypoints[joint + '_angles'])
+        if joint not in exclude_joints_from_output:
+            keypoints[joint + '_angles'] = np.array(keypoints[joint + '_angles'])
+
+    #print(f"Frame {framenum}, Left Hip Angles (rad): {frame_rotations['left_hip']}")
+    #print(f"Frame {framenum}, Right Hip Angles (rad): {frame_rotations['right_hip']}")
 
     return keypoints
 
@@ -222,11 +234,15 @@ def process_chunk(keypoints_chunk, num_keypoints):
     get_base_skeleton(filtered_keypoints)
     angles_chunk = calculate_joint_angles(filtered_keypoints)
 
+    # Exclude unwanted joints from the angles dictionary
+    exclude_joints_from_output = ['hips', 'neck', 'left_heel', 'right_heel', 'left_foot_index', 'right_foot_index']
     angles_dict = {}
     for joint in angles_chunk['joints']:
-        angles_dict[joint + '_angles'] = angles_chunk[joint + '_angles']
+        if joint not in exclude_joints_from_output:
+            angles_dict[joint + '_angles'] = angles_chunk[joint + '_angles']
 
     return angles_dict
+
 
 def calculate_angles_tpose(keypoints, chunk_size=2500):
     combined_angles = {}

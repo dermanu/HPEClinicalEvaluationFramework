@@ -32,55 +32,6 @@ def log_frame_example(frame):
     image = wandb.Image(frame)
     wandb.log({"Example_Frame": image})
 
-    import numpy as np
-
-    def align_rigid(target, prediction):
-        """
-        Rigid alignment (translation and rotation) without scaling.
-        :param target: Ground truth 3D joint positions, shape [samples, joints, 3]
-        :param prediction: Predicted 3D joint positions, shape [samples, joints, 3]
-        :return: Aligned predictions, shape [samples, joints, 3]
-        """
-        assert target.shape == prediction.shape, 'Shapes of target and prediction must match'
-
-        pred_aligned = []
-        error_count = 0
-
-        for i in range(target.shape[0]):
-            gt = target[i]
-            pred = prediction[i]
-
-            try:
-                # Subtract mean (centroid alignment)
-                gt_mean = gt.mean(axis=0)
-                pred_mean = pred.mean(axis=0)
-                gt_centered = gt - gt_mean
-                pred_centered = pred - pred_mean
-
-                # Compute optimal rotation using SVD
-                H = pred_centered.T @ gt_centered
-                U, S, Vt = np.linalg.svd(H)
-                R = Vt.T @ U.T
-
-                # Ensure proper rotation (determinant should be +1)
-                if np.linalg.det(R) < 0:
-                    Vt[-1, :] *= -1
-                    R = Vt.T @ U.T
-
-                # Rotate prediction
-                pred_rotated = pred_centered @ R
-
-                # Translate prediction to match ground truth
-                pred_aligned_frame = pred_rotated + gt_mean
-                pred_aligned.append(pred_aligned_frame)
-            except Exception as e:
-                error_count += 1
-                pred_aligned.append(np.full_like(pred, np.nan))
-                continue
-
-        pred_aligned = np.array(pred_aligned)
-        return pred_aligned, error_count
-
 
 def align_procrustes(target, prediction):
     """
@@ -223,6 +174,7 @@ class Normalize:
 class Framework:
     def __init__(self, model_name, model_type, sample_rate, directory, sweep_id=None):
         # Access the parsed arguments
+        self.default_camera_fallback = None
         self.joint_names = None
         self.model_name = model_name
         self.model_type = model_type
@@ -465,19 +417,28 @@ class Framework:
         Run inference on the chosen model with sweep parameters and log results to wandb project.
         """
         with wandb.init(config=config) as run:
-            # If called by wandb.agent, as below, this config will be set by Sweep Controller
             config = wandb.config
             run.name = f"{config.model_name}-{config.movement}-{config.augmentation}"
 
+            # Parse default_camera
+            if hasattr(config, 'default_camera'):
+                default_camera = [int(cam) for cam in config.default_camera.split('_')]
+            else:
+                # Fallback to default cameras if not set
+                default_camera = [int(cam) for cam in self.default_camera_fallback.split('_')]
+
             # Determine cameras based on augmentation type
             if 'cameras_' in config.augmentation:
-                cameras = list(map(int, config.augmentation.replace('cameras_', '').split('_')))
+                cameras = [int(cam) for cam in config.augmentation.replace('cameras_', '').split('_')]
+            elif config.augmentation == 'none':
+                cameras = default_camera
             else:
-                cameras = config.default_camera
+                # Handle other augmentation types if they affect camera selection
+                cameras = default_camera
 
+            print(f"Using cameras: {cameras}")
             wandb.log({'cameras': cameras})
 
-            # Generate cv2 video API and load respective ground truth keypoints
             gt_keypoints_all = []
             pred_keypoints_all = []
             inference_times_all = []
@@ -679,9 +640,12 @@ class Framework:
                                'cameras_0', 'cameras_1', 'cameras_2', 'cameras_3', 'cameras_4', 'cameras_5']
                 },
                 'default_camera': {
-                    'value': [5]
+                    'value': '5'
                 }
             }
+        
+            self.default_camera_fallback = '5'
+            
         elif self.model_type == 'multi':
             # Sweep parameters
             parameters_dict = {
@@ -692,9 +656,11 @@ class Framework:
                                'cameras_0_4_3', 'cameras_5_4_1', 'cameras_0_4_3_2']
                 },
                 'default_camera': {
-                    'value': [0, 4]
+                    'value': '0_4'
                 }
             }
+
+            self.default_camera_fallback = '0_4'
 
         self.sweep_config['parameters'].update(parameters_dict)
 
@@ -711,11 +677,9 @@ class Framework:
         wandb.agent(self.sweep_id, function=self.main)
 
 
-if __main__ == "__main__":
 # Run the framework
-
-framework = Framework(model_name="mediapipe", model_type=sys.argv[1], sample_rate=25,
-                      directory="C:/Users/vizlab_stud/emanuel/MoCap/segmented", sweep_id='9lw5do54')
+framework = Framework(model_name="mediapipe", model_type="mono", sample_rate=25,
+                      directory="C:/Users/vizlab_stud/emanuel/MoCap/segmented", sweep_id=None)
 framework.initiate_wandb_sweep()
 framework.run_sweep_agent()
 

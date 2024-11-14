@@ -59,6 +59,49 @@ def DLT(projection_matrices, points_2d):
     return np.array(points_3d)
 
 
+def weighted_DLT(projection_matrices, points_2d, likelihoods):
+    """
+    Weighted Direct Linear Transform (DLT) to triangulate 3D points from multiple camera views
+    based on 2D points and their likelihoods.
+
+    Parameters:
+    projection_matrices (list of ndarray): List of 3x4 projection matrices for each camera.
+    points_2d (ndarray): Array of 2D points with shape (n_keypoints, n_cams, 2).
+    likelihoods (ndarray): Array of likelihood scores with shape (n_keypoints, n_cams).
+
+    Returns:
+    ndarray: Array of triangulated 3D points with shape (n_keypoints, 3).
+    """
+    n_keypoints = points_2d.shape[0]
+    n_views = points_2d.shape[1]
+    points_3d = []
+
+    # Loop over each keypoint
+    for k in range(n_keypoints):
+        A = []
+
+        # For each view/camera, add weighted equations to A for the current keypoint
+        for i in range(n_views):
+            P = projection_matrices[i]
+            point = points_2d[k, i]
+            weight = likelihoods[k, i]
+
+            # Create the two weighted rows for this point/camera combination
+            A.append(weight * (point[1] * P[2, :] - P[1, :]))
+            A.append(weight * (P[0, :] - point[0] * P[2, :]))
+
+        A = np.array(A)
+
+        # Perform Singular Value Decomposition (SVD) to solve the system
+        U, s, Vh = linalg.svd(A)
+
+        # Normalize and store the triangulated 3D point
+        X = Vh[-1]
+        points_3d.append(X[:3] / X[3])
+
+    return np.array(points_3d)
+
+
 def read_camera_parameters(camera_id, folder='camera_parameters/'):
     """
     Reads the camera intrinsic matrix and distortion coefficients from a file.
@@ -132,3 +175,5 @@ def get_projection_matrix(camera_id, folder='camera_parameters/'):
     # Calculate projection matrix
     projection_matrix = cmtx @ make_homogeneous_rep_matrix(rvec, tvec)[:3, :]
     return projection_matrix
+
+
