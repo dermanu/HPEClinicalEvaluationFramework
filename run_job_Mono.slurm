@@ -1,10 +1,11 @@
 #!/bin/bash
-#SBATCH --partition=CPUQ
+#SBATCH --partition=GPUQ
 #SBATCH --account=ie-idi
-#SBATCH --time=0-48:00:00          # Adjust time as needed
+#SBATCH --time=0-00:15:00          # Adjust time as needed
 #SBATCH --nodes=1                   # 1 compute node
-#SBATCH --cpus-per-task=2           # 2 CPU cores
-#SBATCH --mem=32G                  # Adjust memory if needed
+#SBATCH --cpus-per-task=8           # 2 CPU cores
+#SBATCH --mem=64G                  # Adjust memory if needed
+#SBATCH --gres=gpu:1
 #SBATCH --output=logs/%x_%j.log     # Save logs with job name and ID
 #SBATCH --mail-user=emanueal@ntnu.no
 #SBATCH --mail-type=ALL
@@ -24,11 +25,7 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Nodes: $SLURM_JOB_NODELIST"
 echo "CPU cores per node: $SLURM_CPUS_ON_NODE"
 
-# Define the participant's video path
-video_path="/cluster/home/emanueal/Desktop/MoCap/segmented/"
-
 # Run the video processing script
 cd /cluster/home/emanueal/Documents/HPEClinicalEvaluationFramework
-python evaluation_pipeline.py "$video_path"
 
-python -m venv /cluster/home/emanueal/EVAL
+wandb agent dermanu/HPE_framework_3/se9s48z0 #Mono
