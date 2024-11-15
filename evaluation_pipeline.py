@@ -497,9 +497,13 @@ def sweep(model_type):
     # Initialize W&B sweep
     run = wandb.init(config=config)
 
-    Framework(model_name=config.model_name, model_type=config.model_type, sample_rate=config.sample_rate,
-                          directory=config.dataset_path).evaluation(config)
-
+    framework = Framework(
+        model_name=config['model_name'],
+        model_type=config['model_type'],
+        sample_rate=config['sample_rate'],
+        directory=config['dataset_path']
+    )
+    framework.evaluation(config)
     wandb.finish()
 
 
