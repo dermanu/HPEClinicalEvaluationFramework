@@ -1,7 +1,6 @@
 program: evaluation_pipeline.py
 name: MonoEval
 command:
-  - /venv
   - python
   - mono
 method: grid
