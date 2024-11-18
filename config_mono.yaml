@@ -2,8 +2,7 @@ program: evaluation_pipeline.py
 name: MonoEval
 command:
   - python
-  - -m
-  - skeletonMorphing.trainSkeletonMorphing
+  - mono
 method: grid
 parameters:
   model_type:
