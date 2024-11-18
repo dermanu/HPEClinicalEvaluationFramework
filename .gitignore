@@ -1,4 +1,7 @@
 venv/
 wandb/
 models/pose_landmarker_heavy.task
-
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
