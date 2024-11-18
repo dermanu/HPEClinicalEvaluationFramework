@@ -499,10 +499,10 @@ def sweep(model_type):
     print(config)
 
     framework = Framework(
-        model_name=config['model_name'],
-        model_type=config['model_type'],
-        sample_rate=config['sample_rate'],
-        directory=config['dataset_path']
+        model_name=config['parameters']['model_name']['value'],
+        model_type=config['parameters']['model_type']['value'],
+        sample_rate=config['parameters']['sample_rate']['value'],
+        directory=config['parameters']['dataset_path']['value'],
     )
     framework.evaluation(config)
     wandb.finish()
