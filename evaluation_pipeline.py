@@ -164,7 +164,7 @@ class Framework:
         :return model_skel_morph: Morphing model for the specified model name
         """
         model_path = f"skeletonMorphing/models/model_skeleton_morph_{self.model_name}_final.pth"
-        model_skel_morph = modelSkeletonMorphing.Synthesizer(dropout_rate=0, layer_size=1024)
+        model_skel_morph = modelSkeletonMorphing.Synthesizer(dropout_rate=0.1, layer_size=2048)
         if not os.path.isfile(model_path):
             raise ValueError(f'Morphing model not found at {model_path}')
 
@@ -496,7 +496,6 @@ def sweep(model_type):
 
     # Initialize W&B sweep
     run = wandb.init(config=config)
-    print(config)
 
     framework = Framework(
         model_name=config['parameters']['model_name']['value'],
