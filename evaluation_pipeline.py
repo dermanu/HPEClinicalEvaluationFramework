@@ -5,6 +5,9 @@ import numpy as np
 import yaml
 import torch
 import cv2
+
+from skeletonMorphing.loadMorphDatasets import model_type
+
 cv2.setUseOptimized(True)
 cv2.setNumThreads(2)
 from tqdm import tqdm
@@ -326,6 +329,7 @@ class Framework:
         """
         with wandb.init(config=config) as run:
             config = wandb.config
+            print(config)
             run.name = f"{config.model_name}-{config.movement}-{config.augmentation}"
             if 'cameras_' in config.augmentation:
                 cameras = list(map(int, config.augmentation.replace('cameras_', '').split('_')))
@@ -439,7 +443,7 @@ class Framework:
                             data = {'gt': gt_keypoints_example,
                                     'pred': pred_keypoints_example,
                                     'frame': frame_example}
-                            with open('results/' + run.name + str(mov) + '.pkl', 'wb') as file:
+                            with open('results/' + self.model_type + '/' + run.name + str(mov) + '.pkl', 'wb') as file:
                                 pickle.dump(data, file)
 
             # Save data for debugging
@@ -450,7 +454,7 @@ class Framework:
                             }
 
             # Save calculate keypoints for later
-            with open('results/' + run.name + '.pkl', 'wb') as file:
+            with open('results/' + self.model_type + '/' + run.name + '.pkl', 'wb') as file:
                 pickle.dump(data_to_save, file)
 
             print("Calculating metrics and logging to wandb")
