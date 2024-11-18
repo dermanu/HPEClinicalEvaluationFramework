@@ -496,6 +496,7 @@ def sweep(model_type):
 
     # Initialize W&B sweep
     run = wandb.init(config=config)
+    print(config)
 
     framework = Framework(
         model_name=config['model_name'],
