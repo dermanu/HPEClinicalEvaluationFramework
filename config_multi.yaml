@@ -4,7 +4,7 @@ command:
   - python
   - -m
   - evaluation_pipeline
-  - mono
+  - multi
 method: grid
 parameters:
   model_type:
