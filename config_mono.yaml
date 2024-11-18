@@ -2,6 +2,8 @@ program: evaluation_pipeline.py
 name: MonoEval
 command:
   - python
+  - m
+  - evaluation_pipeline
   - mono
 method: grid
 parameters:

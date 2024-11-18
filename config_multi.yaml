@@ -3,6 +3,7 @@ name: MultiEval
 command:
   - python
   - -m
+  - evaluation_pipeline.py
   - skeletonMorphing.trainSkeletonMorphing
 method: grid
 parameters:
