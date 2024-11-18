@@ -3,8 +3,8 @@ name: MultiEval
 command:
   - python
   - -m
-  - evaluation_pipeline.py
-  - skeletonMorphing.trainSkeletonMorphing
+  - evaluation_pipeline
+  - mono
 method: grid
 parameters:
   model_type:
