@@ -24,4 +24,4 @@ echo "CPU cores per node: $SLURM_CPUS_ON_NODE"
 # Run the video processing script
 cd /cluster/home/emanueal/Documents/HPEClinicalEvaluationFramework
 
-wandb agent dermanu/HPEClinicalEvaluationFramework/vsr7v79d #Mono
+wandb agent dermanu/HPEClinicalEvaluationFramework/7z7w8it7 #Mono
