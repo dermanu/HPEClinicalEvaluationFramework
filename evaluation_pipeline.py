@@ -163,7 +163,7 @@ class Framework:
         Load the morphing model for the specified model name
         :return model_skel_morph: Morphing model for the specified model name
         """
-        model_path = f"skeletonMorphing\models\model_skeleton_morph_{self.model_name}_best.pth"
+        model_path = f"skeletonMorphing/models/model_skeleton_morph_{self.model_name}_best.pth"
         model_skel_morph = modelSkeletonMorphing.Synthesizer(dropout_rate=0, layer_size=1024)
         if not os.path.isfile(model_path):
             raise ValueError(f'Morphing model not found at {model_path}')
