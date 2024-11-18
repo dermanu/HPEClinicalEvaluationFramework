@@ -1,0 +1,4 @@
+venv/
+wandb/
+models/pose_landmarker_heavy.task
+
