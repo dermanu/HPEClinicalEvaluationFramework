@@ -6,8 +6,6 @@ import yaml
 import torch
 import cv2
 
-from skeletonMorphing.loadMorphDatasets import model_type
-
 cv2.setUseOptimized(True)
 cv2.setNumThreads(2)
 from tqdm import tqdm
