@@ -14,7 +14,7 @@ parameters:
   sample_rate:
     value: 25
   dataset_path:
-    value: /cluster/home/emanueal/Desktop/MoCap/segmented
+    value: /cluster/home/emanueal/Desktop/MoCap
   movement:
     values: [upper, lower, sitting, complex]
   augmentation:
