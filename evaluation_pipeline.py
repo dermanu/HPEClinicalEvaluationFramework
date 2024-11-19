@@ -353,6 +353,7 @@ class Framework:
 
             for par in tqdm(self.participants, ascii=True, desc="Participant:"):
                 for mov in tqdm(self.movement_category[config.movement], ascii=True, desc="Movement:"):
+                    print(self.dataset_path)
 
                     gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, cameras)
                     if not gt_keypoints or not caps:
