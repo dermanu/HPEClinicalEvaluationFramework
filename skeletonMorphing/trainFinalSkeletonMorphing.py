@@ -35,10 +35,6 @@ def group_by_n(participants, n):
     return iter(lambda: list(islice(it, n)), [])
 
 
-#######################################################################################
-## Per-sample normalization may disrupt the spatial relationships between keypoints. ##
-## Consider normalizing using global statistics or per-feature normalization.        ##
-#######################################################################################
 def normalize_frames(frames):
     min_val = frames.min(dim=1, keepdim=True)[0]
     max_val = frames.max(dim=1, keepdim=True)[0]
@@ -91,27 +87,6 @@ def calculate_mpjpe(predicted_keypoints, target_keypoints):
     # Average over all joints and all samples
     mpjpe = distances.mean().item()
     return mpjpe
-
-class PairwiseDistanceLoss(nn.Module):
-    """
-    Computes a loss based on pairwise distances between keypoints.
-    Helps in preserving the structural relationships.
-    """
-    def __init__(self):
-        super(PairwiseDistanceLoss, self).__init__()
-
-    def forward(self, predicted_keypoints, target_keypoints):
-        """
-        Args:
-            predicted_keypoints (torch.Tensor): Predicted keypoints, shape (batch_size, num_keypoints, 3).
-            target_keypoints (torch.Tensor): Target keypoints, shape (batch_size, num_keypoints, 3).
-
-        Returns:
-            torch.Tensor: Pairwise distance loss.
-        """
-        pred_distances = torch.cdist(predicted_keypoints, predicted_keypoints)
-        target_distances = torch.cdist(target_keypoints, target_keypoints)
-        return F.mse_loss(pred_distances, target_distances)
 
 
 # Class for network training
@@ -182,64 +157,6 @@ class NetworkTrainer:
             scaler.update()
 
             losses.append(loss.detach().cpu().numpy().item())
-
-        return losses
-
-
-    @staticmethod
-    def validation(model, validation_loader, criterion):
-        '''
-        Validating model
-        :param model: Morphing model to be trained
-        :param validation_loader: Validation-specific dataset loader
-        :param criterion: Loss function
-        :return:
-        '''
-
-        # Initialize model for evaluation
-        model.eval()
-
-        # Start evaluation
-        with torch.no_grad():
-            # Initialize variables
-            losses = []
-
-            # Go through all batches of the validation dataset
-            for step, batch in enumerate(validation_loader):
-                pose_gt_batch = batch['pose_gt'].float().cuda() # Get ground truth (Qualisys)
-                pose_inf_batch = batch['pose_inf'].float().cuda() # Get inferred data (HPE)
-                conf_inf_batch = batch['confidences_inf'].float().cuda() # Get HPE prediction confidence score
-
-                # Randomly select one camera view                                                                       ###  consistent evaluation, you might want to fix the camera or average over all cameras.
-                #num_cameras = pose_inf_batch.size(1)
-                #random_camera = random.randint(0, num_cameras - 1)
-                #pose_inf_batch = pose_inf_batch[:, random_camera, :, :]
-
-                # Identify the camera with the highest confidence for each sample, only if the highest confidence > 0.6
-                best_camera = conf_inf_batch.mean(dim=2).argmax(dim=1)
-                batch_indices = torch.arange(pose_inf_batch.size(0), device=pose_inf_batch.device)
-                pose_inf_batch = pose_inf_batch[batch_indices, best_camera]
-
-                # Normalize input poses
-                # inp_poses, min_val, max_val = normalize_frames(pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)))
-                # output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2))
-
-                inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2))
-                output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2))
-
-                # Check if input and output have the same size (and are available). Otherwise, skip.
-                if inp_poses is None:
-                    print(f'Skipping validation batch {step} due to dimension mismatch')
-                    continue
-
-                # Forward pass
-                pred_poses = model(inp_poses)
-                #pred_poses = descale_frames(pred_poses, min_val, max_val)
-
-                # Compute loss
-                loss = criterion(pred_poses, output_poses)
-
-                losses.append(loss.detach().cpu().numpy().item())
 
         return losses
 
@@ -341,82 +258,6 @@ class NetworkTrainer:
         :return: None
         '''
 
-        # Splits participants into n-folds
-        num_vali = 2
-        folds = list(group_by_n(pars, num_vali))
-
-        # Initialize variables for the training
-        fold_id = 1
-
-        # Process each fold
-        for fold in tqdm(folds, desc='Fold:', leave=True, position=0):
-            if len(fold) < num_vali:
-                print(f"Skipping fold {fold_id} due to insufficient participants number")
-                continue
-
-            print(f"Starting Fold {fold_id} with participants: {fold}")
-
-            # Prepare training and validation datasets
-            try:
-                train_data = concat_dataset(data_dict, [y for y in pars if y not in fold])
-                validation_data = concat_dataset(data_dict, fold)
-            except Exception as e:
-                print(f"Error during dataset concatenation for fold {fold_id}: {e}")
-                continue
-
-            # Create samplers
-            try:
-                sampler_train = EveryNthSampler(train_data, config.n_samples)
-                shuffled_sampler_train = SubsetRandomSampler(list(sampler_train))
-                sampler_validation = EveryNthSampler(validation_data, config.n_samples)
-                shuffled_sampler_validation = SubsetRandomSampler(list(sampler_validation))
-                wandb.log({"train_size": len(sampler_train), "validation_size": len(sampler_validation)})
-            except Exception as e:
-                print(f"Error setting up samplers for fold {fold_id}: {e}")
-                continue
-
-            wandb.log({"train_size": len(sampler_train), "validation_size": len(sampler_validation)})
-
-            # Create data loaders
-            data_loader_train = DataLoader(train_data, batch_size=config.BATCH_SIZE, num_workers=12, pin_memory=True,
-                                            sampler=shuffled_sampler_train)
-
-            data_loader_validation = DataLoader(validation_data, batch_size=config.BATCH_SIZE, num_workers=12,
-                                            pin_memory=True,
-                                            sampler=shuffled_sampler_validation)
-
-            # Initialize the model, criterion, optimizer, scheduler, and scaler
-            model = modelSkeletonMorphing.Synthesizer(config.dropout_rate, config.layer_size).cuda()
-            wandb.watch(model, log_freq=100)
-            criterion = nn.MSELoss()
-            #criterion = PairwiseDistanceLoss()
-            optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
-            scaler = amp.GradScaler()
-            torch.autograd.set_detect_anomaly(True)
-
-            # Trains the model for the specified number of epochs
-            for epoch in tqdm(range(epochs), desc='Epoch:', leave=False, position=1):
-                train_loss = NetworkTrainer.train(model, data_loader_train, optimizer, criterion, scaler)
-                validation_loss = NetworkTrainer.validation(model, data_loader_validation, criterion)
-
-                # Log validation loss to WandB
-                mean_val_loss = np.mean(validation_loss)
-                mean_train_loss = np.mean(train_loss)
-                wandb.log({"fold": fold_id,
-                           "epoch": epoch + 1,
-                           "validation_loss_mean": mean_val_loss,
-                           "training_loss_mean": mean_train_loss})
-
-                # Update scheduler
-                scheduler.step(mean_val_loss)
-
-                # Clear cache to free up memory
-                gc.collect()
-                torch.cuda.empty_cache()
-
-            fold_id += 1
-
         # Final training on all data if required
         print('Training final model on all data.')
         # Re-initialize model, optimizer, scheduler, and scaler
@@ -428,7 +269,12 @@ class NetworkTrainer:
 
         full_data = concat_dataset(data_dict, pars)
         full_data_loader = DataLoader(full_data, batch_size=config.BATCH_SIZE, num_workers=12, pin_memory=True)
-        final_train_loss = NetworkTrainer.train(model, full_data_loader, optimizer, criterion, scaler)
+
+        for epoch in range(epochs):
+            print(f"Epoch [{epoch + 1}/{epochs}]")
+            final_train_loss = NetworkTrainer.train(model, full_data_loader, optimizer, criterion, scaler)
+            avg_train_loss = np.mean(train_losses)
+            scheduler.step(avg_train_loss)
 
         # Testing the final model
         test_data = concat_dataset(test_dict, pars_test)
@@ -437,7 +283,7 @@ class NetworkTrainer:
                                                                                             criterion)
 
         # Save the final model weights
-        torch.save(model.state_dict(), 'models/trained/model_skeleton_morph_mediapipe_final.pth')
+        torch.save(model, 'models/trained/model_skeleton_morph_mediapipe_final.pth')
         print("Final model saved.")
 
 
@@ -485,6 +331,7 @@ def load_dataset_par(data_folder: str, par: int):
     return torch.utils.data.ConcatDataset([train_dataset, eval_dataset])
 
 
+
 # Load all training and test data for participants
 def load_train_test_all(data_folder: str, train_eval_pars, test_pars):
     train_eval_dict = {}
@@ -527,7 +374,7 @@ def concat_dataset(dataset_dict: dict, pars=np.arange(4, 27)):
 # Sweep function
 def sweep():
     # Set up your default hyperparameters
-    with open("skeletonMorphing/config.yaml") as file:
+    with open("skeletonMorphing/configFinal.yaml") as file:
         config = yaml.load(file, Loader=yaml.FullLoader)
     run = wandb.init(config=config)
 

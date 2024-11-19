@@ -1,0 +1,35 @@
+program: skeletonMorphing/trainSkeletonMorphing.py
+name: skeleton-morphing-2
+command:
+  - python
+  - -m
+  - skeletonMorphing.trainSkeletonMorphing
+method: bayes
+metric:
+  name: validation_loss_mean
+  goal: minimize
+parameters:
+  learning_rate:
+    values: [0.001, 0.0001, 0.00005]
+  BATCH_SIZE:
+    values: [32, 64, 128]
+  weight_decay:
+    values: [0.001, 0.01, 0.1]
+  N_epochs:
+    value: 90
+  layer_size:
+    values: [1024, 2048]
+  train_pars:
+    value: [6, 7, 8, 9, 10, 16, 17, 18, 20, 21, 22, 24, 25]
+  test_pars:
+    value: [5, 26]
+  model_type:
+    value: mediapipe
+  n_samples:
+    values: [15, 25]
+  dropout_rate:
+    values: [0, 0.1, 0.2]
+early_terminate:
+  type: hyperband
+  min_iter: 5
+  eta: 3

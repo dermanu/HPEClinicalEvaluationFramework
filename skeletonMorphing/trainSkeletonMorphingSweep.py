@@ -11,11 +11,11 @@ import torch.optim
 from torch.utils import data
 import torch.optim as optim
 import modelSkeletonMorphing
-import time
 import torch.nn as nn
 import wandb
 import numpy as np
 from utils.plotKeypoints import plot_3d_keypoints, plot_3d_keypoints_all
+from skeletonMorphing.trainSkeletonMorphing import NetworkTrainer, MPJPELoss, load_train_test_all
 import tqdm
 
 
@@ -23,27 +23,36 @@ import tqdm
 sweep_config = {
     'method': 'bayes',
     'metric': {
-        'name': 'epoch_loss',
+        'name': 'validation_loss',
         'goal': 'minimize'
     },
     'parameters': {
         'learning_rate': {
-            'values': [1e-3, 1e-4]  # Learning rate: 1e-4 0.000
+            'values': [1e-2, 1e-3, 1e-4]
         },
         'BATCH_SIZE': {
-            'value': 32  # Batch size: 32
+            'values': [16, 32, 64]
         },
         'weight_decay': {
-            'values': [1e-4, 1e-5]  # Weight decay: 1e-5
+            'values': [1e-1, 1e-2, 1e-3]
         },
         'epochs': {
-            'value': 100
+            'values': [60, 80, 100]
+        },
+        'dropout': {
+            'values': [0, 0.1, 0.2]
+        },
+        'num_blocks': {
+            'values': [2, 3]
+        },
+        'layer_size': {
+            'values': [1024, 2048]
         },
         'datafolder': {
-            'value': '/home/emanu/Desktop/SegmentedData'
+            'value': "E:\MoCap"
         },
-        'par': {
-            'value': [4]
+        'pars': {
+            'values': [11, 25]
         },
         'mov': {
             'value': list(range(1, 18))
@@ -66,10 +75,31 @@ sweep_config = {
 }
 
 # Initialize sweep by passing in config.
-# (Optional) Provide a name of the project.
 sweep_id = wandb.sweep(sweep=sweep_config, project="SkeletonMorphingSweep")
 
+# RMSE loss function
+class RMSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
 
+    def forward(self, yhat, y):
+        return torch.sqrt(self.mse(yhat, y))
+
+# Mean Per Joint Position Error Loss
+class MPJPELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def forward(skeletons1, skeletons2):
+        coordinate_abs_diff = torch.abs(skeletons1 - skeletons2)
+        mae_per_coordinate = torch.mean(coordinate_abs_diff, dim=0)
+        mae_per_joint_position = torch.mean(mae_per_coordinate, dim=1)
+        overall_mae = torch.mean(mae_per_joint_position)
+        return overall_mae
+
+# Trainings data loader
 def train_data_loader(data_config):
     """
     Creating dataset and data loader for training
@@ -84,7 +114,7 @@ def train_data_loader(data_config):
                                    pin_memory=True)
     return train_loader
 
-
+# Validation data loader
 def validation_data_loader(data_config):
     """
     Creating dataset and data loader
@@ -98,125 +128,62 @@ def validation_data_loader(data_config):
                                   pin_memory=True)
     return validation_loader
 
-
-def train(model, train_loader, optimizer):
+# Test data loader
+def test_data_loader(data_config):
     """
-    Training the model
-    :param model: Morphing model to train
-    :param train_loader: training data loader
-    :param optimizer: optimizer for the model
-    :return: Average loss of the model
+    Creating dataset and data loader
+    :param data_config: Configuration for the data loader
     """
-    # Iterate through batches
-    losses = 0
-    for step, batch in enumerate(tqdm.tqdm(train_loader, desc="Training progress", leave=False)):
-        # Access data for each batch
-        pose_gt_batch = batch['pose_gt']
-        pose_inf_batch = batch['pose_inf']
+    # Save dataset in pytorch model
+    # my_dataset = ReadDatasetFiles(data_folder, config.par, config.mov, config.cam, config.model_type)
+    # torch.save(my_dataset, 'par4_mediapipe_test2.pth')
+    my_dataset = torch.load('morph_dataset/par5_mediapipe_test.pth')
+    validation_loader = data.DataLoader(my_dataset, batch_size=data_config.BATCH_SIZE, shuffle=False, num_workers=8,
+                                  pin_memory=True)
+    return validation_loader
 
-        # Creating tensors for input and output poses batches/frames x cams, keypoints x 3
-        inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)).cuda().float()
-        output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-        # Forward pass through the model
-        pred_poses = model(inp_poses)
-
-        # Calculating MSE loss
-        loss = nn.functional.mse_loss(pred_poses, output_poses)
-
-        # Backward pass and optimization step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-
-def validation(model, validation_loader):
-    """
-    Validation of the model
-    :param model: Morphing model to train
-    :param validation_loader: training data loader
-    :return: Average loss of the model
-    """
-    # Iterate through batches
-    with torch.no_grad():
-        losses = 0
-        for step, batch in enumerate(tqdm.tqdm(validation_loader, desc="Validation progress", leave=False)):
-            # Access data for each batch
-            pose_gt_batch = batch['pose_gt']
-            pose_inf_batch = batch['pose_inf']
-
-            # Creating tensors for input and output poses
-            inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(
-                2)).cuda().float()  # batches/frames x cams, keypoints x 3
-            output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)).cuda().float()
-
-            # Forward pass through the model
-            pred_poses = model(inp_poses)
-
-            # Calculating MSE loss
-            loss = nn.functional.mse_loss(pred_poses, output_poses)
-
-            print(loss.item())
-
-            # Append loss
-            losses += (loss.item())
-
-            # Log the loss of each batch
-            wandb.log({"batch_loss": loss.item(), "batch": step+1})
-
-
-    return losses / len(validation_loader), pred_poses, pose_gt_batch, pose_inf_batch
-
-
+# Main training function
 def main(config=None):
-    """
-    Initialize a new wandb run
-    :param config: Configuration for the model
-    """
+    # Start a wandb sweep
     with wandb.init(config=config):
-        # If called by wandb.agent, as below,
-        # this config will be set by Sweep Controller
         config = wandb.config
 
         # Load model
-        model = modelSkeletonMorphing.Synthesizer().cuda()
-        # wandb.watch(model, log_freq=1000)
+        model = modelSkeletonMorphing.Synthesizer(
+            dropout_rate=config.dropout,
+            num_blocks=config.num_blocks,
+            layer_size=config.layer_size
+        ).cuda()
 
         # Parameters for optimization
-        params = list(model.parameters())  # + list(dec.parameters())
+        params = list(model.parameters())
+
+        # Loss function
+        criterion = MPJPELoss()
 
         # Setting anomaly detection for autograd
         optimizer = optim.AdamW(params, lr=config.learning_rate, weight_decay=config.weight_decay,
-                               amsgrad=True, foreach=True)
+                                amsgrad=True, foreach=True)
 
         # Setting anomaly detection for autograd
         torch.autograd.set_detect_anomaly(True)
 
         # Load dataset
-        train_dataset = train_data_loader(config)
-        validation_dataset = validation_data_loader(config)
+        train, eval, test, standardizer = load_train_test_all(config.datafolder, config.pars)
+        train_loader = data.DataLoader(train, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+        eval_loader = data.DataLoader(eval, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+        test_loader = data.DataLoader(test, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
 
         # Start loss
         last_loss = 1000000
 
         # Training loop
         for epoch in range(config.epochs):
-            time.sleep(15)
             # Training the model
-            train(model, train_dataset, optimizer)
-            losses, pred_poses, pose_gt_batch, pose_inf_batch = validation(model, validation_dataset)
+            train_loss = NetworkTrainer.train(model, train_loader, optimizer, criterion)
+            losses, pred_poses, pose_gt_batch, pose_inf_batch = NetworkTrainer.validation(model, test_loader, criterion)
 
-            # Logging the loss and epoch
-            wandb.log({"epoch_loss": np.sqrt(np.mean(losses)), "epoch": epoch+1})
-
-            # Plotting the keypoints and logging them
-            prediction = pred_poses.view(-1, pose_gt_batch.size(1), pose_gt_batch.size(2)).cpu().detach().numpy()[0]
-            ground_truth = pose_gt_batch.cpu().detach().numpy()[0]
-            hpe_truth = pose_inf_batch.cpu().detach().numpy()[0]
-            plot_3d_keypoints(prediction, 'mediapipe', 'morphed', epoch)
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'ground_truth', epoch)
-            plot_3d_keypoints(hpe_truth, 'mediapipe', 'hpe_truth', epoch)
-            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, config.model_type, epoch)
+            NetworkTrainer.log_training_result(train_loss, losses, pred_poses, pose_gt_batch, pose_inf_batch, epoch)
 
             # Print loss and epoch
             print('Finished epoch ' + str(epoch+1) + ' of ' + str(config.epochs) + ' with loss ' + str(np.sqrt(np.mean(losses))))
@@ -233,8 +200,9 @@ def main(config=None):
         wandb.log_artifact(artifact)
 
 
-
-# Start sweep job.
-wandb.agent(sweep_id, function=main, count=2)
-# Training complete
-print('done')
+if __name__ == '__main__':
+    datapath = "E:\MoCap"
+    # Start sweep job.
+    wandb.agent(sweep_id, function=main, count=2)
+    # Training complete
+    print('done')
