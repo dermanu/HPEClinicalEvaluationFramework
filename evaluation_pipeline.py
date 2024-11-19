@@ -169,7 +169,17 @@ class Framework:
         if not os.path.isfile(model_path):
             raise ValueError(f'Morphing model not found at {model_path}')
 
-        model_skel_morph.load_state_dict(torch.load(model_path))
+        # Load the file
+        model_data = torch.load(model_path)
+
+        # Check if it's a state_dict or a full model instance
+        if isinstance(model_data, dict):  # state_dict case
+            model_skel_morph.load_state_dict(model_data)
+        elif isinstance(model_data, modelSkeletonMorphing.Synthesizer):  # Full model case
+            model_skel_morph = model_data
+        else:
+            raise ValueError(f"Unexpected data type in {model_path}: {type(model_data)}")
+
         model_skel_morph.eval()
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
