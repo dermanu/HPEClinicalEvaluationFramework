@@ -399,6 +399,7 @@ class Framework:
                         else:
                             p_matrix_raw, _, _ = camCali.get_projection_matrix(cameras, False)
 
+                        print(type(p_matrix_raw))
                         p_matrix = list(p_matrix_raw.values())
 
                         if self.model_name == "mediapipe":
