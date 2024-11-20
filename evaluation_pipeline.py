@@ -256,8 +256,21 @@ class Framework:
                 gt_array = np.squeeze(np.array(gt_movement[:, joint, :]))
                 pred_array = np.squeeze(np.array(pred_movement[:, joint, :]))
 
+                print(pred_array)
+                print(gt_array)
+                print("velocity_predicted shape:", pred_array.shape)
+                print("velocity_target shape:", gt_array.shape)
+                print("NaNs in velocity_predicted:", np.isnan(pred_array).any())
+                print("NaNs in velocity_target:", np.isnan(gt_array).any())
+                print("Infs in velocity_predicted:", np.isinf(pred_array).any())
+                print("Infs in velocity_target:", np.isinf(gt_array).any())
+                print("velocity_predicted dtype:", pred_array.dtype)
+                print("velocity_target dtype:", gt_array.dtype)
+                print("velocity_predicted sample:", pred_array[0])
+                print("velocity_target sample:", gt_array[0])
+
                 pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(gt_array, pred_array)
-                velocity_m, velocity_s = metrics.mean_velocity_error(gt_array, pred_array, self.sample_rate)
+                velocity_m, velocity_s = metrics.mean_velocity_error(gt_array, pred_array, self.sample_rate, axis=-1)
                 pcc, pvalue = metrics.calculate_correlation(gt_array, pred_array)
 
                 metrics_dict["pmpjpe_m"][joint_names[joint]].append(pmpjpe_m)

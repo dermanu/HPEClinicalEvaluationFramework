@@ -184,7 +184,7 @@ def calculate_pck(target, prediction, threshold=100.0,
     return pck
 
 
-def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
+def mean_velocity_error(prediction, target, sample_rate, procrustes=False, axis=2):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
     :param prediction: Predicted 3D joint positions
@@ -200,6 +200,10 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
     velocity_predicted = np.diff(prediction, axis=0) * sample_rate
     velocity_target = np.diff(target, axis=0) * sample_rate
 
+    # Ensure velocity arrays have the correct shape for norm computation
+    velocity_predicted = velocity_predicted.reshape(-1, prediction.shape[1], 3)
+    velocity_target = velocity_target.reshape(-1, target.shape[1], 3)
+
     # Create valid mask for velocities
     valid_mask = ~np.isnan(velocity_predicted) & ~np.isnan(velocity_target)
 
@@ -207,26 +211,10 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
         # Replace NaNs with zeros temporarily for alignment
         velocity_predicted_filled = np.where(valid_mask, velocity_predicted, 0)
         velocity_target_filled = np.where(valid_mask, velocity_target, 0)
-
         mean, std, err = calculate_pmpjpe(velocity_target_filled, velocity_predicted_filled)
     else:
         # Compute MPJPE with NaN-aware functions
-        print(velocity_target)
-        print(velocity_predicted)
-        print("velocity_predicted shape:", velocity_predicted.shape)
-        print("velocity_target shape:", velocity_target.shape)
-        print("NaNs in velocity_predicted:", np.isnan(velocity_predicted).any())
-        print("NaNs in velocity_target:", np.isnan(velocity_target).any())
-        print("Infs in velocity_predicted:", np.isinf(velocity_predicted).any())
-        print("Infs in velocity_target:", np.isinf(velocity_target).any())
-        print("velocity_predicted dtype:", velocity_predicted.dtype)
-        print("velocity_target dtype:", velocity_target.dtype)
-        print("velocity_predicted shape:", velocity_predicted.shape)
-        print("velocity_target shape:", velocity_target.shape)
-        print("velocity_predicted sample:", velocity_predicted[0])
-        print("velocity_target sample:", velocity_target[0])
-
-        mpjpe = np.linalg.norm(velocity_predicted - velocity_target, axis=2)  # Shape: [batch, joints]
+        mpjpe = np.linalg.norm(velocity_predicted - velocity_target, axis=axis)  # Shape: [batch, joints]
         mean = np.nanmean(mpjpe)
         std = np.nanstd(mpjpe)
 
