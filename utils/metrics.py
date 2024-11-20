@@ -22,7 +22,7 @@ def align_by_pelvis(joints):
     return joints
 
 
-def calculate_mpjpe(target, prediction):
+def calculate_mpjpe(target, prediction, axis=1):
     """
     Mean per-joint position error (MPJPE)
     :param target: Ground truth 3D joint positions
@@ -31,7 +31,7 @@ def calculate_mpjpe(target, prediction):
     """
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
-    mpjpe = np.linalg.norm(prediction - target, axis=1)
+    mpjpe = np.linalg.norm(prediction - target, axis=axis)
     mean = np.nanmean(mpjpe)
     std = np.nanstd(mpjpe)
 
@@ -136,7 +136,7 @@ def align_procrustes_old(target, prediction):
     return gt_all, pred_all, error_count
 
 
-def calculate_pmpjpe(target, prediction, procrustes=True):
+def calculate_pmpjpe(target, prediction, procrustes=True, axis=1):
     """
     Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers..
@@ -151,7 +151,7 @@ def calculate_pmpjpe(target, prediction, procrustes=True):
         target, prediction, error_count = align_procrustes(target, prediction)
     else:
         error_count = 0
-    mean, std = calculate_mpjpe(target, prediction)
+    mean, std = calculate_mpjpe(target, prediction, axis=axis)
 
     return mean, std, error_count
 
@@ -211,6 +211,19 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
         mean, std, err = calculate_pmpjpe(velocity_target_filled, velocity_predicted_filled)
     else:
         # Compute MPJPE with NaN-aware functions
+        print("velocity_predicted shape:", velocity_predicted.shape)
+        print("velocity_target shape:", velocity_target.shape)
+        print("NaNs in velocity_predicted:", np.isnan(velocity_predicted).any())
+        print("NaNs in velocity_target:", np.isnan(velocity_target).any())
+        print("Infs in velocity_predicted:", np.isinf(velocity_predicted).any())
+        print("Infs in velocity_target:", np.isinf(velocity_target).any())
+        print("velocity_predicted dtype:", velocity_predicted.dtype)
+        print("velocity_target dtype:", velocity_target.dtype)
+        print("velocity_predicted shape:", velocity_predicted.shape)
+        print("velocity_target shape:", velocity_target.shape)
+        print("velocity_predicted sample:", velocity_predicted[0])
+        print("velocity_target sample:", velocity_target[0])
+
         mpjpe = np.linalg.norm(velocity_predicted - velocity_target, axis=2)  # Shape: [batch, joints]
         mean = np.nanmean(mpjpe)
         std = np.nanstd(mpjpe)
