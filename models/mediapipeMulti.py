@@ -41,8 +41,11 @@ def process_frame(cap, frameaug=None, sweep_config=None):
 def detect_pose(rgb_frame):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = pose_landmarker.detect(mp_image)
-    # print(f"Landmarks detected: {results.pose_landmarks is not None}")  # Debug: Check detection
-    return results.pose_landmarks if results.pose_landmarks else None
+    if results.pose_landmarks and results.pose_landmarks[0]:
+        # Return the first detected pose's landmarks
+        return results.pose_landmarks[0]
+    else:
+        return None
 
 
 def inference_video(caps, projections, sweep_config=None):
