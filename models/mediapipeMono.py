@@ -9,7 +9,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker

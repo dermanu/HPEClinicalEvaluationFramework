@@ -11,7 +11,7 @@ from mediapipe.tasks.python import vision
 from models.dlt import DLT, weighted_DLT
 
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker

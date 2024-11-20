@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=GPUQ
 #SBATCH --account=ie-idi
-#SBATCH --time=0-00:15:00          # Adjust time as needed
+#SBATCH --time=0-02:15:00          # Adjust time as needed
 #SBATCH --nodes=1                   # 1 compute node
 #SBATCH --cpus-per-task=8           # 2 CPU cores
 #SBATCH --mem=64G                  # Adjust memory if needed
