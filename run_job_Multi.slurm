@@ -3,7 +3,7 @@
 #SBATCH --account=ie-idi
 #SBATCH --time=0-05:00:00          # Adjust time as needed
 #SBATCH --nodes=1                   # 1 compute node
-#SBATCH --cpus-per-task=8           # 2 CPU cores
+#SBATCH --cpus-per-task=12           # 2 CPU cores
 #SBATCH --mem=32G                  # Adjust memory if needed
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/%x_%j.log     # Save logs with job name and ID

@@ -56,7 +56,7 @@ def inference_video(caps, projections, sweep_config=None):
 
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
         while all(cap.isOpened() for _, cap in caps):
-            futures = [executor.submit(process_frame, cap[1], frameaug, sweep_config) for cap in caps]
+            futures = {executor.submit(process_frame, cap[1], frameaug, sweep_config): cap[0] for cap in caps}
             rgb_frames = [None] * num_cameras
             for future in as_completed(futures):
                 cam_idx = futures[future]
