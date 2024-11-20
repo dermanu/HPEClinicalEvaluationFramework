@@ -409,6 +409,7 @@ class Framework:
                         p_matrix = list(p_matrix_raw.values())
 
                         if self.model_name == "mediapipe":
+                            print(config)
                             pred_keypoints, inference_times, frame = mediapipeMulti.inference_video(caps, p_matrix, config)
                             selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]  # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, :]

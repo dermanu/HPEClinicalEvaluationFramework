@@ -32,7 +32,6 @@ def inference_video(cap, sweep_config=None, dimensions=3):
     frame_number = 0
     rgb_frame = None
 
-
     with PoseLandmarker.create_from_options(options) as landmarker:
         while cap.isOpened():
             ret, frame = cap.read()
