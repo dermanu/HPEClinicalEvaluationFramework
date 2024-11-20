@@ -211,6 +211,8 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False):
         mean, std, err = calculate_pmpjpe(velocity_target_filled, velocity_predicted_filled)
     else:
         # Compute MPJPE with NaN-aware functions
+        print(velocity_target)
+        print(velocity_predicted)
         print("velocity_predicted shape:", velocity_predicted.shape)
         print("velocity_target shape:", velocity_target.shape)
         print("NaNs in velocity_predicted:", np.isnan(velocity_predicted).any())
