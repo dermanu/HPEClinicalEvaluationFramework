@@ -434,6 +434,10 @@ class Framework:
                     #                                                   self.smoothing_fun)
 
                     # Procrustes Alignment
+                    print(gt_keypoints_np)
+                    print(pred_keypoints)
+                    print("Shape gt:", gt_keypoints_np.shape)
+                    print("Shape pred:", pred_keypoints.shape)
                     gt_keypoints, pred_keypoints, error_count = align_procrustes_old(gt_keypoints_np, pred_keypoints)
                     error_count_all += error_count
 
