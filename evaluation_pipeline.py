@@ -395,9 +395,9 @@ class Framework:
 
                         # Load camera parameter matrix and add noise if specified so
                         if config._items['augmentation'] == 'decalibration':
-                            p_matrix_raw, _, _ = camCali.get_projection_matrix(cameras, True)
+                            p_matrix_raw = camCali.get_projection_matrix(cameras, True)
                         else:
-                            p_matrix_raw, _, _ = camCali.get_projection_matrix(cameras, False)
+                            p_matrix_raw = camCali.get_projection_matrix(cameras, False)
 
                         print(type(p_matrix_raw))
                         p_matrix = list(p_matrix_raw.values())
