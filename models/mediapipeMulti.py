@@ -74,6 +74,7 @@ def inference_video(caps, projections, sweep_config=None):
             # Skip frame if no frames are read
             if all(frame is None for frame in rgb_frames):
                 print(f"No frames read for frame {frame_number}, skipping.")
+                frame_number += 1
                 continue
 
             frame_keypoints = np.full((33, num_cameras, 2), np.nan)  # Initialize with NaNs
