@@ -12,7 +12,7 @@ def occlusion(frame):
     h, w = frame.shape[:2]
 
     # Define the size of the occlusion
-    occlusion_size = np.random.uniform(0.1, 0.25)
+    occlusion_size = np.random.uniform(0.05, 0.15)
 
     # Compute the width and height of the occlusion
     cutout_width = int(w * occlusion_size)

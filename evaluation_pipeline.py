@@ -75,12 +75,13 @@ def align_procrustes_old(target, prediction):
     """
     gt_all, pred_all = [], []
     error_count = 0
-    joint_number = target.shape[1]
+    joint_number = target.shape[1]  # Expected number of joints
 
     for gt, pred in zip(target, prediction):
         gt_raw = gt  # Keep the original ground truth
-        if np.sum(np.abs(pred)) != 0:
+        if np.sum(np.abs(pred)) != 0:  # Valid prediction
             try:
+                # Procrustes alignment
                 muX = np.mean(pred, axis=0, keepdims=True)
                 muY = np.mean(gt, axis=0, keepdims=True)
 
@@ -98,27 +99,35 @@ def align_procrustes_old(target, prediction):
                 t = muY - scale * (R @ muX.T).T
                 pred_hat = scale * (R @ pred.T).T + t
             except np.linalg.LinAlgError as e:
+                # Alignment failed, fallback to mean-based approximation
                 print(f"Procrustes alignment failed: {e}")
                 error_count += 1
-                pred_hat = np.tile(np.mean(gt_raw, axis=0), (joint_number, 1))
+                pred_hat = np.tile(np.mean(gt_raw, axis=0), (gt.shape[0], 1))
         else:
-            pred_hat = np.tile(np.mean(gt_raw, axis=0), (joint_number, 1))
+            # Invalid prediction, fallback to mean-based approximation
+            pred_hat = np.tile(np.mean(gt_raw, axis=0), (gt.shape[0], 1))
 
+        # Ensure consistent shapes
         if pred_hat.shape != gt_raw.shape:
-            print(f"Shape mismatch: gt_raw {gt_raw.shape}, pred_hat {pred_hat.shape}")
-            pred_hat = np.tile(np.mean(gt_raw, axis=0), (joint_number, 1))
+            print(f"Shape mismatch after fallback. gt_raw: {gt_raw.shape}, pred_hat: {pred_hat.shape}")
+            pred_hat = np.tile(np.mean(gt_raw, axis=0), (gt.shape[0], 1))
 
         gt_all.append(gt_raw)
         pred_all.append(pred_hat)
 
-    gt_all = np.array(gt_all)
-    pred_all = np.array(pred_all)
+    # Convert lists to numpy arrays
+    try:
+        gt_all = np.array(gt_all)
+        pred_all = np.array(pred_all)
+    except Exception as e:
+        print(f"Error converting lists to arrays: {e}")
+        print(f"gt_all shapes: {[g.shape for g in gt_all]}")
+        print(f"pred_all shapes: {[p.shape for p in pred_all]}")
 
     if error_count > 0:
         print(f"Procrustes alignment failed {error_count} times")
 
     return gt_all, pred_all, error_count
-
 
 
 class Framework:
