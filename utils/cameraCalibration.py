@@ -66,7 +66,8 @@ def make_homogeneous_rep_matrix(R, t):
     return P
 
 
-def get_projection_matrix(camera_ids, noise=False, noise_percent=0.05, file_path='utils/P_values.yaml'):
+def get_projection_matrix(camera_ids, noise=False, file_path='utils/P_values.yaml'):
+    noise_percent = 0.05
     if isinstance(camera_ids, int):
         camera_ids = [camera_ids]
 
