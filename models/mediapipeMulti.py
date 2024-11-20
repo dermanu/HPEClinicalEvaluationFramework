@@ -56,6 +56,7 @@ def inference_video(caps, projections, sweep_config=None):
 
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
         while all(cap.isOpened() for _, cap in caps):
+            # Process frames in parallel
             futures = {executor.submit(process_frame, cap[1], frameaug, sweep_config): cap[0] for cap in caps}
             rgb_frames = [None] * num_cameras
             for future in as_completed(futures):
@@ -67,17 +68,18 @@ def inference_video(caps, projections, sweep_config=None):
                 except Exception as e:
                     print(f"Error processing frame: {e}")
 
-            if None in rgb_frames:
-                print(f"Incomplete frames for frame {frame_number}, skipping.")
+            # Skip frame if no frames are read
+            if all(frame is None for frame in rgb_frames):
+                print(f"No frames read for frame {frame_number}, skipping.")
                 continue
 
-            frame_keypoints = np.zeros((33, num_cameras, 2))
-            confidences = np.zeros((33, num_cameras))
-            valid_detections = True  # Flag to check if all cameras detected poses
+            frame_keypoints = np.full((33, num_cameras, 2), np.nan)  # Initialize with NaNs
+            confidences = np.full((33, num_cameras), np.nan)          # Initialize with NaNs
 
             start_time = time.time()
+            # Detect poses in parallel
             pose_futures = {executor.submit(detect_pose, rgb_frames[cam_idx]): cam_idx for cam_idx in
-                            range(num_cameras)}
+                            range(num_cameras) if rgb_frames[cam_idx] is not None}
 
             for future in as_completed(pose_futures):
                 cam_idx = pose_futures[future]
@@ -87,30 +89,42 @@ def inference_video(caps, projections, sweep_config=None):
                     frame_keypoints[:, cam_idx, 1] = [landmark.y for landmark in landmarks]
                     confidences[:, cam_idx] = [landmark.visibility for landmark in landmarks]
                 else:
-                    valid_detections = False
-                    print(f"No valid detection from camera {cam_idx}. Skipping triangulation.")
-                    break  # Exit the loop if any detection is invalid
+                    print(f"No valid detection from camera {cam_idx}.")
 
-            if not valid_detections:
-                keypoints_data.append(np.full((33, 3), np.nan))
-                inference_time.append(np.nan)
-                frame_number += 1
-                print(f"Skipping frame {frame_number} due to invalid detections.")
-                continue
+            # Proceed even if some cameras didn't detect landmarks
+            points_3d = np.full((33, 3), np.nan)  # Initialize 3D points with NaNs
 
-            # Triangulate 3D points
-            points_3d = DLT(projections, frame_keypoints)
+            for landmark_idx in range(33):
+                # Collect data for the current landmark across cameras
+                valid_cameras = ~np.isnan(frame_keypoints[landmark_idx, :, 0])
+                num_valid_cameras = np.sum(valid_cameras)
+
+                if num_valid_cameras >= 2:
+                    # Collect 2D keypoints and projection matrices for valid cameras
+                    keypoints_2d = frame_keypoints[landmark_idx, valid_cameras, :]
+                    projections_valid = [projections[i] for i in np.where(valid_cameras)[0]]
+
+                    # Perform triangulation for the current landmark
+                    point_3d = DLT(projections_valid, keypoints_2d[np.newaxis, :, :])[0]
+                    points_3d[landmark_idx] = point_3d
+                else:
+                    # Not enough data to triangulate this landmark
+                    print(f"Not enough data to triangulate landmark {landmark_idx} in frame {frame_number}.")
+
             keypoints_data.append(points_3d)
             end_time = time.time()
             inference_time.append(end_time - start_time)
             frame_number += 1
 
             # Adjust rotation if needed
-            rgb_frames = [np.rot90(frame, k=-1) for frame in rgb_frames]
-            last_rgb_frame = np.concatenate(rgb_frames, axis=1)
+            rgb_frames = [np.rot90(frame, k=-1) if frame is not None else None for frame in rgb_frames]
+            # Concatenate frames that are not None
+            valid_frames = [frame for frame in rgb_frames if frame is not None]
+            if valid_frames:
+                last_rgb_frame = np.concatenate(valid_frames, axis=1)
 
     for _, cap in caps:
-            cap.release()
+        cap.release()
 
     inference_time = np.array(inference_time)
     return np.array(keypoints_data), inference_time, last_rgb_frame

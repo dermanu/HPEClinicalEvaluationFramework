@@ -19,16 +19,22 @@ def make_homogeneous_rep_matrix(R, t):
     return P
 
 
+import numpy as np
+from scipy import linalg
+
 def DLT(projection_matrices, points_2d):
     """
-    Performs Direct Linear Transform (DLT) to triangulate 3D points from multiple camera views.
+    Performs Direct Linear Transform (DLT) to triangulate 3D points from multiple camera views,
+    handling missing data.
 
     Parameters:
     projection_matrices (list of ndarray): List of 3x4 projection matrices for each camera.
-    points_2d (ndarray): Array of 2D points with shape (n_keypoints, n_cams, 2).
+    points_2d (ndarray): Array of 2D points with shape (n_keypoints, n_cams, 2),
+                         with np.nan for missing points.
 
     Returns:
-    ndarray: Array of triangulated 3D points with shape (n_keypoints, 3).
+    ndarray: Array of triangulated 3D points with shape (n_keypoints, 3),
+             with np.nan for points that couldn't be triangulated.
     """
     n_keypoints = points_2d.shape[0]
     n_views = points_2d.shape[1]
@@ -37,40 +43,57 @@ def DLT(projection_matrices, points_2d):
     # Loop over each keypoint
     for k in range(n_keypoints):
         A = []
+        valid_views = []
 
-        # For each view/camera, add two equations to A for the current keypoint
+        # For each view/camera, check if the point is valid
         for i in range(n_views):
-            P = projection_matrices[i]
             point = points_2d[k, i]
 
-            # Create the two rows for this point/camera combination
-            A.append(point[1] * P[2, :] - P[1, :])
-            A.append(P[0, :] - point[0] * P[2, :])
+            # Check if both x and y are valid numbers
+            if not np.isnan(point).any():
+                P = projection_matrices[i]
 
+                # Create the two rows for this point/camera combination
+                A.append(point[1] * P[2, :] - P[1, :])
+                A.append(P[0, :] - point[0] * P[2, :])
+
+                valid_views.append(i)
+
+        # Convert A to a NumPy array
         A = np.array(A)
 
-        # Perform Singular Value Decomposition (SVD) to solve the system
-        U, s, Vh = linalg.svd(A)
+        # Check if we have enough views to triangulate
+        if len(valid_views) >= 2:
+            # Perform Singular Value Decomposition (SVD) to solve the system
+            U, s, Vh = linalg.svd(A)
 
-        # Normalize and store the triangulated 3D point
-        X = Vh[-1]
-        points_3d.append(X[:3] / X[3])
+            # Normalize and store the triangulated 3D point
+            X = Vh[-1]
+            X = X[:3] / X[3]
+            points_3d.append(X)
+        else:
+            # Not enough data to triangulate this keypoint
+            points_3d.append([np.nan, np.nan, np.nan])
 
     return np.array(points_3d)
 
 
-def weighted_DLT(projection_matrices, points_2d, likelihoods):
+
+def weighted_DLT(projection_matrices, points_2d, confidences):
     """
-    Weighted Direct Linear Transform (DLT) to triangulate 3D points from multiple camera views
-    based on 2D points and their likelihoods.
+    Performs weighted Direct Linear Transform (DLT) to triangulate 3D points,
+    handling missing data and incorporating confidence weights.
 
     Parameters:
     projection_matrices (list of ndarray): List of 3x4 projection matrices for each camera.
-    points_2d (ndarray): Array of 2D points with shape (n_keypoints, n_cams, 2).
-    likelihoods (ndarray): Array of likelihood scores with shape (n_keypoints, n_cams).
+    points_2d (ndarray): Array of 2D points with shape (n_keypoints, n_cams, 2),
+                         with np.nan for missing points.
+    confidences (ndarray): Array of confidence scores with shape (n_keypoints, n_cams),
+                           with np.nan for missing points.
 
     Returns:
-    ndarray: Array of triangulated 3D points with shape (n_keypoints, 3).
+    ndarray: Array of triangulated 3D points with shape (n_keypoints, 3),
+             with np.nan for points that couldn't be triangulated.
     """
     n_keypoints = points_2d.shape[0]
     n_views = points_2d.shape[1]
@@ -79,27 +102,36 @@ def weighted_DLT(projection_matrices, points_2d, likelihoods):
     # Loop over each keypoint
     for k in range(n_keypoints):
         A = []
+        valid_views = []
 
-        # For each view/camera, add weighted equations to A for the current keypoint
+        # For each view/camera, check if the point is valid
         for i in range(n_views):
-            P = projection_matrices[i]
             point = points_2d[k, i]
-            weight = likelihoods[k, i]
+            confidence = confidences[k, i]
 
-            # Create the two weighted rows for this point/camera combination
-            A.append(weight * (point[1] * P[2, :] - P[1, :]))
-            A.append(weight * (P[0, :] - point[0] * P[2, :]))
+            # Check if both x and y are valid numbers and confidence is valid
+            if not np.isnan(point).any() and not np.isnan(confidence):
+                P = projection_matrices[i]
+                w = confidence  # Weight based on confidence
+
+                # Create the weighted rows for this point/camera combination
+                A.append(w * (point[1] * P[2, :] - P[1, :]))
+                A.append(w * (P[0, :] - point[0] * P[2, :]))
+
+                valid_views.append(i)
 
         A = np.array(A)
 
-        # Perform Singular Value Decomposition (SVD) to solve the system
-        U, s, Vh = linalg.svd(A)
-
-        # Normalize and store the triangulated 3D point
-        X = Vh[-1]
-        points_3d.append(X[:3] / X[3])
+        if len(valid_views) >= 2:
+            U, s, Vh = linalg.svd(A)
+            X = Vh[-1]
+            X = X[:3] / X[3]
+            points_3d.append(X)
+        else:
+            points_3d.append([np.nan, np.nan, np.nan])
 
     return np.array(points_3d)
+
 
 
 def read_camera_parameters(camera_id, folder='camera_parameters/'):
