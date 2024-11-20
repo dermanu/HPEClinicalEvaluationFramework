@@ -10,7 +10,7 @@
 
 # Load required modules
 module purge
-module load TensorFlow/2.13.0-foss-2023a
+#module load TensorFlow/2.13.0-foss-2023a
 module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
 source /cluster/home/emanueal/Documents/HPEClinicalEvaluationFramework/venv/bin/activate
 

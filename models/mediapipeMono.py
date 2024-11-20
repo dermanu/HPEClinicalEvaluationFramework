@@ -7,7 +7,7 @@ from utils.frameAugmentation import FrameAugmentor
 import mediapipe as mp
 
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
 # Load the pose landmarker model once to avoid reloading it multiple times
