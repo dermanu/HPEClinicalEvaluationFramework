@@ -140,7 +140,7 @@ def inference_video(caps, projections, sweep_config=None):
                     projections_valid = [projections[idx] for idx in valid_idxs]
 
                     # Perform triangulation for the current landmark
-                    point_3d = weighted_DLT(projections_valid, keypoints_2d[np.newaxis, :, :], confidences_valid)
+                    point_3d = DLT(projections_valid, keypoints_2d[np.newaxis, :, :])
                     points_3d[landmark_idx] = point_3d
                 else:
                     # Not enough data to triangulate this landmark
