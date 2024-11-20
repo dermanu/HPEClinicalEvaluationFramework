@@ -149,10 +149,10 @@ class Framework:
             "sitting": [14, 15, 16, 17]
         }
         self.movement_category = {
-            "upper": 1,
-            "lower": 5,
-            "complex": 9,
-            "sitting": 14
+            "upper": [1],
+            "lower": [5],
+            "complex": [9],
+            "sitting": [14]
         }
 
         # Joint names mapping for MoCap ground truth
