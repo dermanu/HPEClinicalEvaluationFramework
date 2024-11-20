@@ -12,7 +12,7 @@ def occlusion(frame):
     h, w = frame.shape[:2]
 
     # Define the size of the occlusion
-    occlusion_size = np.random.uniform(0.05, 0.15)
+    occlusion_size = np.random.uniform(0.1, 0.25)
 
     # Compute the width and height of the occlusion
     cutout_width = int(w * occlusion_size)
@@ -26,7 +26,7 @@ def occlusion(frame):
     y2 = y1 + cutout_height
 
     # Apply Gaussian noise to the cutout region
-    noise = iaa.AdditiveGaussianNoise(scale=0.8 * 255).augment_image(frame)
+    noise = iaa.AdditiveGaussianNoise(scale=0.9 * 255).augment_image(frame)
     frame[y1:y2, x1:x2, :] = noise[y1:y2, x1:x2, :]
 
     return frame
