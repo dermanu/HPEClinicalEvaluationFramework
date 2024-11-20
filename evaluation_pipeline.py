@@ -19,7 +19,7 @@ from models import mediapipeMulti
 import pickle
 from scipy.spatial import procrustes
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "`2`"
 
 
 def log_frame_example(frame):
