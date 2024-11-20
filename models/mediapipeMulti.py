@@ -32,7 +32,7 @@ def process_frame(cap, frameaug=None, sweep_config=None):
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    if frameaug is not None and sweep_config is not None:
+    if sweep_config._items['augmentation'] != "none" and frameaug is not None:
         rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
     return rgb_frame
@@ -49,7 +49,10 @@ def detect_pose(rgb_frame):
 
 
 def inference_video(caps, projections, sweep_config=None):
-    frameaug = FrameAugmentor() if sweep_config is not None else None
+    if sweep_config._items['augmentation'] != "none":
+        frameaug = FrameAugmentor()
+    else:
+        frameaug = None
 
     keypoints_data = []
     inference_time = []

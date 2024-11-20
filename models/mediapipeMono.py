@@ -23,7 +23,7 @@ options = PoseLandmarkerOptions(
 
 # Currently runs on CPU as per default.
 def inference_video(cap, sweep_config=None, dimensions=3):
-    if sweep_config is not None:
+    if sweep_config._items['augmentation'] != "none":
         # Initialize frame augmentor
         frameaug = FrameAugmentor()
 
@@ -41,7 +41,7 @@ def inference_video(cap, sweep_config=None, dimensions=3):
             # Convert the BGR image to RGB - Is this really needed?
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            if sweep_config is not None:
+            if sweep_config._items['augmentation'] != "none":
                 # Augment frame
                 rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
