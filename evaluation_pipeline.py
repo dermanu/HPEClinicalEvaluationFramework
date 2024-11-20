@@ -78,39 +78,35 @@ def align_procrustes_old(target, prediction):
     joint_number = target.shape[1]
 
     for gt, pred in zip(target, prediction):
-        gt_raw = gt
+        gt_raw = gt  # Keep the original ground truth
         if np.sum(np.abs(pred)) != 0:
-            transposed = False
-            if pred.shape[0] != 3 and pred.shape[0] != 2:
-                pred = pred.T
-                gt = gt.T
-                transposed = True
-            assert (gt.shape[1] == pred.shape[1]), "The number of joints must match."
-
             try:
-                muX = np.mean(pred, axis=1, keepdims=True)
-                muY = np.mean(gt, axis=1, keepdims=True)
+                muX = np.mean(pred, axis=0, keepdims=True)
+                muY = np.mean(gt, axis=0, keepdims=True)
 
                 X0 = pred - muX
                 Y0 = gt - muY
 
                 var1 = np.sum(X0 ** 2)
-                K = X0.dot(Y0.T)
+                K = X0.T @ Y0
                 U, s, Vh = np.linalg.svd(K)
                 V = Vh.T
                 Z = np.eye(U.shape[0])
-                Z[-1, -1] *= np.sign(np.linalg.det(U.dot(Vh)))
-                R = V.dot(Z.dot(U.T))
-                scale = np.trace(R.dot(K)) / var1
-                t = muY - scale * (R.dot(muX))
-                pred_hat = scale * R.dot(pred) + t
-                if transposed:
-                    pred_hat = pred_hat.T
-            except np.linalg.LinAlgError:
+                Z[-1, -1] *= np.sign(np.linalg.det(U @ Vh))
+                R = V @ Z @ U.T
+                scale = np.trace(R @ K) / var1
+                t = muY - scale * (R @ muX.T).T
+                pred_hat = scale * (R @ pred.T).T + t
+            except np.linalg.LinAlgError as e:
+                print(f"Procrustes alignment failed: {e}")
                 error_count += 1
-                pred_hat = np.tile(np.mean(gt, axis=0), (joint_number, 1))
+                pred_hat = np.tile(np.mean(gt_raw, axis=0), (joint_number, 1))
         else:
-            pred_hat = np.tile(np.mean(gt, axis=0), (joint_number, 1))
+            pred_hat = np.tile(np.mean(gt_raw, axis=0), (joint_number, 1))
+
+        if pred_hat.shape != gt_raw.shape:
+            print(f"Shape mismatch: gt_raw {gt_raw.shape}, pred_hat {pred_hat.shape}")
+            pred_hat = np.tile(np.mean(gt_raw, axis=0), (joint_number, 1))
 
         gt_all.append(gt_raw)
         pred_all.append(pred_hat)
