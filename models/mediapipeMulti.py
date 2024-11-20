@@ -134,9 +134,10 @@ def inference_video(caps, projections, sweep_config=None):
                     # Collect 2D keypoints and projection matrices for valid cameras
                     keypoints_2d = frame_keypoints[landmark_idx, valid_indices, :]
                     confidences_valid = confidences[landmark_idx, valid_indices]
-                    valid_idxs = np.where(valid_indices)[0]
-                    valid_cams = [idx_to_cam[idx] for idx in valid_idxs]
-                    projections_valid = [projections[cam] for cam in valid_cams]
+                    valid_idxs = np.where(valid_indices)[0]  # Sequential indices
+
+                    # Use sequential indices to access projections
+                    projections_valid = [projections[idx] for idx in valid_idxs]
 
                     # Perform triangulation for the current landmark
                     point_3d = weighted_DLT(projections_valid, keypoints_2d[np.newaxis, :, :], confidences_valid)
