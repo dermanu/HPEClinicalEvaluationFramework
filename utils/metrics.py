@@ -201,8 +201,8 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False, axis=
     velocity_target = np.diff(target, axis=0) * sample_rate
 
     # Ensure velocity arrays have the correct shape for norm computation
-    velocity_predicted = velocity_predicted.reshape(-1, prediction.shape[1], 3)
-    velocity_target = velocity_target.reshape(-1, target.shape[1], 3)
+    #velocity_predicted = velocity_predicted.reshape(-1, prediction.shape[1], 3)
+    #velocity_target = velocity_target.reshape(-1, target.shape[1], 3)
 
     # Create valid mask for velocities
     valid_mask = ~np.isnan(velocity_predicted) & ~np.isnan(velocity_target)
