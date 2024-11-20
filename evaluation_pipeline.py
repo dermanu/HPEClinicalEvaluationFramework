@@ -366,7 +366,6 @@ class Framework:
 
             for par in tqdm(self.participants, ascii=True, desc="Participant:"):
                 for mov in tqdm(self.movement_category[config.movement], ascii=True, desc="Movement:"):
-                    print(self.dataset_path)
 
                     gt_keypoints, caps = readDataEval.load_data(self.dataset_path, par, mov, cameras)
                     if not gt_keypoints or not caps:
@@ -410,11 +409,9 @@ class Framework:
                         else:
                             p_matrix_raw = camCali.get_projection_matrix(cameras, False)
 
-                        print(type(p_matrix_raw))
                         p_matrix = list(p_matrix_raw.values())
 
                         if self.model_name == "mediapipe":
-                            print(config)
                             pred_keypoints, inference_times, frame = mediapipeMulti.inference_video(caps, p_matrix, config)
                             selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]  # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, :]
