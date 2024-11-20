@@ -24,10 +24,8 @@ options = PoseLandmarkerOptions(
 pose_landmarker = vision.PoseLandmarker.create_from_options(options)
 
 
-def process_frame(cap, frameaug=None, sweep_config=None):
-    ret, frame = cap.read()
-    # print(f"Frame read status: {ret}")  # Debug: Check if frame is read
-    if not ret:
+def process_frame(frame, frameaug=None, sweep_config=None):
+    if frame is None:
         return None
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -36,6 +34,7 @@ def process_frame(cap, frameaug=None, sweep_config=None):
         rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
     return rgb_frame
+
 
 
 def detect_pose(rgb_frame):
@@ -60,10 +59,29 @@ def inference_video(caps, projections, sweep_config=None):
     num_cameras = len(caps)
     last_rgb_frame = None
 
+    # Initialize cap status to keep track of which videos have ended
+    cap_status = [True] * num_cameras  # True means the video is still open
+    caps_dict = dict(caps)  # Convert caps to a dict for easy access
+
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
-        while all(cap.isOpened() for _, cap in caps):
+        while any(cap_status):  # Continue until all videos have been processed
+            frames = [None] * num_cameras  # Initialize frames list
+
+            # Read frames from caps in the main thread
+            for cap_idx in range(num_cameras):
+                if cap_status[cap_idx]:
+                    ret, frame = caps_dict[cap_idx].read()
+                    if not ret:
+                        frames[cap_idx] = None
+                        cap_status[cap_idx] = False  # Mark this cap as finished
+                        caps_dict[cap_idx].release()
+                    else:
+                        frames[cap_idx] = frame
+                else:
+                    frames[cap_idx] = None  # No more frames from this cap
+
             # Process frames in parallel
-            futures = {executor.submit(process_frame, cap[1], frameaug, sweep_config): cap[0] for cap in caps}
+            futures = {executor.submit(process_frame, frames[cap_idx], frameaug, sweep_config): cap_idx for cap_idx in range(num_cameras)}
             rgb_frames = [None] * num_cameras
             for future in as_completed(futures):
                 cam_idx = futures[future]
@@ -72,16 +90,11 @@ def inference_video(caps, projections, sweep_config=None):
                     if rgb_frame is not None:
                         rgb_frames[cam_idx] = rgb_frame
                 except Exception as e:
-                    print(f"Error processing frame: {e}")
+                    print(f"Error processing frame from camera {cam_idx}: {e}")
 
-            # Skip frame if no frames are read
-            if all(frame is None for frame in rgb_frames):
-                print(f"No frames read for frame {frame_number}, skipping.")
-                frame_number += 1
-                continue
-
-            frame_keypoints = np.full((33, num_cameras, 2), np.nan)  # Initialize with NaNs
-            confidences = np.full((33, num_cameras), np.nan)          # Initialize with NaNs
+            # Initialize keypoints and confidences with NaNs for this frame
+            frame_keypoints = np.full((33, num_cameras, 2), np.nan)
+            confidences = np.full((33, num_cameras), np.nan)
 
             start_time = time.time()
             # Detect poses in parallel
@@ -96,9 +109,9 @@ def inference_video(caps, projections, sweep_config=None):
                     frame_keypoints[:, cam_idx, 1] = [landmark.y for landmark in landmarks]
                     confidences[:, cam_idx] = [landmark.visibility for landmark in landmarks]
                 else:
-                    print(f"No valid detection from camera {cam_idx}.")
+                    print(f"No valid detection from camera {cam_idx} at frame {frame_number}.")
 
-            # Proceed even if some cameras didn't detect landmarks
+            # Triangulate 3D points for this frame
             points_3d = np.full((33, 3), np.nan)  # Initialize 3D points with NaNs
 
             for landmark_idx in range(33):
@@ -130,8 +143,10 @@ def inference_video(caps, projections, sweep_config=None):
             if valid_frames:
                 last_rgb_frame = np.concatenate(valid_frames, axis=1)
 
-    for _, cap in caps:
-        cap.release()
+        # Release any remaining video captures
+        for cap_idx in range(num_cameras):
+            if caps_dict[cap_idx].isOpened():
+                caps_dict[cap_idx].release()
 
     inference_time = np.array(inference_time)
     return np.array(keypoints_data), inference_time, last_rgb_frame
