@@ -66,7 +66,7 @@ def make_homogeneous_rep_matrix(R, t):
     return P
 
 
-def get_projection_matrix(camera_ids, noise=False, file_path='utils/P_values.yaml'):
+def get_projection_matrix(camera_ids, noise=False, noise_percent=0.05, file_path='utils/P_values.yaml'):
     if isinstance(camera_ids, int):
         camera_ids = [camera_ids]
 
@@ -76,16 +76,17 @@ def get_projection_matrix(camera_ids, noise=False, file_path='utils/P_values.yam
 
     for camera_id in camera_ids:
         cam_key = f"Camera_{camera_id}"
-        if cam_key in P_dict:
-            P = np.array(P_dict[cam_key])
-            P[:, 3] = P[:, 3]  # Convert translation to meters
-        if noise:
-            noise_percent = 0.05
-            rg = np.random.default_rng(42)
-            P[:, :3] = P[:, :3] + np.random.normal(size=P[:, :3].shape, loc=np.mean(P[:, :3]) * noise_percent, scale=np.std(P[:, :3]) * noise_percent)
-            P[:, 3] = P[:, 3] + np.random.normal(size=P[:, 3].shape, loc=np.mean(P[:, 3]) * noise_percent, scale=np.abs(np.mean(P[:, 3])) * noise_percent)
+        if cam_key not in P_dict:
+            raise KeyError(f"Camera ID {camera_id} not found in file {file_path}")
 
-    return P
+        P = np.array(P_dict[cam_key])
+        if noise:
+            rg = np.random.default_rng()
+            P[:, :3] += rg.normal(loc=0, scale=np.std(P[:, :3]) * noise_percent, size=P[:, :3].shape)
+            P[:, 3] += rg.normal(loc=0, scale=np.abs(np.mean(P[:, 3])) * noise_percent, size=P[:, 3].shape)
+
+        projection_matrices[camera_id] = P
+    return projection_matrices
 
 def plot_cameras(camera_positions, camera_orientations):
     fig = plt.figure()
