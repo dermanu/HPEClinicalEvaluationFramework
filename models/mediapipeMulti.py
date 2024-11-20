@@ -6,13 +6,23 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.frameAugmentation import FrameAugmentor
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 from models.dlt import DLT, weighted_DLT
 
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+BaseOptions = mp.tasks.BaseOptions
+PoseLandmarker = mp.tasks.vision.PoseLandmarker
+PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
+VisionRunningMode = mp.tasks.vision.RunningMode
+
 # Load the pose landmarker model once to avoid reloading it multiple times
-options = mp.tasks.vision.PoseLandmarkerOptions(
-    base_options=mp.tasks.BaseOptions(model_asset_path='models/pose_landmarker_heavy.task'),
-    running_mode=mp.tasks.vision.RunningMode.IMAGE)
-PoseLandmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
+options = PoseLandmarkerOptions(
+    base_options=BaseOptions(model_asset_path='models/pose_landmarker_heavy.task'),
+    running_mode=VisionRunningMode.IMAGE)
+PoseLandmarker = vision.PoseLandmarker.create_from_options(options)
 
 
 def process_frame(cap, frameaug=None, sweep_config=None):
