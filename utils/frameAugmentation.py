@@ -30,7 +30,7 @@ def occlusion(frame):
     mask[y1:y2, x1:x2] = 1
 
     # Apply Gaussian noise to the cutout region
-    noise = iaa.AdditiveGaussianNoise(scale=0.5 * 255).augment_image(frame)
+    noise = iaa.AdditiveGaussianNoise(scale=0.8 * 255).augment_image(frame)
     frame[mask == 1] = noise[mask == 1]
 
     return frame

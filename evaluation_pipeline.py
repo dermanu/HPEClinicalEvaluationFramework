@@ -266,8 +266,6 @@ class Framework:
                 print("Infs in velocity_target:", np.isinf(gt_array).any())
                 print("velocity_predicted dtype:", pred_array.dtype)
                 print("velocity_target dtype:", gt_array.dtype)
-                print("velocity_predicted sample:", pred_array[0])
-                print("velocity_target sample:", gt_array[0])
 
                 pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(gt_array, pred_array)
                 velocity_m, velocity_s = metrics.mean_velocity_error(gt_array, pred_array, self.sample_rate, axis=-1)
