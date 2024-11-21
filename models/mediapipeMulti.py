@@ -99,11 +99,6 @@ def inference_video(caps, projections, sweep_config=None):
 
             # Process frames in parallel
             futures = {
-                executor.submit(process_frame, frames[cam], frameaug, sweep_config): cam
-                for cam in cam_indices if frames[cam] is not None
-            }
-
-            futures = {
                 executor.submit(
                     lambda cam: process_frame(frames[cam], frameaug, sweep_config), cam
                 ): cam for cam in cam_indices if frames[cam] is not None
@@ -138,9 +133,7 @@ def inference_video(caps, projections, sweep_config=None):
                 if landmarks:
                     for i, landmark in enumerate(landmarks[0]):
                         pxl_x = landmark.x * frame_dimensions[cam][0]
-                        print("X - 0: ", frame_dimensions[cam][0])
                         pxl_y = landmark.y * frame_dimensions[cam][1]
-                        print("Y - 1: ", frame_dimensions[cam][1])
                         pxl_x = int(round(pxl_x))
                         pxl_y = int(round(pxl_y))
                         frame_keypoints[i, idx, 0] = pxl_x

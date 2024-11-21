@@ -42,7 +42,7 @@ def DLT(projection_matrices, points_2d):
 
     # Loop over each keypoint
     for k in range(n_keypoints):
-        A = []
+        A v= []
         valid_views = []
 
         # For each view/camera, check if the point is valid
@@ -65,7 +65,7 @@ def DLT(projection_matrices, points_2d):
         # Check if we have enough views to triangulate
         if len(valid_views) >= 2:
             # Perform Singular Value Decomposition (SVD) to solve the system
-            U, s, Vh = linalg.svd(A)
+            U, s, Vh = linalg.svd(A, full_matrices=False)
 
             # Normalize and store the triangulated 3D point
             X = Vh[-1]
