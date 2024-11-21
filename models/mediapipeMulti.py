@@ -117,8 +117,8 @@ def inference_video(caps, projections, sweep_config=None):
                     frame_keypoints[:, idx, 0] = [landmark.x for landmark in landmarks[0]]
                     frame_keypoints[:, idx, 1] = [landmark.y for landmark in landmarks[0]]
                     confidences[:, idx] = [landmark.visibility for landmark in landmarks[0]]
-                else:
-                    print(f"No valid detection from camera {cam} at frame {frame_number}.")
+                #else:
+                #    print(f"No valid detection from camera {cam} at frame {frame_number}.")
 
             # Triangulate 3D points for this frame
             points_3d = np.full((33, 3), np.nan)  # Initialize 3D points with NaNs
