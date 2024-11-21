@@ -102,6 +102,13 @@ def inference_video(caps, projections, sweep_config=None):
                 executor.submit(process_frame, frames[cam], frameaug, sweep_config): cam
                 for cam in cam_indices if frames[cam] is not None
             }
+
+            futures = {
+                executor.submit(
+                    lambda cam: process_frame(frames[cam], frameaug, sweep_config), cam
+                ): cam for cam in cam_indices if frames[cam] is not None
+            }
+
             rgb_frames = {}
             frame_dimensions = {}
             for future in as_completed(futures):
@@ -121,8 +128,7 @@ def inference_video(caps, projections, sweep_config=None):
             start_time = time.time()
             # Detect poses in parallel
             pose_futures = {
-                executor.submit(detect_pose, rgb_frames[cam], frame_dimensions[cam][0], frame_dimensions[cam][1]): cam
-                for cam in rgb_frames
+                executor.submit(detect_pose, rgb_frames[cam]): cam for cam in rgb_frames
             }
 
             for future in as_completed(pose_futures):
