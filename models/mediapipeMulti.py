@@ -33,17 +33,33 @@ def process_frame(frame, frameaug=None, sweep_config=None):
     if frameaug is not None and sweep_config is not None:
         rgb_frame = frameaug.augment_frames(rgb_frame, sweep_config)
 
-    return rgb_frame
+    height, width = rgb_frame.shape[:2]
+
+    return rgb_frame, (width, height)
 
 
 def detect_pose(rgb_frame):
+    """Detects pose landmarks in the given RGB frame."""
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = pose_landmarker.detect(mp_image)
-
     return results.pose_landmarks if results.pose_landmarks else None
 
 
 def inference_video(caps, projections, sweep_config=None):
+    """
+    Processes video frames from multiple cameras, detects poses, scales landmarks to pixel coordinates,
+    triangulates 3D points, and aggregates keypoint data.
+
+    Parameters:
+    - caps: List of tuples (camera_index, cv2.VideoCapture object)
+    - projections: List of projection matrices corresponding to each camera
+    - sweep_config: Configuration for frame augmentation (optional)
+
+    Returns:
+    - keypoints_data: NumPy array of triangulated 3D keypoints
+    - inference_time: NumPy array of inference times per frame
+    - last_rgb_frame: Concatenated RGB frames from all cameras for the last processed frame
+    """
     if sweep_config and sweep_config._items.get('augmentation', 'none') != "none":
         frameaug = FrameAugmentor()
     else:
@@ -55,13 +71,11 @@ def inference_video(caps, projections, sweep_config=None):
     num_cameras = len(caps)
     last_rgb_frame = None
 
-    # Extract camera numbers from caps
     cam_indices = [cam for cam, _ in caps]
     cam_to_idx = {cam: idx for idx, cam in enumerate(cam_indices)}
     cap_status = {cam: True for cam in cam_indices}
-
-    # Convert caps to a dictionary
     caps_dict = dict(caps)
+
 
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
         while any(cap_status.values()):
@@ -89,12 +103,14 @@ def inference_video(caps, projections, sweep_config=None):
                 for cam in cam_indices if frames[cam] is not None
             }
             rgb_frames = {}
+            frame_dimensions = {}
             for future in as_completed(futures):
                 cam = futures[future]
                 try:
-                    rgb_frame = future.result()
+                    rgb_frame, dimensions = future.result()
                     if rgb_frame is not None:
                         rgb_frames[cam] = rgb_frame
+                        frame_dimensions[cam] = dimensions
                 except Exception as e:
                     print(f"Error processing frame from camera {cam}: {e}")
 
@@ -105,7 +121,7 @@ def inference_video(caps, projections, sweep_config=None):
             start_time = time.time()
             # Detect poses in parallel
             pose_futures = {
-                executor.submit(detect_pose, rgb_frames[cam]): cam
+                executor.submit(detect_pose, rgb_frames[cam], frame_dimensions[cam][0], frame_dimensions[cam][1]): cam
                 for cam in rgb_frames
             }
 
@@ -114,9 +130,16 @@ def inference_video(caps, projections, sweep_config=None):
                 idx = cam_to_idx[cam]
                 landmarks = future.result()
                 if landmarks:
-                    frame_keypoints[:, idx, 0] = [landmark.x for landmark in landmarks[0]]
-                    frame_keypoints[:, idx, 1] = [landmark.y for landmark in landmarks[0]]
-                    confidences[:, idx] = [landmark.visibility for landmark in landmarks[0]]
+                    for i, landmark in enumerate(landmarks[0]):
+                        pxl_x = landmark.x * frame_dimensions[cam][0]
+                        pxl_y = landmark.y * frame_dimensions[cam][1]
+                        frame_keypoints[i, idx, 0] = pxl_x
+                        frame_keypoints[i, idx, 1] = pxl_y
+                        confidences[i, idx] = landmark.visibility
+
+                    #frame_keypoints[:, idx, 0] = [landmark.x for landmark in landmarks[0]]
+                    #frame_keypoints[:, idx, 1] = [landmark.y for landmark in landmarks[0]]
+                    #confidences[:, idx] = [landmark.visibility for landmark in landmarks[0]]
                 #else:
                 #    print(f"No valid detection from camera {cam} at frame {frame_number}.")
 
