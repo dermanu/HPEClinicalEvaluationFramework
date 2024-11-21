@@ -39,7 +39,7 @@ def process_frame(frame, frameaug=None, sweep_config=None):
 def detect_pose(rgb_frame):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = pose_landmarker.detect(mp_image)
-    # print(f"Landmarks detected: {results.pose_landmarks is not None}")  # Debug: Check detection
+
     return results.pose_landmarks if results.pose_landmarks else None
 
 
@@ -57,21 +57,15 @@ def inference_video(caps, projections, sweep_config=None):
 
     # Extract camera numbers from caps
     cam_indices = [cam for cam, _ in caps]
-
-    # Map camera numbers to sequential indices
     cam_to_idx = {cam: idx for idx, cam in enumerate(cam_indices)}
-    idx_to_cam = {idx: cam for cam, idx in cam_to_idx.items()}
-
-    # Initialize cap status to keep track of which videos have ended
-    cap_status = {cam: True for cam in cam_indices}  # Use camera numbers as keys
+    cap_status = {cam: True for cam in cam_indices}
 
     # Convert caps to a dictionary
     caps_dict = dict(caps)
 
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
         while any(cap_status.values()):
-            frames = {}  # Use a dict to store frames by camera number
-
+            frames = {}
             # Read frames from caps in the main thread
             for cam in cam_indices:
                 if cap_status[cam]:
@@ -84,6 +78,10 @@ def inference_video(caps, projections, sweep_config=None):
                         frames[cam] = frame
                 else:
                     frames[cam] = None  # No more frames from this cap
+
+            # Skip processing if no valid frames are left
+            if not any(frame is not None for frame in frames.values()):
+                break
 
             # Process frames in parallel
             futures = {
