@@ -139,6 +139,8 @@ def inference_video(caps, projections, sweep_config=None):
                     for i, landmark in enumerate(landmarks[0]):
                         pxl_x = landmark.x * frame_dimensions[cam][0]
                         pxl_y = landmark.y * frame_dimensions[cam][1]
+                        pxl_x = int(round(pxl_x))
+                        pxl_y = int(round(pxl_y))
                         frame_keypoints[i, idx, 0] = pxl_x
                         frame_keypoints[i, idx, 1] = pxl_y
                         confidences[i, idx] = landmark.visibility
