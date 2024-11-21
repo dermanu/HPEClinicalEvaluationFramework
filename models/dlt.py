@@ -42,7 +42,7 @@ def DLT(projection_matrices, points_2d):
 
     # Loop over each keypoint
     for k in range(n_keypoints):
-        A v= []
+        A = []
         valid_views = []
 
         # For each view/camera, check if the point is valid
