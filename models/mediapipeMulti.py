@@ -115,7 +115,7 @@ def inference_video(caps, projections, sweep_config=None):
     caps_dict = dict(caps)
 
     # Prepare arguments for initializer
-    model_path = 'pose_landmarker_full.task'
+    model_path = 'models/pose_landmarker_full.task'
 
     # Initialize the pool with the initializer
     pool = Pool(
