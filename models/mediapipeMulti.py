@@ -3,28 +3,31 @@ cv2.setUseOptimized(True)
 cv2.setNumThreads(2)
 import numpy as np
 import time
-from multiprocessing import Pool
+from multiprocessing import Pool, Manager
 import mediapipe as mp
+from mediapipe.tasks import python
+from utils.frameAugmentation import FrameAugmentor
 from mediapipe.tasks.python import vision
-from models.dlt import DLT
+from models.dlt import DLT, weighted_DLT
 import os
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
-# Mediapipe setup
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-# Global variables for multiprocessing workers
+# Global variables for each process
 pose_landmarker = None
 frame_augmentor = None
 
+
 def init_worker(model_path, sweep_config):
     """
-    Initializer for each worker process. Initializes PoseLandmarker.
+    Initializer for each worker process. Initializes PoseLandmarker and FrameAugmentor.
     """
     global pose_landmarker
+    global frame_augmentor
 
     # Initialize PoseLandmarker
     pose_landmarker = vision.PoseLandmarker.create_from_options(
@@ -34,19 +37,31 @@ def init_worker(model_path, sweep_config):
         )
     )
 
+    # Initialize FrameAugmentor if needed
+    if sweep_config and sweep_config.get('augmentation', 'none') != "none":
+        frame_augmentor = FrameAugmentor()
+    else:
+        frame_augmentor = None
+
+
 def process_frame(args):
     """
-    Processes a single frame: detects pose and extracts keypoints.
+    Processes a single frame: augment, detect pose, and extract keypoints.
     """
     cam, frame = args
     if frame is None:
         return cam, None, None
 
     global pose_landmarker
+    global frame_augmentor
 
     # Convert and rotate frame
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+    # Apply frame augmentation if available
+    if frame_augmentor is not None:
+        rgb_frame = frame_augmentor.augment_frames(rgb_frame)
 
     height, width = rgb_frame.shape[:2]
 
@@ -64,14 +79,16 @@ def process_frame(args):
         for i, landmark in enumerate(landmarks[0]):
             pxl_x = landmark.x * width
             pxl_y = landmark.y * height
-            keypoints[i, 0] = int(round(pxl_x))
-            keypoints[i, 1] = int(round(pxl_y))
+            pxl_x = int(round(pxl_x))
+            pxl_y = int(round(pxl_y))
+            keypoints[i, 0] = pxl_x
+            keypoints[i, 1] = pxl_y
             confidences[i] = landmark.visibility
 
     return cam, keypoints, confidences
 
 
-def inference_video(caps, projections, model_path, sweep_config=None):
+def inference_video(caps, projections, sweep_config=None):
     """
     Processes video frames from multiple cameras using multiprocessing, detects poses,
     scales landmarks to pixel coordinates, triangulates 3D points, and aggregates keypoint data.
@@ -79,7 +96,6 @@ def inference_video(caps, projections, model_path, sweep_config=None):
     Parameters:
     - caps: List of tuples (camera_index, cv2.VideoCapture object)
     - projections: List of projection matrices corresponding to each camera
-    - model_path: Path to the Mediapipe model file
     - sweep_config: Configuration for frame augmentation (optional)
 
     Returns:
@@ -98,6 +114,9 @@ def inference_video(caps, projections, model_path, sweep_config=None):
     cap_status = {cam: True for cam in cam_indices}
     caps_dict = dict(caps)
 
+    # Prepare arguments for initializer
+    model_path = 'pose_landmarker_full.task'
+
     # Initialize the pool with the initializer
     pool = Pool(
         processes=num_cameras,
@@ -113,15 +132,16 @@ def inference_video(caps, projections, model_path, sweep_config=None):
                 if cap_status[cam]:
                     ret, frame = caps_dict[cam].read()
                     if not ret:
-                        cap_status[cam] = False  # End of video stream for this camera
-                        frames[cam] = None
+                        # End of video stream for this camera
+                        cap_status[cam] = False
+                        frames[cam] = None  # Set frame to None for inactive cameras
                         print(f"Camera {cam} has ended.")
                     else:
                         frames[cam] = frame
                 else:
                     frames[cam] = None  # No more frames from this camera
 
-            if not any(cap_status.values()):  # Check if all cameras are done
+            if not any(cap_status.values()):
                 print(f"All camera streams have ended at frame {frame_number}.")
                 break
 
@@ -136,6 +156,7 @@ def inference_video(caps, projections, model_path, sweep_config=None):
             # Collect results
             frame_keypoints = np.full((33, num_cameras, 2), np.nan)
             confidences = np.full((33, num_cameras), np.nan)
+            rgb_frames = {}
 
             for result in results:
                 cam, keypoints, conf = result
@@ -147,10 +168,13 @@ def inference_video(caps, projections, model_path, sweep_config=None):
                 if keypoints is not None:
                     frame_keypoints[:, idx, :] = keypoints
                     confidences[:, idx] = conf
+                    # Store the frame for visualization if needed
+                    rgb_frames[cam] = frames[cam]
 
             # Triangulate 3D points
             points_3d = np.full((33, 3), np.nan)
             for landmark_idx in range(33):
+                # Collect data for the current landmark across cameras
                 valid_indices = ~np.isnan(frame_keypoints[landmark_idx, :, 0])
                 num_valid_cameras = np.sum(valid_indices)
 
@@ -160,18 +184,25 @@ def inference_video(caps, projections, model_path, sweep_config=None):
                     valid_idxs = np.where(valid_indices)[0]
                     projections_valid = [projections[idx] for idx in valid_idxs]
 
+                    # Perform triangulation for the current landmark
                     try:
                         point_3d = DLT(projections_valid, keypoints_2d[np.newaxis, :, :])
                         points_3d[landmark_idx] = point_3d
                     except Exception as e:
                         print(f"Triangulation error for landmark {landmark_idx} in frame {frame_number}: {e}")
                 else:
+                    # Not enough data to triangulate this landmark
                     print(f"Not enough data to triangulate landmark {landmark_idx} in frame {frame_number}.")
 
             keypoints_data.append(points_3d)
             end_time = time.time()
             inference_time.append(end_time - start_time)
             frame_number += 1
+
+            # Optional: Prepare the last RGB frame for display or saving
+            rotated_frames = [np.rot90(frames[cam], k=-1) for cam in cam_indices if cam in frames]
+            if rotated_frames:
+                last_rgb_frame = np.concatenate(rotated_frames, axis=1)
 
     finally:
         pool.close()
@@ -187,3 +218,67 @@ def inference_video(caps, projections, model_path, sweep_config=None):
     inference_time = np.array(inference_time)
 
     return keypoints_data, inference_time, last_rgb_frame
+
+
+#
+#
+# import yaml
+#
+# def load_projection_matrix(cam_index, file_path='P_values.yaml'):
+#     """
+#     Loads the projection matrix for a specified camera index from a YAML file.
+#
+#     Parameters:
+#         cam_index (int): The index of the camera (0-based) to retrieve.
+#         file_path (str): Path to the YAML file containing the projection matrices.
+#
+#     Returns:
+#         np.ndarray: The 3x4 projection matrix for the specified camera.
+#     """
+#     # Load the YAML file
+#     with open(file_path, 'r') as yaml_file:
+#         P_dict = yaml.safe_load(yaml_file)
+#
+#     # Retrieve and return the projection matrix for the specified camera
+#     cam_key = f"Camera_{cam_index}"
+#     if cam_key in P_dict:
+#         return np.array(P_dict[cam_key])
+#     else:
+#         raise ValueError(f"Camera index {cam_index} is not in the file.")
+#
+#
+# def write_keypoints_to_disk(filename, kpts):
+#     fout = open(filename, 'w')
+#
+#     for frame_kpts in kpts:
+#         for kpt in frame_kpts:
+#             if len(kpt) == 2:
+#                 fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ')
+#             else:
+#                 fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ' + str(kpt[2]) + ' ')
+#
+#         fout.write('\n')
+#     fout.close()
+#
+#
+# if __name__ == '__main__':
+#     # Initialize video captures
+#     input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi'
+#     input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
+#
+#     cap0 = cv2.VideoCapture(input_stream1)
+#     cap1 = cv2.VideoCapture(input_stream2)
+#
+#     caps = [(0, cap0), (1, cap1)]  # Assign camera indices
+#
+#     # Load projection matrices
+#     P0 = load_projection_matrix(0)
+#     P1 = load_projection_matrix(4)
+#     projections = [P0, P1]
+#
+#     # Run inference
+#     keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
+#
+#     # Save or process results as needed
+#     #this will create keypoints file in current working folder
+#     write_keypoints_to_disk('kpts_3D.dat', keypoints_data)
