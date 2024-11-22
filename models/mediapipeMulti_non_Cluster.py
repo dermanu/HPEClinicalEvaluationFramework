@@ -208,16 +208,18 @@ def inference_video(caps, projections, sweep_config=None):
         pool.close()
         pool.join()
         # Release any remaining video captures
-#         for cam in cam_indices:
-#             if caps_dict[cam].isOpened():
-#                 caps_dict[cam].release()
-#         cv2.destroyAllWindows()
-#
-#     # Convert lists to numpy arrays
-#     keypoints_data = np.array(keypoints_data)
-#     inference_time = np.array(inference_time)
-#
-#     return keypoints_data, inference_time, last_rgb_frame
+        for cam in cam_indices:
+            if caps_dict[cam].isOpened():
+                caps_dict[cam].release()
+        cv2.destroyAllWindows()
+
+    # Convert lists to numpy arrays
+    keypoints_data = np.array(keypoints_data)
+    inference_time = np.array(inference_time)
+
+    return keypoints_data, inference_time, last_rgb_frame
+
+
 #
 #
 # import yaml

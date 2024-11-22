@@ -1,76 +1,52 @@
-from mpi4py import MPI
 import cv2
+cv2.setUseOptimized(True)
+cv2.setNumThreads(2)
+import numpy as np
+import time
+from multiprocessing import Pool
 import mediapipe as mp
 from mediapipe.tasks.python import vision
-import numpy as np
-import yaml
-import time
-from models.dlt import DLT, weighted_DLT
-from utils.frameAugmentation import FrameAugmentor
+from models.dlt import DLT
 import os
-import sys
 
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
-num_cameras = size - 1
+# Mediapipe setup
+BaseOptions = mp.tasks.BaseOptions
+PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
+VisionRunningMode = mp.tasks.vision.RunningMode
 
-if num_cameras < 1:
-    if rank == 0:
-        print("Please run with at least one worker (camera).")
-    MPI.Finalize()
-    exit()
+# Global variables for multiprocessing workers
+pose_landmarker = None
+frame_augmentor = None
 
-# Shared configurations
-model_path = 'pose_landmarker_full.task'  # Adjust as needed
-sweep_config = None  # Replace with actual configuration if necessary
-
-def load_projection_matrices(file_path='P_values.yaml'):
-    with open(file_path, 'r') as yaml_file:
-        P_dict = yaml.safe_load(yaml_file)
-    projection_matrices = {}
-    for key, value in P_dict.items():
-        projection_matrices[key] = np.array(value)
-    return projection_matrices
-
-def write_keypoints_to_disk(filename, kpts):
-    with open(filename, 'w') as fout:
-        for frame_kpts in kpts:
-            for kpt in frame_kpts:
-                fout.write(' '.join(map(str, kpt)) + ' ')
-            fout.write('\n')
-
-def init_worker():
+def init_worker(model_path, sweep_config):
+    """
+    Initializer for each worker process. Initializes PoseLandmarker.
+    """
     global pose_landmarker
-    global frame_augmentor
 
+    # Initialize PoseLandmarker
     pose_landmarker = vision.PoseLandmarker.create_from_options(
-        vision.PoseLandmarkerOptions(
-            base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
-            running_mode=vision.RunningMode.IMAGE
+        PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=model_path),
+            running_mode=VisionRunningMode.IMAGE
         )
     )
 
-    if sweep_config and sweep_config.get('augmentation', 'none') != "none":
-        frame_augmentor = FrameAugmentor()
-    else:
-        frame_augmentor = None
-
-def process_frame(frame):
-    global pose_landmarker
-    global frame_augmentor
-
+def process_frame(args):
+    """
+    Processes a single frame: detects pose and extracts keypoints.
+    """
+    cam, frame = args
     if frame is None:
-        return None, None
+        return cam, None, None
+
+    global pose_landmarker
 
     # Convert and rotate frame
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-    # Apply frame augmentation if available
-    if frame_augmentor is not None:
-        rgb_frame = frame_augmentor.augment_frames(rgb_frame)
 
     height, width = rgb_frame.shape[:2]
 
@@ -80,7 +56,7 @@ def process_frame(frame):
     landmarks = results.pose_landmarks if results.pose_landmarks else None
 
     # Collect keypoints and confidences
-    num_landmarks = 33
+    num_landmarks = 33  # Mediapipe Pose has 33 landmarks
     keypoints = np.full((num_landmarks, 2), np.nan)
     confidences = np.full(num_landmarks, np.nan)
 
@@ -92,100 +68,122 @@ def process_frame(frame):
             keypoints[i, 1] = int(round(pxl_y))
             confidences[i] = landmark.visibility
 
-    return keypoints, confidences
+    return cam, keypoints, confidences
 
-def main_master():
-    projection_matrices = load_projection_matrices()
 
+def inference_video(caps, projections, model_path, sweep_config=None):
+    """
+    Processes video frames from multiple cameras using multiprocessing, detects poses,
+    scales landmarks to pixel coordinates, triangulates 3D points, and aggregates keypoint data.
+
+    Parameters:
+    - caps: List of tuples (camera_index, cv2.VideoCapture object)
+    - projections: List of projection matrices corresponding to each camera
+    - model_path: Path to the Mediapipe model file
+    - sweep_config: Configuration for frame augmentation (optional)
+
+    Returns:
+    - keypoints_data: NumPy array of triangulated 3D keypoints
+    - inference_time: NumPy array of inference times per frame
+    - last_rgb_frame: Concatenated RGB frames from all cameras for the last processed frame
+    """
     keypoints_data = []
+    inference_time = []
     frame_number = 0
+    num_cameras = len(caps)
+    last_rgb_frame = None
 
-    while True:
-        frame_keypoints = np.full((33, num_cameras, 2), np.nan)
-        confidences = np.full((33, num_cameras), np.nan)
-        end_of_stream = False
+    cam_indices = [cam for cam, _ in caps]
+    cam_to_idx = {cam: idx for idx, cam in enumerate(cam_indices)}
+    cap_status = {cam: True for cam in cam_indices}
+    caps_dict = dict(caps)
 
-        for cam_idx in range(1, num_cameras + 1):
-            data = comm.recv(source=cam_idx, tag=frame_number)
-            if data is None:
-                end_of_stream = True
+    # Initialize the pool with the initializer
+    pool = Pool(
+        processes=num_cameras,
+        initializer=init_worker,
+        initargs=(model_path, sweep_config)
+    )
+
+    try:
+        while True:
+            frames = {}
+            # Read one frame from each camera
+            for cam in cam_indices:
+                if cap_status[cam]:
+                    ret, frame = caps_dict[cam].read()
+                    if not ret:
+                        cap_status[cam] = False  # End of video stream for this camera
+                        frames[cam] = None
+                        print(f"Camera {cam} has ended.")
+                    else:
+                        frames[cam] = frame
+                else:
+                    frames[cam] = None  # No more frames from this camera
+
+            if not any(cap_status.values()):  # Check if all cameras are done
+                print(f"All camera streams have ended at frame {frame_number}.")
                 break
-            keypoints, conf = data
-            frame_keypoints[:, cam_idx - 1, :] = keypoints
-            confidences[:, cam_idx - 1] = conf
 
-        if end_of_stream:
-            print("All camera streams have ended.")
-            break
+            start_time = time.time()
 
-        # Triangulate 3D points
-        points_3d = np.full((33, 3), np.nan)
-        for landmark_idx in range(33):
-            valid_indices = ~np.isnan(frame_keypoints[landmark_idx, :, 0])
-            num_valid = np.sum(valid_indices)
-            if num_valid >= 2:
-                keypoints_2d = frame_keypoints[landmark_idx, valid_indices, :]
-                cams = np.where(valid_indices)[0]
-                projection_keys = [f"Camera_{cam}" for cam in cams]
-                projections_valid = [projection_matrices[key] for key in projection_keys]
-                try:
-                    # Adjust DLT function as per your implementation
-                    point_3d = DLT(projections_valid, keypoints_2d[np.newaxis, :, :])
-                    points_3d[landmark_idx] = point_3d
-                except Exception as e:
-                    print(f"Triangulation error for landmark {landmark_idx} in frame {frame_number}: {e}")
-            else:
-                print(f"Not enough data to triangulate landmark {landmark_idx} in frame {frame_number}.")
+            # Prepare arguments for multiprocessing: list of (cam, frame)
+            args_list = [(cam, frames[cam]) for cam in cam_indices]
 
-        keypoints_data.append(points_3d)
-        frame_number += 1
+            # Process frames in parallel
+            results = pool.map(process_frame, args_list)
 
-    # Optionally, send termination signal to workers
-    for cam_idx in range(1, num_cameras + 1):
-        comm.send(None, dest=cam_idx, tag=0)
+            # Collect results
+            frame_keypoints = np.full((33, num_cameras, 2), np.nan)
+            confidences = np.full((33, num_cameras), np.nan)
 
-    # Save results
+            for result in results:
+                cam, keypoints, conf = result
+                if cam is None:
+                    continue
+                idx = cam_to_idx.get(cam)
+                if idx is None:
+                    continue
+                if keypoints is not None:
+                    frame_keypoints[:, idx, :] = keypoints
+                    confidences[:, idx] = conf
+
+            # Triangulate 3D points
+            points_3d = np.full((33, 3), np.nan)
+            for landmark_idx in range(33):
+                valid_indices = ~np.isnan(frame_keypoints[landmark_idx, :, 0])
+                num_valid_cameras = np.sum(valid_indices)
+
+                if num_valid_cameras >= 2:
+                    # Collect 2D keypoints and projection matrices for valid cameras
+                    keypoints_2d = frame_keypoints[landmark_idx, valid_indices, :]
+                    valid_idxs = np.where(valid_indices)[0]
+                    projections_valid = [projections[idx] for idx in valid_idxs]
+
+                    try:
+                        point_3d = DLT(projections_valid, keypoints_2d[np.newaxis, :, :])
+                        points_3d[landmark_idx] = point_3d
+                    except Exception as e:
+                        print(f"Triangulation error for landmark {landmark_idx} in frame {frame_number}: {e}")
+                else:
+                    print(f"Not enough data to triangulate landmark {landmark_idx} in frame {frame_number}.")
+
+            keypoints_data.append(points_3d)
+            end_time = time.time()
+            inference_time.append(end_time - start_time)
+            frame_number += 1
+
+    finally:
+        pool.close()
+        pool.join()
+        # Release any remaining video captures
+        for cam in cam_indices:
+            if caps_dict[cam].isOpened():
+                caps_dict[cam].release()
+        cv2.destroyAllWindows()
+
+    # Convert lists to numpy arrays
     keypoints_data = np.array(keypoints_data)
-    write_keypoints_to_disk('kpts_3D.dat', keypoints_data)
-    print("Triangulation complete and results saved.")
+    inference_time = np.array(inference_time)
 
-def main_worker(cam_index, video_path):
-    # Initialize PoseLandmarker and FrameAugmentor
-    init_worker()
-
-    cap = cv2.VideoCapture(video_path)
-    frame_number = 0
-
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        keypoints, conf = process_frame(frame)
-
-        # Send keypoints to master
-        comm.send((keypoints, conf), dest=0, tag=frame_number)
-        frame_number += 1
-
-    cap.release()
-    print(f"Camera {cam_index} processing complete.")
-
-if rank == 0:
-    main_master()
-else:
-    # Assign camera indices based on rank
-    cam_idx = rank - 1
-
-    # Define video paths for each camera
-    video_paths = {
-        0: '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi',
-        1: '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi',
-        # Add more cameras as needed
-    }
-
-    if cam_idx not in video_paths:
-        print(f"No video path assigned for camera index {cam_idx}.")
-        comm.send(None, dest=0, tag=0)
-    else:
-        video_path = video_paths[cam_idx]
-        main_worker(cam_idx, video_path)
+    return keypoints_data, inference_time, last_rgb_frame
