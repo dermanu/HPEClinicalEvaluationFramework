@@ -17,12 +17,6 @@ BaseOptions = mp.tasks.BaseOptions
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-# Load the pose landmarker model once to avoid reloading it multiple times
-options = PoseLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path='models/pose_landmarker_heavy.task'),
-    running_mode=VisionRunningMode.IMAGE)
-pose_landmarker = vision.PoseLandmarker.create_from_options(options)
-
 
 def process_frame(frame, frameaug=None, sweep_config=None):
     if frame is None:
@@ -38,7 +32,7 @@ def process_frame(frame, frameaug=None, sweep_config=None):
     return rgb_frame, (width, height)
 
 
-def detect_pose(rgb_frame):
+def detect_pose(rgb_frame, pose_landmarker):
     """Detects pose landmarks in the given RGB frame."""
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = pose_landmarker.detect(mp_image)
@@ -76,6 +70,13 @@ def inference_video(caps, projections, sweep_config=None):
     cap_status = {cam: True for cam in cam_indices}
     caps_dict = dict(caps)
 
+    # Create a PoseLandmarker instance per camera
+    pose_landmarkers = {}
+    for cam in cam_indices:
+        options = PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path='models/pose_landmarker_heavy.task'),
+            running_mode=VisionRunningMode.IMAGE)
+        pose_landmarkers[cam] = vision.PoseLandmarker.create_from_options(options)
 
     with ThreadPoolExecutor(max_workers=num_cameras) as executor:
         while any(cap_status.values()):
@@ -123,7 +124,7 @@ def inference_video(caps, projections, sweep_config=None):
             start_time = time.time()
             # Detect poses in parallel
             pose_futures = {
-                executor.submit(detect_pose, rgb_frames[cam]): cam for cam in rgb_frames
+                executor.submit(detect_pose, rgb_frames[cam], pose_landmarkers[cam]): cam for cam in rgb_frames
             }
 
             for future in as_completed(pose_futures):
