@@ -2,8 +2,9 @@
 #SBATCH --partition=GPUQ
 #SBATCH --account=ie-idi
 #SBATCH --time=0-05:00:00          # Adjust time as needed
+#SBATCH --ntasks=5                  # Define task count
 #SBATCH --nodes=2                  # 1 compute node
-#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
 #SBATCH --cpus-per-task=8          # 2 CPU cores
 #SBATCH --mem=32G                  # Adjust memory if needed
 #SBATCH --gres=gpu:1
