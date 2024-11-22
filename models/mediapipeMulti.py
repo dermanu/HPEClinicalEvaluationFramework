@@ -7,12 +7,10 @@ from multiprocessing import Pool, Manager
 import mediapipe as mp
 from mediapipe.tasks import python
 from utils.frameAugmentation import FrameAugmentor
-
 from mediapipe.tasks.python import vision
 from models.dlt import DLT, weighted_DLT
 import os
-import logging
-
+from mpi4py import MPI
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
@@ -118,7 +116,7 @@ def inference_video(caps, projections, sweep_config=None):
     caps_dict = dict(caps)
 
     # Prepare arguments for initializer
-    model_path = 'pose_landmarker_heavy.task'
+    model_path = 'pose_landmarker_full.task'
 
     # Initialize the pool with the initializer
     pool = Pool(
@@ -211,18 +209,18 @@ def inference_video(caps, projections, sweep_config=None):
         pool.close()
         pool.join()
         # Release any remaining video captures
-        for cam in cam_indices:
-            if caps_dict[cam].isOpened():
-                caps_dict[cam].release()
-        cv2.destroyAllWindows()
-
-    # Convert lists to numpy arrays
-    keypoints_data = np.array(keypoints_data)
-    inference_time = np.array(inference_time)
-
-    return keypoints_data, inference_time, last_rgb_frame
-
-
+#         for cam in cam_indices:
+#             if caps_dict[cam].isOpened():
+#                 caps_dict[cam].release()
+#         cv2.destroyAllWindows()
+#
+#     # Convert lists to numpy arrays
+#     keypoints_data = np.array(keypoints_data)
+#     inference_time = np.array(inference_time)
+#
+#     return keypoints_data, inference_time, last_rgb_frame
+#
+#
 # import yaml
 #
 # def load_projection_matrix(cam_index, file_path='P_values.yaml'):

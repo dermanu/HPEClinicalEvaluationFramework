@@ -1,6 +1,7 @@
 program: evaluation_pipeline.py
 name: MultiEval
 command:
+  - mpirun
   - python
   - -m
   - evaluation_pipeline
