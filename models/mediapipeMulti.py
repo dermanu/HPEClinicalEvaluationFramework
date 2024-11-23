@@ -1,24 +1,26 @@
+import os
 import cv2
-cv2.setUseOptimized(True)
-cv2.setNumThreads(2)
 import numpy as np
 import time
 import mediapipe as mp
 from mediapipe.tasks import python
-from utils.frameAugmentation import FrameAugmentor
 from mediapipe.tasks.python import vision
+from utils.frameAugmentation import FrameAugmentor
 from models.dlt import DLT, weighted_DLT
-import os
+import yaml
 
+# Suppress TensorFlow logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
+# Initialize Mediapipe options
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-# Initialize PoseLandmarker and FrameAugmentor globally
+# Global variables for PoseLandmarker and FrameAugmentor
 pose_landmarker = None
 frame_augmentor = None
+
 
 def initialize_pose_landmarker(model_path, sweep_config):
     """
@@ -35,13 +37,14 @@ def initialize_pose_landmarker(model_path, sweep_config):
         )
     )
 
-    # Initialize FrameAugmentor if needed
-    if sweep_config and sweep_config.get('augmentation', 'none') != "none":
+    # Initialize FrameAugmentor if augmentation is specified
+    if sweep_config and sweep_config._items['augmentation'] != "none":
         frame_augmentor = FrameAugmentor()
     else:
         frame_augmentor = None
 
-def process_frame(cam, frame):
+
+def process_frame(cam, frame, sweep_config):
     """
     Processes a single frame: augment, detect pose, and extract keypoints.
     """
@@ -57,7 +60,7 @@ def process_frame(cam, frame):
 
     # Apply frame augmentation if available
     if frame_augmentor is not None:
-        rgb_frame = frame_augmentor.augment_frames(rgb_frame)
+        rgb_frame = frame_augmentor.augment_frames(rgb_frame, sweep_config)
 
     height, width = rgb_frame.shape[:2]
 
@@ -73,15 +76,13 @@ def process_frame(cam, frame):
 
     if landmarks:
         for i, landmark in enumerate(landmarks[0]):
-            pxl_x = landmark.x * width
-            pxl_y = landmark.y * height
-            pxl_x = int(round(pxl_x))
-            pxl_y = int(round(pxl_y))
-            keypoints[i, 0] = pxl_x
-            keypoints[i, 1] = pxl_y
+            pxl_x = int(round(landmark.x * width))
+            pxl_y = int(round(landmark.y * height))
+            keypoints[i] = [pxl_x, pxl_y]
             confidences[i] = landmark.visibility
 
     return cam, keypoints, confidences
+
 
 def inference_video(caps, projections, sweep_config=None):
     """
@@ -110,7 +111,7 @@ def inference_video(caps, projections, sweep_config=None):
     caps_dict = dict(caps)
 
     # Initialize PoseLandmarker and FrameAugmentor
-    model_path = 'models/pose_landmarker_full.task'
+    model_path = 'pose_landmarker_full.task'
     initialize_pose_landmarker(model_path, sweep_config)
 
     try:
@@ -143,14 +144,9 @@ def inference_video(caps, projections, sweep_config=None):
 
             for cam in cam_indices:
                 frame = frames[cam]
-                cam_result = process_frame(cam, frame)
-                cam, keypoints, conf = cam_result
-                if cam is None:
-                    continue
-                idx = cam_to_idx.get(cam)
-                if idx is None:
-                    continue
+                _, keypoints, conf = process_frame(cam, frame, sweep_config)
                 if keypoints is not None:
+                    idx = cam_to_idx[cam]
                     frame_keypoints[:, idx, :] = keypoints
                     confidences[:, idx] = conf
                     # Store the frame for visualization if needed
@@ -202,65 +198,67 @@ def inference_video(caps, projections, sweep_config=None):
 
     return keypoints_data, inference_time, last_rgb_frame
 
-# import yaml
-#
-# def load_projection_matrix(cam_index, file_path='P_values.yaml'):
-#     """
-#     Loads the projection matrix for a specified camera index from a YAML file.
-#
-#     Parameters:
-#         cam_index (int): The index of the camera (0-based) to retrieve.
-#         file_path (str): Path to the YAML file containing the projection matrices.
-#
-#     Returns:
-#         np.ndarray: The 3x4 projection matrix for the specified camera.
-#     """
-#     # Load the YAML file
-#     with open(file_path, 'r') as yaml_file:
-#         P_dict = yaml.safe_load(yaml_file)
-#
-#     # Retrieve and return the projection matrix for the specified camera
-#     cam_key = f"Camera_{cam_index}"
-#     if cam_key in P_dict:
-#         return np.array(P_dict[cam_key])
-#     else:
-#         raise ValueError(f"Camera index {cam_index} is not in the file.")
-#
-# def write_keypoints_to_disk(filename, kpts):
-#     """
-#     Writes the 3D keypoints to a disk file.
-#
-#     Parameters:
-#         filename (str): The name of the file to write the keypoints.
-#         kpts (np.ndarray): The array of 3D keypoints.
-#     """
-#     with open(filename, 'w') as fout:
-#         for frame_kpts in kpts:
-#             for kpt in frame_kpts:
-#                 if len(kpt) == 2:
-#                     fout.write(f"{kpt[0]} {kpt[1]} ")
-#                 else:
-#                     fout.write(f"{kpt[0]} {kpt[1]} {kpt[2]} ")
-#             fout.write('\n')
-#
-# if __name__ == '__main__':
-#     # Initialize video captures
-#     input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi'
-#     input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
-#
-#     cap0 = cv2.VideoCapture(input_stream1)
-#     cap1 = cv2.VideoCapture(input_stream2)
-#
-#     caps = [(0, cap0), (1, cap1)]  # Assign camera indices
-#
-#     # Load projection matrices
-#     P0 = load_projection_matrix(0)
-#     P1 = load_projection_matrix(4)
-#     projections = [P0, P1]
-#
-#     # Run inference
-#     keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
-#
-#     # Save or process results as needed
-#     # This will create a keypoints file in the current working folder
-#     write_keypoints_to_disk('kpts_3D.dat', keypoints_data)
+def load_projection_matrix(cam_index, file_path='P_values.yaml'):
+    """
+    Loads the projection matrix for a specified camera index from a YAML file.
+
+    Parameters:
+        cam_index (int): The index of the camera (0-based) to retrieve.
+        file_path (str): Path to the YAML file containing the projection matrices.
+
+    Returns:
+        np.ndarray: The 3x4 projection matrix for the specified camera.
+    """
+    with open(file_path, 'r') as yaml_file:
+        P_dict = yaml.safe_load(yaml_file)
+
+    cam_key = f"Camera_{cam_index}"
+    if cam_key in P_dict:
+        return np.array(P_dict[cam_key])
+    else:
+        raise ValueError(f"Camera index {cam_index} is not in the file.")
+
+
+def write_keypoints_to_disk(filename, kpts):
+    """
+    Writes the 3D keypoints to a disk file.
+
+    Parameters:
+        filename (str): The name of the file to write the keypoints.
+        kpts (np.ndarray): The array of 3D keypoints.
+    """
+    with open(filename, 'w') as fout:
+        for frame_kpts in kpts:
+            for kpt in frame_kpts:
+                if len(kpt) == 2:
+                    fout.write(f"{kpt[0]} {kpt[1]} ")
+                else:
+                    fout.write(f"{kpt[0]} {kpt[1]} {kpt[2]} ")
+            fout.write('\n')
+
+
+if __name__ == '__main__':
+    # Initialize video captures
+    input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi'
+    input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
+
+    cap0 = cv2.VideoCapture(input_stream1)
+    cap1 = cv2.VideoCapture(input_stream2)
+
+    caps = [(0, cap0), (4, cap1)]  # Assign camera indices (Ensure indices match projection matrices)
+
+    # Load projection matrices
+    try:
+        P0 = load_projection_matrix(0)  # Camera index 0
+        P1 = load_projection_matrix(4)  # Camera index 4
+    except ValueError as e:
+        print(e)
+        exit(1)
+
+    projections = [P0, P1]
+
+    # Run inference
+    keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
+
+    # Save the 3D keypoints to disk
+    write_keypoints_to_disk('../../bodypose3d/kpts_3D.dat', keypoints_data)

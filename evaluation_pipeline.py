@@ -431,7 +431,7 @@ class Framework:
                     #                                                   self.smoothing_fun)
 
                     # Procrustes Alignment
-                    gt_keypoints, pred_keypoints, error_count = align_procrustes(gt_keypoints_np, pred_keypoints)
+                    gt_keypoints, pred_keypoints, error_count = align_procrustes_old(gt_keypoints_np, pred_keypoints)
                     error_count_all += error_count
 
                     # Morph ground truth to format of predicted keypoints

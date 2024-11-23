@@ -1,4 +1,7 @@
 import cv2
+
+from skeletonMorphing.trainSkeletonMorphingSweep import sweep_config
+
 cv2.setUseOptimized(True)
 cv2.setNumThreads(2)
 import numpy as np
@@ -20,6 +23,7 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 # Global variables for each process
 pose_landmarker = None
 frame_augmentor = None
+sweep_config_global = None
 
 
 def init_worker(model_path, sweep_config):
@@ -28,6 +32,7 @@ def init_worker(model_path, sweep_config):
     """
     global pose_landmarker
     global frame_augmentor
+    global sweep_config_global
 
     # Initialize PoseLandmarker
     pose_landmarker = vision.PoseLandmarker.create_from_options(
@@ -38,10 +43,12 @@ def init_worker(model_path, sweep_config):
     )
 
     # Initialize FrameAugmentor if needed
-    if sweep_config and sweep_config.get('augmentation', 'none') != "none":
+    if sweep_config and sweep_config._items['augmentation'] != "none":
         frame_augmentor = FrameAugmentor()
     else:
         frame_augmentor = None
+
+    sweep_config_global = sweep_config
 
 
 def process_frame(args):
@@ -54,6 +61,7 @@ def process_frame(args):
 
     global pose_landmarker
     global frame_augmentor
+    global sweep_config_global
 
     # Convert and rotate frame
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -61,7 +69,7 @@ def process_frame(args):
 
     # Apply frame augmentation if available
     if frame_augmentor is not None:
-        rgb_frame = frame_augmentor.augment_frames(rgb_frame)
+        rgb_frame = frame_augmentor.augment_frames(rgb_frame, sweep_config_global)
 
     height, width = rgb_frame.shape[:2]
 
@@ -279,4 +287,4 @@ if __name__ == '__main__':
 
     # Save or process results as needed
     #this will create keypoints file in current working folder
-    write_keypoints_to_disk('kpts_3D.dat', keypoints_data)
+    write_keypoints_to_disk('../../bodypose3d/kpts_3D.dat', keypoints_data)
