@@ -3,7 +3,6 @@ cv2.setUseOptimized(True)
 cv2.setNumThreads(2)
 import numpy as np
 import time
-from multiprocessing import Pool, Manager
 import mediapipe as mp
 from mediapipe.tasks import python
 from utils.frameAugmentation import FrameAugmentor
@@ -17,14 +16,13 @@ BaseOptions = mp.tasks.BaseOptions
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-# Global variables for each process
+# Initialize PoseLandmarker and FrameAugmentor globally
 pose_landmarker = None
 frame_augmentor = None
 
-
-def init_worker(model_path, sweep_config):
+def initialize_pose_landmarker(model_path, sweep_config):
     """
-    Initializer for each worker process. Initializes PoseLandmarker and FrameAugmentor.
+    Initializes PoseLandmarker and FrameAugmentor.
     """
     global pose_landmarker
     global frame_augmentor
@@ -43,12 +41,10 @@ def init_worker(model_path, sweep_config):
     else:
         frame_augmentor = None
 
-
-def process_frame(args):
+def process_frame(cam, frame):
     """
     Processes a single frame: augment, detect pose, and extract keypoints.
     """
-    cam, frame = args
     if frame is None:
         return cam, None, None
 
@@ -87,10 +83,9 @@ def process_frame(args):
 
     return cam, keypoints, confidences
 
-
 def inference_video(caps, projections, sweep_config=None):
     """
-    Processes video frames from multiple cameras using multiprocessing, detects poses,
+    Processes video frames from multiple cameras sequentially, detects poses,
     scales landmarks to pixel coordinates, triangulates 3D points, and aggregates keypoint data.
 
     Parameters:
@@ -114,15 +109,9 @@ def inference_video(caps, projections, sweep_config=None):
     cap_status = {cam: True for cam in cam_indices}
     caps_dict = dict(caps)
 
-    # Prepare arguments for initializer
+    # Initialize PoseLandmarker and FrameAugmentor
     model_path = 'models/pose_landmarker_full.task'
-
-    # Initialize the pool with the initializer
-    pool = Pool(
-        processes=num_cameras,
-        initializer=init_worker,
-        initargs=(model_path, sweep_config)
-    )
+    initialize_pose_landmarker(model_path, sweep_config)
 
     try:
         while True:
@@ -147,19 +136,15 @@ def inference_video(caps, projections, sweep_config=None):
 
             start_time = time.time()
 
-            # Prepare arguments for multiprocessing: list of (cam, frame)
-            args_list = [(cam, frames[cam]) for cam in cam_indices]
-
-            # Process frames in parallel
-            results = pool.map(process_frame, args_list)
-
-            # Collect results
+            # Process frames sequentially
             frame_keypoints = np.full((33, num_cameras, 2), np.nan)
             confidences = np.full((33, num_cameras), np.nan)
             rgb_frames = {}
 
-            for result in results:
-                cam, keypoints, conf = result
+            for cam in cam_indices:
+                frame = frames[cam]
+                cam_result = process_frame(cam, frame)
+                cam, keypoints, conf = cam_result
                 if cam is None:
                     continue
                 idx = cam_to_idx.get(cam)
@@ -169,7 +154,7 @@ def inference_video(caps, projections, sweep_config=None):
                     frame_keypoints[:, idx, :] = keypoints
                     confidences[:, idx] = conf
                     # Store the frame for visualization if needed
-                    rgb_frames[cam] = frames[cam]
+                    rgb_frames[cam] = frame
 
             # Triangulate 3D points
             points_3d = np.full((33, 3), np.nan)
@@ -200,13 +185,11 @@ def inference_video(caps, projections, sweep_config=None):
             frame_number += 1
 
             # Optional: Prepare the last RGB frame for display or saving
-            rotated_frames = [np.rot90(frames[cam], k=-1) for cam in cam_indices if cam in frames]
+            rotated_frames = [np.rot90(frames[cam], k=-1) for cam in cam_indices if cam in frames and frames[cam] is not None]
             if rotated_frames:
                 last_rgb_frame = np.concatenate(rotated_frames, axis=1)
 
     finally:
-        pool.close()
-        pool.join()
         # Release any remaining video captures
         for cam in cam_indices:
             if caps_dict[cam].isOpened():
@@ -219,9 +202,6 @@ def inference_video(caps, projections, sweep_config=None):
 
     return keypoints_data, inference_time, last_rgb_frame
 
-
-#
-#
 # import yaml
 #
 # def load_projection_matrix(cam_index, file_path='P_values.yaml'):
@@ -246,20 +226,22 @@ def inference_video(caps, projections, sweep_config=None):
 #     else:
 #         raise ValueError(f"Camera index {cam_index} is not in the file.")
 #
-#
 # def write_keypoints_to_disk(filename, kpts):
-#     fout = open(filename, 'w')
+#     """
+#     Writes the 3D keypoints to a disk file.
 #
-#     for frame_kpts in kpts:
-#         for kpt in frame_kpts:
-#             if len(kpt) == 2:
-#                 fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ')
-#             else:
-#                 fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ' + str(kpt[2]) + ' ')
-#
-#         fout.write('\n')
-#     fout.close()
-#
+#     Parameters:
+#         filename (str): The name of the file to write the keypoints.
+#         kpts (np.ndarray): The array of 3D keypoints.
+#     """
+#     with open(filename, 'w') as fout:
+#         for frame_kpts in kpts:
+#             for kpt in frame_kpts:
+#                 if len(kpt) == 2:
+#                     fout.write(f"{kpt[0]} {kpt[1]} ")
+#                 else:
+#                     fout.write(f"{kpt[0]} {kpt[1]} {kpt[2]} ")
+#             fout.write('\n')
 #
 # if __name__ == '__main__':
 #     # Initialize video captures
@@ -280,5 +262,5 @@ def inference_video(caps, projections, sweep_config=None):
 #     keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
 #
 #     # Save or process results as needed
-#     #this will create keypoints file in current working folder
+#     # This will create a keypoints file in the current working folder
 #     write_keypoints_to_disk('kpts_3D.dat', keypoints_data)

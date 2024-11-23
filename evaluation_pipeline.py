@@ -397,21 +397,12 @@ class Framework:
                         # Desynchronize video streams
                         if config._items['augmentation'] == 'desynchronize':
                             caps = self.cam_desynchronizer.desynchronize(caps)
-
                         # Load camera parameter matrix and add noise if specified so
                         if config._items['augmentation'] == 'decalibration':
                             p_matrix_raw = camCali.get_projection_matrix(cameras, True)
-                            print(cameras)
-                            print(p_matrix_raw)
-                            print('decalibration')
                         else:
                             p_matrix_raw = camCali.get_projection_matrix(cameras, False)
-                            print(cameras)
-                            print(p_matrix_raw)
-                            print('no decalibration')
-
                         p_matrix = list(p_matrix_raw.values())
-                        print(p_matrix)
 
                         if self.model_name == "mediapipe":
                             gt_keypoints = gt_keypoints[0][1]
