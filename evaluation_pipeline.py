@@ -143,22 +143,22 @@ class Framework:
         self.model_skel_morph = self.load_morph_model()
         self.cam_desynchronizer = frameAug.CameraDesynchronizer()
 
-        self.participants = ['par4', 'par19', 'par11', 'par23']
-        #self.participants = ['par4']
+        #self.participants = ['par4', 'par19', 'par11', 'par23']
+        self.participants = ['par4']
 
         # Defines movement number in dataset related to different movement categories
-        self.movement_category = {
-           "upper": [1, 2, 3, 4],
-           "lower": [5, 6, 7, 8],
-           "complex": [9, 10, 11, 12, 13],
-           "sitting": [14, 15, 16, 17]
-        }
         # self.movement_category = {
-        #     "upper": [1],
-        #     "lower": [5],
-        #     "complex": [9],
-        #     "sitting": [14]
+        #    "upper": [1, 2, 3, 4],
+        #    "lower": [5, 6, 7, 8],
+        #    "complex": [9, 10, 11, 12, 13],
+        #    "sitting": [14, 15, 16, 17]
         # }
+        self.movement_category = {
+            "upper": [1],
+            "lower": [5],
+            "complex": [9],
+            "sitting": [14]
+        }
 
         # Joint names mapping for MoCap ground truth
         self.joint_names_gt = {
