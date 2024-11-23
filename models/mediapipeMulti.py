@@ -21,6 +21,16 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 pose_landmarker = None
 frame_augmentor = None
 
+def rotate_P(P):
+    rotation_matrix = np.array([
+        [0, -1, 0],
+        [1, 0, 0],
+        [0, 0, 1]
+    ])
+    P_rotated = rotation_matrix @ P[:3, :3]
+    P_rot_stack = np.hstack((P_rotated, P[:3, 3].reshape(-1, 1)))
+    return P_rot_stack
+
 
 def initialize_pose_landmarker(model_path, sweep_config):
     """
@@ -111,8 +121,12 @@ def inference_video(caps, projections, sweep_config=None):
     caps_dict = dict(caps)
 
     # Initialize PoseLandmarker and FrameAugmentor
-    model_path = 'models/pose_landmarker_full.task'
+    model_path = 'pose_landmarker_full.task'
     initialize_pose_landmarker(model_path, sweep_config)
+
+    for idx, P in enumerate(projections):
+        projections[idx] = rotate_P(P)
+
 
     try:
         while True:
@@ -256,15 +270,15 @@ if __name__ == '__main__':
             [0, 0, 1]
         ])
 
-        P0_raw = load_projection_matrix(0)  # Camera index 0
-        P1_raw = load_projection_matrix(4)  # Camera index 4
+        P0 = load_projection_matrix(0)  # Camera index 0
+        P1 = load_projection_matrix(4)  # Camera index 4
 
         # Update projection matrices
-        P0_rotated = rotation_matrix @ P0_raw[:3, :3]
-        P0 = np.hstack((P0_rotated, P0_raw[:3, 3].reshape(-1, 1)))
-
-        P1_rotated = rotation_matrix @ P1_raw[:3, :3]
-        P1 = np.hstack((P1_rotated, P0_raw[:3, 3].reshape(-1, 1)))
+        # P0_rotated = rotation_matrix @ P0_raw[:3, :3]
+        # P0 = np.hstack((P0_rotated, P0_raw[:3, 3].reshape(-1, 1)))
+        #
+        # P1_rotated = rotation_matrix @ P1_raw[:3, :3]
+        # P1 = np.hstack((P1_rotated, P0_raw[:3, 3].reshape(-1, 1)))
 
     except ValueError as e:
         print(e)
