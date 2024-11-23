@@ -213,7 +213,6 @@ class Framework:
         with torch.no_grad():
             morphed_pose = self.model_skel_morph(inp_poses)
 
-        # Denormalize the output data
         morphed_pose = morphed_pose.view(-1, input_pose.size(1), input_pose.size(2)).cpu().detach().numpy()
         return morphed_pose
 

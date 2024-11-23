@@ -56,7 +56,7 @@ def process_frame(cam, frame, sweep_config):
 
     # Convert and rotate frame
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    #rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
     # Apply frame augmentation if available
     if frame_augmentor is not None:
@@ -111,7 +111,7 @@ def inference_video(caps, projections, sweep_config=None):
     caps_dict = dict(caps)
 
     # Initialize PoseLandmarker and FrameAugmentor
-    model_path = 'models/pose_landmarker_full.task'
+    model_path = 'pose_landmarker_full.task'
     initialize_pose_landmarker(model_path, sweep_config)
 
     try:
@@ -180,10 +180,11 @@ def inference_video(caps, projections, sweep_config=None):
             inference_time.append(end_time - start_time)
             frame_number += 1
 
-            # Optional: Prepare the last RGB frame for display or saving
-            rotated_frames = [np.rot90(frames[cam], k=-1) for cam in cam_indices if cam in frames and frames[cam] is not None]
-            if rotated_frames:
-                last_rgb_frame = np.concatenate(rotated_frames, axis=1)
+            # # Optional: Prepare the last RGB frame for display or saving
+            # rotated_frames = [np.rot90(frames[cam], k=-1) for cam in cam_indices if cam in frames and frames[cam] is not None]
+            # if rotated_frames:
+            #     last_rgb_frame = np.concatenate(rotated_frames, axis=1)
+            last_rgb_frame = np.concatenate([frames[cam] for cam in cam_indices if cam in frames and frames[cam] is not None])
 
     finally:
         # Release any remaining video captures
@@ -249,8 +250,22 @@ if __name__ == '__main__':
 
     # Load projection matrices
     try:
-        P0 = load_projection_matrix(0)  # Camera index 0
-        P1 = load_projection_matrix(4)  # Camera index 4
+        rotation_matrix = np.array([
+            [0, -1, 0],
+            [1, 0, 0],
+            [0, 0, 1]
+        ])
+
+        P0_raw = load_projection_matrix(0)  # Camera index 0
+        P1_raw = load_projection_matrix(4)  # Camera index 4
+
+        # Update projection matrices
+        P0_rotated = rotation_matrix @ P0_raw[:3, :3]
+        P0 = np.hstack((P0_rotated, P0_raw[:3, 3].reshape(-1, 1)))
+
+        P1_rotated = rotation_matrix @ P1_raw[:3, :3]
+        P1 = np.hstack((P1_rotated, P0_raw[:3, 3].reshape(-1, 1)))
+
     except ValueError as e:
         print(e)
         exit(1)
