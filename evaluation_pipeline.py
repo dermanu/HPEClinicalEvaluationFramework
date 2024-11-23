@@ -435,7 +435,7 @@ class Framework:
                     error_count_all += error_count
 
                     # Morph ground truth to format of predicted keypoints
-                    pred_keypoints = self.apply_morphing(pred_keypoints)
+                    #pred_keypoints = self.apply_morphing(pred_keypoints)
 
                     # Add joint names
                     pred_keypoints = {self.joint_names[i]: pred_keypoints[:, i, :] for i in
