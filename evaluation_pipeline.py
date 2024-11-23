@@ -443,7 +443,7 @@ class Framework:
                     gt_keypoints, pred_keypoints, error_count = align_procrustes(gt_keypoints_np, pred_keypoints)
                     error_count_all += error_count
 
-                    # Morph ground truth to format of predicted keypoints (can't handle gaps)
+                    # Morph ground truth to format of predicted keypoints
                     pred_keypoints = self.apply_morphing(pred_keypoints)
 
                     # Add joint names
