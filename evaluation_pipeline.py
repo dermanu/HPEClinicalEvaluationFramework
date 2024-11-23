@@ -380,8 +380,7 @@ class Framework:
 
                         if self.model_name == "mediapipe":
                             pred_keypoints, inference_times, frame = mediapipeMono.inference_video(caps, config)
-                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32,
-                                                31]  # Select only relevant keypoints and put them in the right order
+                            selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]  # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, 1:]
 
                             # Joint names mapping for MediaPipe (kinda redundant, as names are included in gt)
@@ -395,10 +394,6 @@ class Framework:
 
                     # Multioccular models
                     elif self.model_type == "multi":
-                        if self.model_name == 'mediapipe':
-                            gt_keypoints = gt_keypoints[0][1]
-                            self.joint_num_total = 33
-
                         # Desynchronize video streams
                         if config._items['augmentation'] == 'desynchronize':
                             caps = self.cam_desynchronizer.desynchronize(caps)
@@ -412,6 +407,8 @@ class Framework:
                         p_matrix = list(p_matrix_raw.values())
 
                         if self.model_name == "mediapipe":
+                            gt_keypoints = gt_keypoints[0][1]
+                            self.joint_num_total = 33
                             pred_keypoints, inference_times, frame = mediapipeMulti.inference_video(caps, p_matrix, config)
                             selected_columns = [12, 11, 14, 13, 16, 15, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31]  # Select only relevant keypoints and put them in the right order
                             pred_keypoints = pred_keypoints[:, selected_columns, :]
@@ -436,7 +433,7 @@ class Framework:
                     #                                                   self.smoothing_fun)
 
                     # Procrustes Alignment
-                    gt_keypoints, pred_keypoints, error_count = align_procrustes_old(gt_keypoints_np, pred_keypoints)
+                    gt_keypoints, pred_keypoints, error_count = align_procrustes(gt_keypoints_np, pred_keypoints)
                     error_count_all += error_count
 
                     # Morph ground truth to format of predicted keypoints (can't handle gaps)
