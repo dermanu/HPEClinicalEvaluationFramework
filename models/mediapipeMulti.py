@@ -121,7 +121,7 @@ def inference_video(caps, projections, sweep_config=None):
     caps_dict = dict(caps)
 
     # Initialize PoseLandmarker and FrameAugmentor
-    model_path = 'models/pose_landmarker_full.task'
+    model_path = 'models/pose_landmarker_heavy.task'
     initialize_pose_landmarker(model_path, sweep_config)
 
     for idx, P in enumerate(projections):
