@@ -214,6 +214,8 @@ def inference_video(caps, projections, sweep_config=None):
     #Flip along x-axis
     keypoints_flipped = keypoints_data.copy()
     keypoints_flipped[:, :, 0] = -keypoints_flipped[:, :, 0]  # Flip the x-axis
+    keypoints_flipped[:, :, 1] = -keypoints_flipped[:, :, 1]  # Flip the y-axis
+    keypoints_flipped[:, :, 2] = -keypoints_flipped[:, :, 2]  # Flip the z-axis
 
     return keypoints_flipped, inference_time, last_rgb_frame
 
