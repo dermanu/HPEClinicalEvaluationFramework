@@ -65,7 +65,7 @@ def process_frame(cam, frame, sweep_config):
     global frame_augmentor
 
     # Convert and rotate frame
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    #rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     #rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
     # Apply frame augmentation if available
@@ -211,7 +211,11 @@ def inference_video(caps, projections, sweep_config=None):
     keypoints_data = np.array(keypoints_data)
     inference_time = np.array(inference_time)
 
-    return keypoints_data, inference_time, last_rgb_frame
+    #Flip along x-axis
+    keypoints_flipped = keypoints_data.copy()
+    keypoints_flipped[:, :, 0] = -keypoints_flipped[:, :, 0]  # Flip the x-axis
+
+    return keypoints_flipped, inference_time, last_rgb_frame
 
 def load_projection_matrix(cam_index, file_path='P_values.yaml'):
     """
