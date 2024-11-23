@@ -65,7 +65,7 @@ def process_frame(cam, frame, sweep_config):
     global frame_augmentor
 
     # Convert and rotate frame
-    #rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     #rgb_frame = cv2.rotate(rgb_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
     # Apply frame augmentation if available
