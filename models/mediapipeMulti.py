@@ -260,13 +260,13 @@ def write_keypoints_to_disk(filename, kpts):
 
 if __name__ == '__main__':
     # Initialize video captures
-    input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi'
+    input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam3.avi'
     input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
 
     cap0 = cv2.VideoCapture(input_stream1)
     cap1 = cv2.VideoCapture(input_stream2)
 
-    caps = [(0, cap0), (4, cap1)]  # Assign camera indices (Ensure indices match projection matrices)
+    caps = [(3, cap0), (4, cap1)]  # Assign camera indices (Ensure indices match projection matrices)
 
     # Load projection matrices
     try:
@@ -276,7 +276,7 @@ if __name__ == '__main__':
             [0, 0, 1]
         ])
 
-        P0 = load_projection_matrix(0)  # Camera index 0
+        P0 = load_projection_matrix(3)  # Camera index 0
         P1 = load_projection_matrix(4)  # Camera index 4
 
         # Update projection matrices
