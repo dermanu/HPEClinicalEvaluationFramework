@@ -1,7 +1,4 @@
 import cv2
-
-from skeletonMorphing.trainSkeletonMorphingSweep import sweep_config
-
 cv2.setUseOptimized(True)
 cv2.setNumThreads(2)
 import numpy as np
@@ -228,63 +225,63 @@ def inference_video(caps, projections, sweep_config=None):
     return keypoints_data, inference_time, last_rgb_frame
 
 
-import yaml
-
-def load_projection_matrix(cam_index, file_path='P_values.yaml'):
-    """
-    Loads the projection matrix for a specified camera index from a YAML file.
-
-    Parameters:
-        cam_index (int): The index of the camera (0-based) to retrieve.
-        file_path (str): Path to the YAML file containing the projection matrices.
-
-    Returns:
-        np.ndarray: The 3x4 projection matrix for the specified camera.
-    """
-    # Load the YAML file
-    with open(file_path, 'r') as yaml_file:
-        P_dict = yaml.safe_load(yaml_file)
-
-    # Retrieve and return the projection matrix for the specified camera
-    cam_key = f"Camera_{cam_index}"
-    if cam_key in P_dict:
-        return np.array(P_dict[cam_key])
-    else:
-        raise ValueError(f"Camera index {cam_index} is not in the file.")
-
-
-def write_keypoints_to_disk(filename, kpts):
-    fout = open(filename, 'w')
-
-    for frame_kpts in kpts:
-        for kpt in frame_kpts:
-            if len(kpt) == 2:
-                fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ')
-            else:
-                fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ' + str(kpt[2]) + ' ')
-
-        fout.write('\n')
-    fout.close()
-
-
-if __name__ == '__main__':
-    # Initialize video captures
-    input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi'
-    input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
-
-    cap0 = cv2.VideoCapture(input_stream1)
-    cap1 = cv2.VideoCapture(input_stream2)
-
-    caps = [(0, cap0), (1, cap1)]  # Assign camera indices
-
-    # Load projection matrices
-    P0 = load_projection_matrix(0)
-    P1 = load_projection_matrix(4)
-    projections = [P0, P1]
-
-    # Run inference
-    keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
-
-    # Save or process results as needed
-    #this will create keypoints file in current working folder
-    write_keypoints_to_disk('../../bodypose3d/kpts_3D.dat', keypoints_data)
+# import yaml
+#
+# def load_projection_matrix(cam_index, file_path='P_values.yaml'):
+#     """
+#     Loads the projection matrix for a specified camera index from a YAML file.
+#
+#     Parameters:
+#         cam_index (int): The index of the camera (0-based) to retrieve.
+#         file_path (str): Path to the YAML file containing the projection matrices.
+#
+#     Returns:
+#         np.ndarray: The 3x4 projection matrix for the specified camera.
+#     """
+#     # Load the YAML file
+#     with open(file_path, 'r') as yaml_file:
+#         P_dict = yaml.safe_load(yaml_file)
+#
+#     # Retrieve and return the projection matrix for the specified camera
+#     cam_key = f"Camera_{cam_index}"
+#     if cam_key in P_dict:
+#         return np.array(P_dict[cam_key])
+#     else:
+#         raise ValueError(f"Camera index {cam_index} is not in the file.")
+#
+#
+# def write_keypoints_to_disk(filename, kpts):
+#     fout = open(filename, 'w')
+#
+#     for frame_kpts in kpts:
+#         for kpt in frame_kpts:
+#             if len(kpt) == 2:
+#                 fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ')
+#             else:
+#                 fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ' + str(kpt[2]) + ' ')
+#
+#         fout.write('\n')
+#     fout.close()
+#
+#
+# if __name__ == '__main__':
+#     # Initialize video captures
+#     input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi'
+#     input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
+#
+#     cap0 = cv2.VideoCapture(input_stream1)
+#     cap1 = cv2.VideoCapture(input_stream2)
+#
+#     caps = [(0, cap0), (1, cap1)]  # Assign camera indices
+#
+#     # Load projection matrices
+#     P0 = load_projection_matrix(0)
+#     P1 = load_projection_matrix(4)
+#     projections = [P0, P1]
+#
+#     # Run inference
+#     keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
+#
+#     # Save or process results as needed
+#     #this will create keypoints file in current working folder
+#     write_keypoints_to_disk('../../bodypose3d/kpts_3D.dat', keypoints_data)

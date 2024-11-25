@@ -6,16 +6,16 @@ import seaborn as sns
 from setuptools.command.rotate import rotate
 
 # Load the necessary data (adjust the file paths as necessary)
-with open('multi/all_metrics_single.pkl', 'rb') as f:
+with open('mono/all_metrics_single.pkl', 'rb') as f:
     all_metrics_single = pickle.load(f)
 
-with open('multi/keypoints_metrics.pkl', 'rb') as f:
+with open('mono/keypoints_metrics.pkl', 'rb') as f:
     keypoints_metrics = pickle.load(f)
 
-with open('multi/p_values.pkl', 'rb') as f:
+with open('mono/p_values.pkl', 'rb') as f:
     p_values = pickle.load(f)
 
-with open('multi/angle_errors_metrics.pkl', 'rb') as f:
+with open('mono/angle_errors_metrics.pkl', 'rb') as f:
     angle_errors_metrics = pickle.load(f)
 
 
@@ -58,13 +58,39 @@ y_labels = {
 }
 
 # Define the custom order for augmentations (using original names)
+# augmentation_order = [
+#     'background', 'defocus', 'occlusion', 'underexposure', 'desynchronize', 'decalibration',
+#     'cameras_4_0', 'cameras_4_2', 'cameras_4_3', 'cameras_5_1', 'cameras_0_4_3', 'cameras_5_4_1', 'cameras_0_4_3_2',
+#     'upper', 'lower', 'complex', 'sitting'
+# ]
+
 augmentation_order = [
-    'background', 'defocus', 'occlusion', 'underexposure', 'desynchronize', 'decalibration',
-    'cameras_4_0', 'cameras_4_2', 'cameras_4_3', 'cameras_5_1', 'cameras_0_4_3', 'cameras_5_4_1', 'cameras_0_4_3_2',
+    'background', 'defocus', 'occlusion', 'underexposure',
+    'cameras_0', 'cameras_1', 'cameras_2', 'cameras_3', 'cameras_4', 'cameras_5',
     'upper', 'lower', 'complex', 'sitting'
 ]
 
 # Define a mapping from the original names to the display names
+# augmentation_display_names = {
+#     'background': 'Background',
+#     'defocus': 'Defocus',
+#     'occlusion': 'Occlusion',
+#     'underexposure': 'Underexposure',
+#     'desynchronize': 'Desynchronized',
+#     'decalibration': 'Decalibrated',
+#     'cameras_4_0': 'Camera 0, 4',
+#     'cameras_4_2': 'Camera 2, 4',
+#     'cameras_4_3': 'Camera 3, 4',
+#     'cameras_5_1': 'Camera 1, 5',
+#     'cameras_0_4_3': 'Camera 0, 3, 4',
+#     'cameras_5_4_1': 'Camera 1, 4, 5',
+#     'cameras_0_4_3_2': 'Camera 0, 2, 3, 4',
+#     'upper': 'Upper',
+#     'lower': 'Lower',
+#     'complex': 'Complex',
+#     'sitting': 'Sitting'
+# }
+
 augmentation_display_names = {
     'background': 'Background',
     'defocus': 'Defocus',
@@ -72,13 +98,12 @@ augmentation_display_names = {
     'underexposure': 'Underexposure',
     'desynchronize': 'Desynchronized',
     'decalibration': 'Decalibrated',
-    'cameras_4_0': 'Camera 0, 4',
-    'cameras_4_2': 'Camera 2, 4',
-    'cameras_4_3': 'Camera 3, 4',
-    'cameras_5_1': 'Camera 1, 5',
-    'cameras_0_4_3': 'Camera 0, 3, 4',
-    'cameras_5_4_1': 'Camera 1, 4, 5',
-    'cameras_0_4_3_2': 'Camera 0, 2, 3, 4',
+    'cameras_4': 'Camera fr',
+    'cameras_5': 'Camera fm',
+    'cameras_0': 'Camera fl',
+    'cameras_1': 'Camera bl',
+    'cameras_2': 'Camera br',
+    'cameras_3': 'Camera sl',
     'upper': 'Upper',
     'lower': 'Lower',
     'complex': 'Complex',
@@ -307,7 +332,9 @@ def plot_boxplot_augmentations(all_metrics_single):
     plt.figure(figsize=(12, 6))
     sns.boxplot(data=df, x='Augmentation', y='Error', hue='Condition')
     plt.title('Movement Error Across Augmentations')
-    plt.xticks(rotation=45)
+    # Rotate and align labels
+    ax = plt.gca()
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='left')  # Align text to the right
     plt.tight_layout()
     plt.show()
 

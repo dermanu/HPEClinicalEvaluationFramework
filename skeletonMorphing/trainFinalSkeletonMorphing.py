@@ -15,7 +15,11 @@ import torch.profiler
 import random
 import yaml
 
-
+joint_names = [
+    'right_shoulder', 'left_shoulder', 'right_elbow', 'left_elbow', 'right_wrist', 'left_wrist', 'right_hip',
+    'left_hip', 'right_knee', 'left_knee', 'right_ankle', 'left_ankle', 'right_heel', 'left_heel', 'right_foot_index',
+    'left_foot_index'
+]
 
 # Set seeds for random number generator
 np.random.seed(42)
@@ -167,11 +171,12 @@ class NetworkTrainer:
         model.eval()
 
         # Start testing
-        with torch.no_grad():
+        with (((torch.no_grad()))):
             # Initialize variables
             losses = []
             mpjpe_without_values = []
             mpjpe_values = []
+            mpjpe_joint_values = []
             predictions = []
             ground_truths = []
             hpe_truths = []
@@ -220,8 +225,12 @@ class NetworkTrainer:
                 # Calculate MPJPE for the batch
                 mpjpe = calculate_mpjpe(pred_poses_reshaped, output_poses_reshaped)
                 mpjpe_without = calculate_mpjpe(output_poses_reshaped, input_poses_reshaped)
+                mpjpe_joint = {}
+                for idx, joint_name in enumerate(joint_names):
+                    mpjpe_joint[joint_name] = calculate_mpjpe((output_poses_reshaped[:,idx,:], input_poses_reshaped[:,idx,:])) - calculate_mpjpe((pred_poses_reshaped[:,idx,:], output_poses_reshaped[:,idx,:]))
                 mpjpe_values.append(mpjpe)
                 mpjpe_without_values.append(mpjpe_without)
+                mpjpe_joint_values.append(mpjpe_joint)
 
                 # Store predictions and ground truth for further analysis or logging
                 predictions.append(pred_poses.cpu())
@@ -233,6 +242,8 @@ class NetworkTrainer:
              "test_mpjpe": np.mean(mpjpe_values),
              "test_mpjpe_without": np.mean(mpjpe_without_values),
         })
+        for joint in joint_names:
+            wandb.log({f"test_{joint}": np.mean([mpjpe[joint] for mpjpe in mpjpe_joint_values])})
 
         # Optionally, plot and log some predictions
         if len(predictions) > 0:
@@ -240,7 +251,11 @@ class NetworkTrainer:
             ground_truth = ground_truths[0].view(-1, 3).cpu().detach().numpy()
             hpe_truth = hpe_truths[0].view(-1, 3).cpu().detach().numpy()
 
-            plot_3d_keypoints_all(prediction, ground_truth, hpe_truth, 'mediapipe', 0)
+            plot_3d_keypoints_all(prediction[1], ground_truth[1], hpe_truth[1], 'mediapipe', 0)
+            plot_3d_keypoints_all(prediction[100], ground_truth[100], hpe_truth[100], 'mediapipe', 0)
+            plot_3d_keypoints_all(prediction[200], ground_truth[200], hpe_truth[300], 'mediapipe', 0)
+            plot_3d_keypoints_all(prediction[300], ground_truth[300], hpe_truth[300], 'mediapipe', 0)
+
 
         return losses, mpjpe_values, mpjpe_without_values, predictions, ground_truths
 
@@ -273,7 +288,7 @@ class NetworkTrainer:
         for epoch in range(epochs):
             print(f"Epoch [{epoch + 1}/{epochs}]")
             final_train_loss = NetworkTrainer.train(model, full_data_loader, optimizer, criterion, scaler)
-            avg_train_loss = np.mean(train_losses)
+            avg_train_loss = np.mean(final_train_loss)
             scheduler.step(avg_train_loss)
 
         # Testing the final model
@@ -370,6 +385,32 @@ def concat_dataset(dataset_dict: dict, pars=np.arange(4, 27)):
         dataset = torch.utils.data.ConcatDataset([dataset, dataset_dict[i]]) if dataset is not None else dataset_dict[i]
     return dataset if dataset is not None else []
 
+@staticmethod
+def load_and_test(model_path, test_loader, criterion):
+    """
+    Loads a pre-trained model and tests it on a provided dataset.
+
+    Args:
+        model_path (str): Path to the saved model file.
+        test_loader (DataLoader): DataLoader for the test data.
+        criterion (nn.Module): Loss function for evaluation.
+
+    Returns:
+        None
+    """
+    # Load the model
+    print(f"Loading model from {model_path}")
+    model = torch.load(model_path).cuda()
+
+    # Test the loaded model
+    losses, mpjpe_values, mpjpe_without_values, predictions, ground_truths = NetworkTrainer.test(
+        model=model,
+        test_loader=test_loader,
+        criterion=criterion
+    )
+
+    print(f"Test completed. Average MPJPE: {np.mean(mpjpe_values):.4f}, Loss: {np.mean(losses):.4f}")
+
 
 # Sweep function
 def sweep():
@@ -395,6 +436,56 @@ def sweep():
 
     wandb.finish()
 
-if __name__ == "__main__":
-    sweep()
+# if __name__ == "__main__":
+#     sweep()
 
+import argparse
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Skeleton Morphing Training and Testing")
+    parser.add_argument("--mode", type=str, default="train", choices=["train", "test"],
+                        help="Mode to run the script: 'train' or 'test'.")
+    parser.add_argument("--model_path", type=str, default="models/trained/model_skeleton_morph_mediapipe_final.pth",
+                        help="Path to the saved model for testing.")
+    parser.add_argument("--data_path", type=str, required=True,
+                        help="Path to the dataset folder.")
+    parser.add_argument("--test_pars", type=int, nargs="+", default=None,
+                        help="Participant IDs for testing.")
+    args = parser.parse_args()
+
+    if args.mode == "train":
+        # Training workflow
+        with open("skeletonMorphing/configFinal.yaml") as file:
+            config = yaml.load(file, Loader=yaml.FullLoader)
+        run = wandb.init(config=config)
+
+        # Load the data
+        train_eval_dict, test_dict = load_train_test_all(args.data_path, np.array(config.train_pars), np.array(config.test_pars))
+
+        NetworkTrainer.train_model(
+            data_dict=train_eval_dict,
+            test_dict=test_dict,
+            epochs=config.N_epochs,
+            pars=config.train_pars,
+            pars_test=config.test_pars,
+            config=config
+        )
+        wandb.finish()
+
+    elif args.mode == "test":
+        # Testing workflow
+        print("Loading test data...")
+        _, test_dict = load_train_test_all(args.data_path, [], np.array(args.test_pars))
+
+        test_data = concat_dataset(test_dict, pars=args.test_pars)
+        test_loader = DataLoader(test_data, batch_size=64, num_workers=12, pin_memory=True)
+
+        # Define criterion
+        criterion = nn.MSELoss()
+
+        # Load and test the model
+        NetworkTrainer.load_and_test(
+            model_path=args.model_path,
+            test_loader=test_loader,
+            criterion=criterion
+        )

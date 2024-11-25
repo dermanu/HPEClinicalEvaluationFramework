@@ -18,6 +18,6 @@ parameters:
   movement:
     values: [upper, lower, sitting, complex]
   augmentation:
-    values: [decalibration, cameras_0_2, cameras_5_4_1_3]
+    values: [cameras_4_3, cameras_0_4_5, cameras 4_1_3, cameras_5_1_2]
   default_camera:
     value: [0, 4]
