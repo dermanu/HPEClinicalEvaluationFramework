@@ -10,6 +10,15 @@ from utils import metrics
 import pingouin as pg
 from statsmodels.stats.multitest import multipletests
 
+# 0_4_5 fl, fm, fr x
+# 5_4_1_3 bl, sl, fl, fm x
+# 5_4_1 sl, fl, fm x
+# 5_1 fm, sl x
+# 4_3 bl, fl x
+# 4_1_3
+# 4_0 fl, fr  x
+# 0_4_5
+
 
 def is_data_normal(data, alpha=0.05):
     if len(data) > 5000:
@@ -208,7 +217,7 @@ def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
             base_mean = np.mean(base_data)
             aug_mean = np.mean(aug_data)
             diff_percent = ((base_mean - aug_mean) / base_mean) * 100 if base_mean != 0 else 0
-            diff_total = aug_mean - base_mean
+            diff_total = base_mean - aug_mean
 
             # Bootstrap CI for mean difference
             conf_int = bootstrap_confidence_interval(base_data, aug_data, n_resamples=1000, alpha=alpha,
@@ -589,7 +598,7 @@ def main():
     """
     Run inference on the chosen model with sweep parameters and log results to wandb project.
     """
-    directory = '/home/emanu/Desktop/mono/combined'
+    directory = '/home/emanu/Desktop/multi/combined'
 
     # List of all files in the directory
     all_files = os.listdir(directory)
@@ -621,7 +630,7 @@ def main():
     # Compare metrics of each group with baseline group
     perform_statistical_analysis(all_metrics_single)
 
-    p_values = compare_metrics_with_none_group(all_metrics_single, default_camera='cameras_5')
+    p_values = compare_metrics_with_none_group(all_metrics_single, default_camera='cameras_4_0')
 
     with open('p_values.pkl', 'wb') as f:
         pickle.dump(p_values, f)

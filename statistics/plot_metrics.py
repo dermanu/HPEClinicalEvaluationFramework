@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Load the necessary data
-with open('mono/all_metrics_single.pkl', 'rb') as f:
+with open('multi/all_metrics_single.pkl', 'rb') as f:
     all_metrics_single = pickle.load(f)
 
-with open('mono/p_values.pkl', 'rb') as f:
+with open('multi/p_values.pkl', 'rb') as f:
     p_values = pickle.load(f)
 
-with open('mono/keypoints_metrics.pkl', 'rb') as f:
+with open('multi/keypoints_metrics.pkl', 'rb') as f:
     keypoints_metrics = pickle.load(f)
 
 
