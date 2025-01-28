@@ -24,4 +24,3 @@ echo "CPU cores per node: $SLURM_CPUS_ON_NODE"
 cd /cluster/home/emanueal/Documents/HPEClinicalEvaluationFramework
 
 wandb agent dermanu/HPEClinicalEvaluationFramework/6z9ef5ud
-#wandb agent dermanu/HPEClinicalEvaluationFramework/9hx5mlzl #Multi

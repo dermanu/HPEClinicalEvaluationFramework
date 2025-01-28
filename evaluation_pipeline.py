@@ -4,10 +4,11 @@ import wandb
 import numpy as np
 import yaml
 import torch
-import cv2
 
+import cv2
 cv2.setUseOptimized(True)
 cv2.setNumThreads(2)
+
 from tqdm import tqdm
 from skeletonMorphing import modelSkeletonMorphing
 from utils import cameraCalibration as camCali
@@ -25,7 +26,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "`2`"
 def log_frame_example(frame):
     """
     Log the last frame of one camera angle to visualize applied frame augmentations. Blur the faces for privacy.
-    :param frame: augmented frames, e.g. [cam0, cam1, cam2, ...]
+    Parameters:
+    - frame: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
     face_detect = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
     face_data = face_detect.detectMultiScale(frame, 1.2, 3)
@@ -38,44 +40,21 @@ def log_frame_example(frame):
     wandb.log({"Example_Frame": wandb.Image(frame)})
 
 
-def align_procrustes(target, prediction):
-    """
-    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
-    often referred to as "Protocol #2" in many papers.
-    Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
-    :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
-    :return error_count: Error count of failed alignments
-    """
-    assert target.shape[0] == prediction.shape[0], 'Input must have the same number of frames'
-    gt_all, pred_all, error_count = [], [], 0
-
-    for gt, pred in zip(target, prediction):
-        try:
-            mtx1, mtx2, disparity = procrustes(gt, pred)
-            gt_all.append(mtx1)
-            pred_all.append(mtx2)
-        except Exception:
-            error_count += 1
-            continue
-
-    return np.array(gt_all), np.array(pred_all), error_count
-
-
 def align_procrustes_old(target, prediction):
     """
-    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation).
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
-    :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
-    :return error_count: Error count of failed alignments
+    Procrustes alignment of the ground truth and predicted keypoints (scale, rotation, and translation).
+    Parameters:
+    - target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    - prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+
+    Returns:
+    - gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
+    - pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
+    - error_count: Error count of failed alignments
     """
     gt_all, pred_all = [], []
     error_count = 0
-    joint_number = target.shape[1]  # Expected number of joints
+    joint_number = target.shape[1]
 
     for gt, pred in zip(target, prediction):
         gt_raw = gt  # Keep the original ground truth
@@ -143,22 +122,16 @@ class Framework:
         self.model_skel_morph = self.load_morph_model()
         self.cam_desynchronizer = frameAug.CameraDesynchronizer()
 
+        # Participants used for evaluation (not used in training and evaluation of morphing model)
         self.participants = ['par4', 'par19', 'par11', 'par23']
-        #self.participants = ['par4']
 
-        # Defines movement number in dataset related to different movement categories
+        # Defines movement number in dataset related to different movement categories. Complex was changed to whole-body
         self.movement_category = {
             "upper": [1, 2, 3, 4],
             "lower": [5, 6, 7, 8],
             "complex": [9, 10, 11, 12, 13],
             "sitting": [14, 15, 16, 17]
         }
-        # self.movement_category = {
-        #     "upper": [1],
-        #     "lower": [5],
-        #     "complex": [9],
-        #     "sitting": [14]
-        # }
 
         # Joint names mapping for MoCap ground truth
         self.joint_names_gt = {
@@ -168,14 +141,17 @@ class Framework:
             12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
         }
 
-        self.interpolation_fun = "akima"
-        self.smoothing_fun = "median"
+        # Possibility for post-processing of HPE estimates (gap filling and smoothing)
+        # self.interpolation_fun = "akima"
+        # self.smoothing_fun = "median"
 
 
     def load_morph_model(self):
         """
         Load the morphing model for the specified model name
-        :return model_skel_morph: Morphing model for the specified model name
+
+        Parameters:
+        - model_skel_morph: Morphing model for the specified model name
         """
         model_path = f"skeletonMorphing/models/model_skeleton_morph_{self.model_name}_final.pth"
         model_skel_morph = modelSkeletonMorphing.Synthesizer(dropout_rate=0.2, layer_size=2048)
@@ -202,8 +178,12 @@ class Framework:
     def apply_morphing(self, input_pose):
         """
         Apply skeleton morphing to the input pose using the loaded model.
-        :param input_pose: Input pose to be morphed as numpy array.
-        :return: morphed_pose: Pose after applying skeleton morphing.
+
+        Parameters:
+        - input_pose: Input pose to be morphed as numpy array.
+
+        Returns:
+        - morphed_pose: Pose after applying skeleton morphing.
         """
         # Convert input pose to tensor and apply morphing
         input_pose = torch.from_numpy(input_pose).float()
@@ -220,8 +200,12 @@ class Framework:
     def convert_keypoints_dicts_to_array(self, keypoints_all):
         """
         Convert a list of dictionaries containing keypoints to a list of numpy arrays.
-        :param keypoints_all: List of dictionaries where each dictionary contains keypoints.
-        :return: all_keypoints_array: List of numpy arrays with keypoints.
+
+        Parameters:
+        - keypoints_all: List of dictionaries where each dictionary contains keypoints.
+
+        Returns:
+        - all_keypoints_array: List of numpy arrays with keypoints.
         """
         all_keypoints_array = []
         for keypoints_dict in keypoints_all:
@@ -234,15 +218,18 @@ class Framework:
     def calculate_log_metrics(self, gt_keypoints, pred_keypoints, inference_times):
         """
         Calculate metrics for each sweep and logs them on wandb. Calculates it for the whole body and body segments.
-        :param gt_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
-        :param pred_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
-        :param inference_times: [inference_time0, inference_time1, inference_time2, ]
+
+        Parameters:
+        - gt_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
+        - pred_keypoints: [[x0,y0,z0], [x1,y1,z1], [x2,y2,z2], ...]
+        - inference_times: [inference_time0, inference_time1, inference_time2, ]
         """
         gt_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(gt_keypoints)
         pred_keypoints_all_arrays = self.convert_keypoints_dicts_to_array(pred_keypoints)
         joint_names = list(gt_keypoints[0].keys())
         assert joint_names == list(gt_keypoints[0].keys()), "Joint names of target and prediction do not match."
 
+        # Dicts for online logging in wandb while running the evaluation
         metrics_dict = {metric: {joint: [] for joint in joint_names} for metric in
                         ["pmpjpe_m", "pmpjpe_s", "velocity_m", "velocity_s", "pcc", "pvalue"]}
 
@@ -261,6 +248,7 @@ class Framework:
                 pred_array = np.squeeze(np.array(pred_movement[:, joint, :]))
 
                 pmpjpe_m, pmpjpe_s = metrics.calculate_mpjpe(gt_array, pred_array)
+                # Update to MPJAVE
                 velocity_m, velocity_s = metrics.mean_velocity_error(gt_array, pred_array, self.sample_rate, axis=-1)
                 pcc, pvalue = metrics.calculate_correlation(gt_array, pred_array)
 
@@ -390,6 +378,9 @@ class Framework:
                                 12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
                             }
                             self.joint_num_total = 33
+                    ########################################################################################################
+                    ## More models can be added here (given a model/dataset specific morphing model is available/trained" ##
+                    ########################################################################################################
 
                     # Multioccular models
                     elif self.model_type == "multi":
@@ -418,14 +409,18 @@ class Framework:
                                 12: 'right_heel', 13: 'left_heel', 14: 'right_foot_index', 15: 'left_foot_index'
                             }
 
+                        ########################################################################################################
+                        ## More models can be added here (given a model/dataset specific morphing model is available/trained" ##
+                        ########################################################################################################
+
                     gt_keypoints_np = np.array(gt_keypoints)
                     if gt_keypoints_np.shape != pred_keypoints.shape:
                         print(gt_keypoints.shape)
                         print(pred_keypoints.shape)
                         assert gt_keypoints_np.shape == pred_keypoints.shape, "Not the same shape. Bummer!"
 
-                    # Postprocess predicted keypoints
-                    #pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
+                    # Postprocess predicted keypoints (currently not in use)
+                    # pred_keypoints = postprocessing.postprocess_points(pred_keypoints,
                     #                                                   self.interpolation_fun,
                     #                                                   self.smoothing_fun)
 
@@ -461,14 +456,15 @@ class Framework:
                             with open('results/' + self.model_type + '/' + run.name + str(mov) + '.pkl', 'wb') as file:
                                 pickle.dump(data, file)
 
-            # Save data for debugging
+            # Save data for recalculate metrics (statistics/recalculate_metrics.py)
+            # and plot results (statistics/plot_metrics.py)
             data_to_save = {'gt_keypoints': gt_keypoints_all,
                             'pred_keypoints': pred_keypoints_all,
                             'inference_time': inference_times_all,
                             'frame': frame
                             }
 
-            # Save calculate keypoints for later
+            # Save calculate keypoints for later (change so that it is already safed in the appropriate folder)
             with open('results/' + self.model_type + '/' + run.name + '.pkl', 'wb') as file:
                 pickle.dump(data_to_save, file)
 
@@ -484,6 +480,9 @@ class Framework:
 
 
     def total_frames(self, data):
+        """
+        Calculates total number of frames
+        """
         key = 'right_shoulder'  # Random keypoint to calculate number of frames
         total = 0
         for item in data:
@@ -528,4 +527,3 @@ def sweep(model_type):
 
 if __name__ == "__main__":
     sweep(sys.argv[1])
-    #r"C:\Users\vizlab_stud\emanuel"
