@@ -18,7 +18,6 @@ from utils import metrics, postprocessing, readDataEval
 from models import mediapipeMono
 from models import mediapipeMulti
 import pickle
-from scipy.spatial import procrustes
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "`2`"
 
@@ -26,10 +25,11 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "`2`"
 def log_frame_example(frame):
     """
     Log the last frame of one camera angle to visualize applied frame augmentations. Blur the faces for privacy.
+
     Parameters:
     - frame: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
-    face_detect = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
+    face_detect = cv2.CascadeClassifier('utils/haarcascade_frontalface_alt.xml')
     face_data = face_detect.detectMultiScale(frame, 1.2, 3)
 
     for (x, y, w, h) in face_data:
@@ -491,7 +491,7 @@ class Framework:
         return total
 
 
-# Sweep function
+# Add the function to choose the model (mediapipe, openpose, etc.)
 def sweep(model_type):
     """
     Initializes a W&B sweep based on the model type and configuration file.

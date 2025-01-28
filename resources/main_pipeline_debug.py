@@ -21,7 +21,7 @@ def log_frame_example(frame):
     Log the last frame of one camera angle to visualize applied frame augmentations. Blur the faces for privacy.
     :param frame: augmented frames, e.g. [cam0, cam1, cam2, ...]
     """
-    face_detect = cv2.CascadeClassifier('../haarcascade_frontalface_alt.xml')
+    face_detect = cv2.CascadeClassifier('../utils/haarcascade_frontalface_alt.xml')
     face_data = face_detect.detectMultiScale(frame, 1.2, 3)
 
     for (x, y, w, h) in face_data:
