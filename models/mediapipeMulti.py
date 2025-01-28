@@ -257,43 +257,43 @@ def write_keypoints_to_disk(filename, kpts):
                     fout.write(f"{kpt[0]} {kpt[1]} {kpt[2]} ")
             fout.write('\n')
 
-
-if __name__ == '__main__':
-    # Initialize video captures
-    input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam3.avi'
-    input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
-
-    cap0 = cv2.VideoCapture(input_stream1)
-    cap1 = cv2.VideoCapture(input_stream2)
-
-    caps = [(3, cap0), (4, cap1)]  # Assign camera indices (Ensure indices match projection matrices)
-
-    # Load projection matrices
-    try:
-        rotation_matrix = np.array([
-            [0, -1, 0],
-            [1, 0, 0],
-            [0, 0, 1]
-        ])
-
-        P0 = load_projection_matrix(3)  # Camera index 0
-        P1 = load_projection_matrix(4)  # Camera index 4
-
-        # Update projection matrices
-        # P0_rotated = rotation_matrix @ P0_raw[:3, :3]
-        # P0 = np.hstack((P0_rotated, P0_raw[:3, 3].reshape(-1, 1)))
-        #
-        # P1_rotated = rotation_matrix @ P1_raw[:3, :3]
-        # P1 = np.hstack((P1_rotated, P0_raw[:3, 3].reshape(-1, 1)))
-
-    except ValueError as e:
-        print(e)
-        exit(1)
-
-    projections = [P0, P1]
-
-    # Run inference
-    keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
-
-    # Save the 3D keypoints to disk
-    write_keypoints_to_disk('../../bodypose3d/kpts_3D.dat', keypoints_data)
+# For offline testing
+# if __name__ == '__main__':
+#     # Initialize video captures
+#     input_stream1 = '/par10/par10_Mov14_Cam3.avi'
+#     input_stream2 = '/par10/par10_Mov14_Cam4.avi'
+#
+#     cap0 = cv2.VideoCapture(input_stream1)
+#     cap1 = cv2.VideoCapture(input_stream2)
+#
+#     caps = [(3, cap0), (4, cap1)]  # Assign camera indices (Ensure indices match projection matrices)
+#
+#     # Load projection matrices
+#     try:
+#         rotation_matrix = np.array([
+#             [0, -1, 0],
+#             [1, 0, 0],
+#             [0, 0, 1]
+#         ])
+#
+#         P0 = load_projection_matrix(3)  # Camera index 0
+#         P1 = load_projection_matrix(4)  # Camera index 4
+#
+#         # Update projection matrices
+#         # P0_rotated = rotation_matrix @ P0_raw[:3, :3]
+#         # P0 = np.hstack((P0_rotated, P0_raw[:3, 3].reshape(-1, 1)))
+#         #
+#         # P1_rotated = rotation_matrix @ P1_raw[:3, :3]
+#         # P1 = np.hstack((P1_rotated, P0_raw[:3, 3].reshape(-1, 1)))
+#
+#     except ValueError as e:
+#         print(e)
+#         exit(1)
+#
+#     projections = [P0, P1]
+#
+#     # Run inference
+#     keypoints_data, inference_time, last_rgb_frame = inference_video(caps, projections)
+#
+#     # Save the 3D keypoints to disk
+#     write_keypoints_to_disk('../../bodypose3d/kpts_3D.dat', keypoints_data)

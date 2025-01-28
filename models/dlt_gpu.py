@@ -2,7 +2,7 @@ import torch
 
 def homogeneous_to_euclidean(points):
     """Converts torch homogeneous points to euclidean
-    Args:
+    Parameters:
         points torch tensor of shape (N, M + 1): N homogeneous points of dimension M
     Returns:
         torch tensor of shape (N, M): euclidean points
@@ -14,7 +14,7 @@ def homogeneous_to_euclidean(points):
 
 def euclidean_to_homogeneous(points):
     """Converts torch euclidean points to homogeneous
-    Args:
+    Parameters:
         points torch tensor of shape (N, M): N euclidean points of dimension M
     Returns:
         torch tensor of shape (N, M+1): homogeneous points
@@ -26,7 +26,7 @@ def euclidean_to_homogeneous(points):
 
 def project(points, projections):
     """Project batch of 3D points to 2D
-    Args:
+    Parameters:
         points torch tensor of shape (B, 3)
         projections torch tensor of shape (B, N, 3, 4)
     Returns:
@@ -42,7 +42,7 @@ def project(points, projections):
 def triangulate_from_multiple_views_sii(proj_matricies, points, number_of_iterations = 2):
     """This module lifts B 2d detections obtained from N viewpoints to 3D using the Direct Linear Transform method.
     It computes the eigenvector associated to the smallest eigenvalue using the Shifted Inverse Iterations algorithm.
-    Args:
+    Parameters:
         proj_matricies torch tensor of shape (B, N, 3, 4): sequence of projection matricies (3x4)
         points torch tensor of shape (B, N, 2): sequence of points' coordinates
     Returns:
@@ -79,7 +79,8 @@ def triangulate_from_multiple_views_sii(proj_matricies, points, number_of_iterat
 def triangulate_from_multiple_views_svd(proj_matricies, points):
     """This module lifts B 2d detections obtained from N viewpoints to 3D using the Direct Linear Transform method.
     It computes the eigenvector associated to the smallest eigenvalue using Singular Value Decomposition.
-    Args:
+
+    Parameters:
         proj_matricies torch tensor of shape (B, N, 3, 4): sequence of projection matricies (3x4)
         points torch tensor of shape (B, N, 2): sequence of points' coordinates
     Returns:

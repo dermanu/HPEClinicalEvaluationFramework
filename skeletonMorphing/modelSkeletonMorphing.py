@@ -1,10 +1,10 @@
 """
 The function modelSkeletonMorphing is a trainable model to morph keypoints of one dataset to another for comparison of
 different algorithms.
-It is based on the work of Bastian Wandt (https://github.com/bastianwandt/CanonPose/tree/main).
+It is inspired by the work of Bastian Wandt (https://github.com/bastianwandt/CanonPose/tree/main).
 """
-import torch.nn as nn
 
+import torch.nn as nn
 
 class Synthesizer(nn.Module):
     def __init__(self, dropout_rate=0.0, layer_size=1024):

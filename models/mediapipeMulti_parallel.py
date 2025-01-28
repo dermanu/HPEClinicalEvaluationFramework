@@ -266,8 +266,8 @@ def inference_video(caps, projections, sweep_config=None):
 #
 # if __name__ == '__main__':
 #     # Initialize video captures
-#     input_stream1 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam0.avi'
-#     input_stream2 = '/home/emanu/Desktop/MoCap/segmented/par10/par10_Mov14_Cam4.avi'
+#     input_stream1 = '/par10/par10_Mov14_Cam0.avi'
+#     input_stream2 = '/par10/par10_Mov14_Cam4.avi'
 #
 #     cap0 = cv2.VideoCapture(input_stream1)
 #     cap1 = cv2.VideoCapture(input_stream2)

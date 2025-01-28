@@ -1,170 +1,234 @@
-import os
-import pickle
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
+import argparse
 
-# Load the necessary data
-with open('multi/all_metrics_single.pkl', 'rb') as f:
-    all_metrics_single = pickle.load(f)
+def generate_and_plot_boxplots(data_type='mono'):
+    """
+    Generate and plot boxplots for various metrics from a preprocessed metrics file.
 
-with open('multi/p_values.pkl', 'rb') as f:
-    p_values = pickle.load(f)
+    Parameters:
+    data_type (str): 'mono' or 'multi' to specify the type of data being analyzed.
 
-with open('multi/keypoints_metrics.pkl', 'rb') as f:
-    keypoints_metrics = pickle.load(f)
+    Returns:
+    None
+    """
 
+    # Define the color palette for groups
+    palette = sns.color_palette("colorblind", 4)  # Generate distinct colors
 
-# 1. Box Plot for PMPJPE
-def plot_boxplot_pmpjpe(all_metrics_single):
-    data = []
-    for condition, metrics in all_metrics_single.items():
-        pmpjpe_values = metrics['pmpjpe']  # Assuming 'pmpjpe' is stored as a list of tuples
-        for value in pmpjpe_values:
-            data.append({'Condition': condition, 'PMPJPE Mean': value[0]})  # Use mean from tuple
-
-    df = pd.DataFrame(data)
-
-    plt.figure(figsize=(10, 6))
-    sns.boxplot(data=df, x='Condition', y='PMPJPE Mean')
-    plt.title('PMPJPE Distribution Across Conditions')
-    plt.ylabel('PMPJPE Mean')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig('boxplot_pmpjpe.png')
-    plt.show()
-
-
-# 2. Bar Plot with Error Bars for other metrics
-def plot_barplot_metrics(all_metrics_single):
-    data = []
-    metrics_to_plot = ['pmpjpe_m', 'angle_m', 'velocity_m', 'pcc']
-
-    for condition, metrics in all_metrics_single.items():
-        for metric in metrics_to_plot:
-            if metric in metrics:
-                mean_value = np.mean([x[0] for x in metrics[metric]])  # Extract mean
-                std_value = np.std([x[0] for x in metrics[metric]])  # Extract std
-                data.append({'Condition': condition, 'Metric': metric, 'Mean': mean_value, 'Std': std_value})
-
-    df = pd.DataFrame(data)
-
-    plt.figure(figsize=(10, 6))
-    sns.barplot(data=df, x='Metric', y='Mean', hue='Condition', capsize=.1, ci=None)
-    for i in range(df.shape[0]):
-        plt.errorbar(x=i, y=df.iloc[i]['Mean'], yerr=df.iloc[i]['Std'], fmt='none', c='black', capsize=5)
-    plt.title('Comparison of Metrics Across Conditions with Std Error')
-    plt.ylabel('Mean Value')
-    plt.legend(title='Condition', bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.tight_layout()
-    plt.savefig('barplot_metrics.png')
-    plt.show()
-
-
-# 3. Heatmap for per-keypoint PMPJPE
-def plot_heatmap_keypoints(keypoints_metrics):
-    data = []
-    for condition, keypoints in keypoints_metrics.items():
-        for keypoint, metrics in keypoints.items():
-            data.append({
-                'Condition': condition,
-                'Keypoint': keypoint,
-                'PMPJPE Mean': metrics['pmpjpe_m']  # Assuming 'pmpjpe_m' exists
-            })
-
-    df = pd.DataFrame(data)
-    pivot_df = df.pivot(index='Keypoint', columns='Condition', values='PMPJPE Mean')
-
-    plt.figure(figsize=(12, 8))
-    sns.heatmap(pivot_df, annot=True, fmt=".2f", cmap='viridis')
-    plt.title('Per-Keypoint PMPJPE Mean Across Conditions')
-    plt.ylabel('Keypoint')
-    plt.xlabel('Condition')
-    plt.tight_layout()
-    plt.savefig('heatmap_keypoints.png')
-    plt.show()
-
-
-# 4. Skeleton Diagram with Keypoints Color-Coded
-def plot_skeleton_diagram(keypoints_metrics, condition_to_plot='Condition1'):
-    keypoint_coords = {
-        'head': (0, 10), 'neck': (0, 8),
-        'left_shoulder': (-2, 8), 'right_shoulder': (2, 8),
-        'left_elbow': (-3, 6), 'right_elbow': (3, 6),
-        'left_hand': (-4, 4), 'right_hand': (4, 4),
-        'torso': (0, 6), 'left_hip': (-1, 4), 'right_hip': (1, 4),
-        'left_knee': (-1, 2), 'right_knee': (1, 2),
-        'left_foot': (-1, 0), 'right_foot': (1, 0),
+    # Metric titles and y-axis labels
+    metric_titles = {
+        'pmpjpe': 'MPJPE',
+        'angle': 'MPJAE',
+        'velocity': 'MPJAVE',
+        'pcc': 'PCC'
     }
 
-    keypoints = list(keypoints_metrics[condition_to_plot].keys())
-    metric_values = [keypoints_metrics[condition_to_plot][kp]['pmpjpe_m'] for kp in keypoints]
+    y_labels = {
+        'pmpjpe': 'Overall MPJPE [mm]',
+        'angle': 'Overall MPJAE [°]',
+        'velocity': 'Overall MPJAVE [°/s]',
+        'pcc': 'Overall PCC'
+    }
 
-    norm = plt.Normalize(min(metric_values), max(metric_values))
-    colors = plt.cm.viridis(norm(metric_values))
+    # Define augmentation orders and display names based on data type
+    if data_type == 'multi':
+        augmentation_order = [
+            'background', 'defocus', 'occlusion', 'underexposure', 'desynchronize', 'decalibration',
+            'cameras_4_0', 'cameras_4_3', 'cameras_5_1', 'cameras_5_4_1', 'cameras_0_4_5', 'cameras_5_4_1_3',
+            'upper', 'lower', 'complex', 'sitting'
+        ]
 
-    plt.figure(figsize=(8, 8))
-    for i, kp in enumerate(keypoints):
-        x, y = keypoint_coords[kp]
-        plt.scatter(x, y, color=colors[i], s=100)
-        plt.text(x + 0.1, y, kp, fontsize=9, ha='left', va='center')
+        augmentation_display_names = {
+            'background': 'Background',
+            'defocus': 'Defocus',
+            'occlusion': 'Occlusion',
+            'underexposure': 'Underexposure',
+            'desynchronize': 'Desynchronized',
+            'decalibration': 'Decalibrated',
+            'cameras_4_0': 'Cam fl-fr',
+            'cameras_4_3': 'Cam fl-bl',
+            'cameras_5_1': 'Cam fm-sl',
+            'cameras_5_4_1': 'Cam fl-fm-sl',
+            'cameras_0_4_5': 'Cam fl-fm-fr',
+            'cameras_5_4_1_3': 'Cam fl-fm-bl-sl',
+            'upper': 'Upper',
+            'lower': 'Lower',
+            'complex': 'Whole-Body',
+            'sitting': 'Sitting'
+        }
 
-    skeleton_edges = [('head', 'neck'), ('neck', 'left_shoulder'), ('neck', 'right_shoulder'),
-                      ('left_shoulder', 'left_elbow'), ('right_shoulder', 'right_elbow'),
-                      ('left_elbow', 'left_hand'), ('right_elbow', 'right_hand'),
-                      ('neck', 'torso'), ('torso', 'left_hip'), ('torso', 'right_hip'),
-                      ('left_hip', 'left_knee'), ('right_hip', 'right_knee'),
-                      ('left_knee', 'left_foot'), ('right_knee', 'right_foot')]
+        box_colors = {
+            'Background': palette[0],
+            'Defocus': palette[0],
+            'Occlusion': palette[0],
+            'Underexposure': palette[0],
+            'Desynchronized': palette[0],
+            'Decalibrated': palette[0],
+            'Cam fl-fr': palette[1],
+            'Cam fl-bl': palette[1],
+            'Cam fm-sl': palette[1],
+            'Cam fl-fm-sl': palette[1],
+            'Cam fl-fm-fr': palette[1],
+            'Cam fl-fm-bl-sl': palette[1],
+            'Upper': palette[2],
+            'Lower': palette[2],
+            'Whole-Body': palette[2],
+            'Sitting': palette[2],
+        }
 
-    for edge in skeleton_edges:
-        kp1, kp2 = edge
-        x1, y1 = keypoint_coords[kp1]
-        x2, y2 = keypoint_coords[kp2]
-        plt.plot([x1, x2], [y1, y2], 'k-', lw=2)
+    else:  # mono
+        augmentation_order = [
+            'background', 'defocus', 'occlusion', 'underexposure',
+            'cameras_0', 'cameras_1', 'cameras_2', 'cameras_3', 'cameras_4', 'cameras_5',
+            'upper', 'lower', 'complex', 'sitting'
+        ]
 
-    plt.title(f'Per-Keypoint PMPJPE Mean for {condition_to_plot}')
-    plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='viridis'), label='PMPJPE Mean')
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig('skeleton_diagram.png')
-    plt.show()
+        augmentation_display_names = {
+            'background': 'Background',
+            'defocus': 'Defocus',
+            'occlusion': 'Occlusion',
+            'underexposure': 'Underexposure',
+            'cameras_4': 'Cam fr',
+            'cameras_5': 'Cam fm',
+            'cameras_0': 'Cam fl',
+            'cameras_1': 'Cam bl',
+            'cameras_2': 'Cam br',
+            'cameras_3': 'Cam sl',
+            'upper': 'Upper',
+            'lower': 'Lower',
+            'complex': 'Whole-Body',
+            'sitting': 'Sitting'
+        }
+
+        box_colors = {
+            'Background': palette[0],
+            'Defocus': palette[0],
+            'Occlusion': palette[0],
+            'Underexposure': palette[0],
+            'Cam fr': palette[1],
+            'Cam fm': palette[1],
+            'Cam fl': palette[1],
+            'Cam bl': palette[1],
+            'Cam br': palette[1],
+            'Cam sl': palette[1],
+            'Upper': palette[2],
+            'Lower': palette[2],
+            'Whole-Body': palette[2],
+            'Sitting': palette[2],
+        }
+
+    def prepare_bxp_data(condition, metric_data):
+        """Prepare data for matplotlib's bxp function."""
+        return {
+            "label": condition,
+            "med": metric_data["median"],
+            "q1": metric_data["Q1"],
+            "q3": metric_data["Q3"],
+            "whislo": metric_data["loval"],
+            "whishi": metric_data["hival"],
+            "fliers": []  # No outliers for simplicity
+        }
+
+    def generate_bxp_stats(boxplot_df, metrics_to_plot):
+        """Generate bxp data for each metric."""
+        bxp_data = {}
+        for metric in metrics_to_plot:
+            bxp_data[metric] = [
+                prepare_bxp_data(row["condition"], row)
+                for _, row in boxplot_df[boxplot_df["metric"] == metric].iterrows()
+            ]
+        return bxp_data
+
+    def plot_bxp(bxp_data):
+        """Plot boxplots for each metric."""
+        # The axis limits are static so multi and mono or different algorithms can be better compared.
+        axis_limit = {
+            'pmpjpe': (-100, 350),
+            'angle': (-15, 40),
+            'velocity': (-15, 20),
+        }
+
+        for metric, stats in bxp_data.items():
+            # Filter and sort stats
+            stats = [
+                stat for stat in stats
+                if stat["label"].lower().replace(" ", "_") in augmentation_order
+            ]
+            stats = sorted(stats, key=lambda x: augmentation_order.index(x["label"].lower().replace(" ", "_")))
+
+            # Replace labels with display names
+            for stat in stats:
+                original_label = stat["label"].lower().replace(" ", "_")
+                stat["label"] = augmentation_display_names[original_label]
+
+            # Create the plot
+            fig, ax = plt.subplots(figsize=(8, 6))
+            boxplot_elements = ax.bxp(stats, showfliers=False, patch_artist=True)
+
+            # Set colors for boxes
+            for box, stat in zip(boxplot_elements['boxes'], stats):
+                label = stat["label"]
+                box.set_facecolor(box_colors[label])
+
+            # Style medians
+            for median in boxplot_elements['medians']:
+                median.set_color('black')
+                median.set_linewidth(2)
+
+            # Style axes
+            ax.set_ylabel(y_labels[metric], fontsize=14)
+            ax.set_xlabel("", fontsize=14)
+            ax.tick_params(axis="x", rotation=45)
+            ax.yaxis.grid(True, linestyle='--', linewidth=0.7, alpha=0.7)
+            for label in ax.get_xticklabels():
+                label.set_ha('right')
+            tick_labels = ax.get_xticklabels()
+            for label in tick_labels:
+                if label.get_text() in ('Cam fl-fr', 'Cam fm'):
+                    label.set_fontweight('bold')
+            plt.ylim(axis_limit[metric])
+            plt.tight_layout()
+            plt.show()
+
+    # Load the data
+    all_metrics = pd.read_pickle("statistics/" + data_type + "/all_metrics.pkl")
+
+    # Metrics of interest
+    metrics_to_plot = ['pmpjpe', 'angle', 'velocity']
+
+    # Prepare the data for boxplots
+    columns = ['condition', 'metric', 'Q1', 'median', 'Q3', 'loval', 'hival', 'actual_loval', 'actual_hival']
+    data_for_boxplots = []
+
+    for condition, metrics in all_metrics.items():
+        for metric in metrics_to_plot:
+            if f"{metric}_Qs" in metrics:
+                Qs = metrics[f"{metric}_Qs"]
+                data_for_boxplots.append([condition, metric] + Qs)
+
+    # Create a DataFrame
+    boxplot_df = pd.DataFrame(data_for_boxplots, columns=columns)
+
+    # Prepare boxplot data
+    bxp_data = generate_bxp_stats(boxplot_df, metrics_to_plot)
+
+    # Plot the boxplots
+    plot_bxp(bxp_data)
 
 
-# 5. Effect Size Forest Plot
-def plot_effect_size_forest(p_values):
-    data = []
-    for metric, tests in p_values.items():
-        for test in tests:
-            data.append({
-                'Metric': metric,
-                'Condition': test['augmentation'],
-                'Effect Size': test['effect_size'],
-                'CI Lower': test['effect_size_ci'][0],
-                'CI Upper': test['effect_size_ci'][1],
-                'Significant': test['Significant']
-            })
+# Command-line interface
+def main():
+    parser = argparse.ArgumentParser(description="Generate and plot boxplots for metrics data.")
+    parser.add_argument("--data_type", type=str, choices=["mono", "multi"], default="mono", help="Specify data type: 'mono' or 'multi'.")
+    args = parser.parse_args()
 
-    df = pd.DataFrame(data)
-    df = df.sort_values(by='Effect Size')
+    generate_and_plot_boxplots(data_type=args.data_type)
 
-    plt.figure(figsize=(10, 6))
-    for i, row in df.iterrows():
-        plt.plot([row['CI Lower'], row['CI Upper']], [i, i], 'k-', lw=2)
-        plt.scatter(row['Effect Size'], i, color='red' if row['Significant'] else 'blue')
+if __name__ == "__main__":
+    main()
 
-    plt.yticks(range(len(df)), df['Condition'] + ' (' + df['Metric'] + ')')
-    plt.axvline(0, color='grey', linestyle='--')
-    plt.xlabel('Effect Size (Cohen\'s d)')
-    plt.title('Effect Sizes with Confidence Intervals')
-    plt.tight_layout()
-    plt.savefig('effect_size_forest.png')
-    plt.show()
+# Example command
+# python statistics/plot_metrics.py --data_type mono
 
-
-# Running the plotting functions
-plot_boxplot_pmpjpe(all_metrics_single)
-plot_barplot_metrics(all_metrics_single)
-plot_heatmap_keypoints(keypoints_metrics)
-plot_skeleton_diagram(keypoints_metrics, condition_to_plot='Condition1')
-plot_effect_size_forest(p_values)

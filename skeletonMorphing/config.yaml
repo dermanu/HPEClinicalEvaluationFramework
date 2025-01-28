@@ -16,7 +16,7 @@ parameters:
   weight_decay:
     values: [0.001, 0.01, 0.1]
   N_epochs:
-    value: 90
+    value: [60, 80]
   layer_size:
     values: [1024, 2048]
   train_pars:

@@ -1,3 +1,8 @@
+"""
+Training the morphing model on a set of hyperparameters defined in config.yaml. Optimized code to run on an
+HPC.
+"""
+
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -15,8 +20,6 @@ import torch.profiler
 import random
 import yaml
 
-
-
 # Set seeds for random number generator
 np.random.seed(42)
 torch.manual_seed(42)
@@ -27,35 +30,16 @@ if torch.cuda.is_available():
 def group_by_n(participants, n):
     '''
     Helper function to split participants into folds for cross-validation
-    :param participants: particpant indcies
-    :param n: fold size
-    :return: Folds for leave-n-participants-out cross-validation
+
+    Parameters:
+    - participants: particpant indcies
+    - n: fold size
+
+    Returns:
+    - Folds for leave-n-participants-out cross-validation
     '''
     it = iter(participants)
     return iter(lambda: list(islice(it, n)), [])
-
-
-#######################################################################################
-## Per-sample normalization may disrupt the spatial relationships between keypoints. ##
-## Consider normalizing using global statistics or per-feature normalization.        ##
-#######################################################################################
-def normalize_frames(frames):
-    min_val = frames.min(dim=1, keepdim=True)[0]
-    max_val = frames.max(dim=1, keepdim=True)[0]
-
-    norm_frames = (frames - min_val) / (max_val - min_val + 1e-8)
-    return norm_frames, min_val, max_val
-
-
-def descale_frames(norm_frames, min_val, max_val):
-    '''
-    Reverses the normalization process to recover the original scale of the frames.
-    :param norm_frames: Nomralized keypoints per frame
-    :param min_val: Min scaling factor
-    :param max_val: Max scaling factor
-    :return: De-normalized keypoints
-    '''
-    return norm_frames * (max_val - min_val + 1e-8) + min_val
 
 
 class EveryNthSampler(torch.utils.data.Sampler):
@@ -78,9 +62,9 @@ def calculate_mpjpe(predicted_keypoints, target_keypoints):
     """
     Calculate the Mean Per Joint Position Error (MPJPE).
 
-    Args:
-        predicted_keypoints (torch.Tensor): The predicted keypoints tensor of shape (batch_size, num_joints, 3).
-        target_keypoints (torch.Tensor): The ground truth keypoints tensor of shape (batch_size, num_joints, 3).
+    Parameter:
+    - predicted_keypoints (torch.Tensor): The predicted keypoints tensor of shape (batch_size, num_joints, 3).
+    - target_keypoints (torch.Tensor): The ground truth keypoints tensor of shape (batch_size, num_joints, 3).
 
     Returns:
         float: The MPJPE value.
@@ -92,6 +76,7 @@ def calculate_mpjpe(predicted_keypoints, target_keypoints):
     mpjpe = distances.mean().item()
     return mpjpe
 
+
 class PairwiseDistanceLoss(nn.Module):
     """
     Computes a loss based on pairwise distances between keypoints.
@@ -102,12 +87,12 @@ class PairwiseDistanceLoss(nn.Module):
 
     def forward(self, predicted_keypoints, target_keypoints):
         """
-        Args:
-            predicted_keypoints (torch.Tensor): Predicted keypoints, shape (batch_size, num_keypoints, 3).
-            target_keypoints (torch.Tensor): Target keypoints, shape (batch_size, num_keypoints, 3).
+        Parameters:
+        - predicted_keypoints (torch.Tensor): Predicted keypoints, shape (batch_size, num_keypoints, 3).
+        - target_keypoints (torch.Tensor): Target keypoints, shape (batch_size, num_keypoints, 3).
 
         Returns:
-            torch.Tensor: Pairwise distance loss.
+        - torch.Tensor: Pairwise distance loss.
         """
         pred_distances = torch.cdist(predicted_keypoints, predicted_keypoints)
         target_distances = torch.cdist(target_keypoints, target_keypoints)
@@ -125,12 +110,13 @@ class NetworkTrainer:
     def train(model, train_loader, optimizer, criterion, scaler):
         '''
         Training the morphing model
-        :param model: Model to train
-        :param train_loader: Dataloader for the training data
-        :param optimizer: Optimizer
-        :param criterion: Loss Criterion
-        :param scaler: Uses mixed-precision training (amp.GradScaler) for efficiency.
-        :return:
+
+        Parameters:
+        - model: Model to train
+        - train_loader: Dataloader for the training data
+        - optimizer: Optimizer
+        - criterion: Loss Criterion
+        - scaler: Uses mixed-precision training (amp.GradScaler) for efficiency.
         '''
 
         # Initialize model for training
@@ -145,19 +131,10 @@ class NetworkTrainer:
             pose_inf_batch = batch['pose_inf'].float().cuda() # Get inferred data (HPE)
             conf_inf_batch = batch['confidences_inf'].float().cuda() # Get HPE prediction confidence score
 
-            # Randomly selects a camera view for each sample
-            #num_cameras = pose_inf_batch.size(1)
-            #random_camera = random.randint(0, num_cameras - 1)
-            #pose_inf_batch = pose_inf_batch[:, random_camera, :, :]
-
             # Identify the camera with the highest confidence for each sample, only if the highest confidence > 0.6
             best_camera = conf_inf_batch.mean(dim=2).argmax(dim=1)
             batch_indices = torch.arange(pose_inf_batch.size(0), device=pose_inf_batch.device)
             pose_inf_batch = pose_inf_batch[batch_indices, best_camera]
-
-            # Normalize inputs and outputs
-            #inp_poses, inp_min_val, inp_max_val = normalize_frames(pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)))
-            #output_poses, output_min_val, output_max_val = normalize_frames(pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2)))
 
             inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2))
             output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2))
@@ -190,10 +167,11 @@ class NetworkTrainer:
     def validation(model, validation_loader, criterion):
         '''
         Validating model
-        :param model: Morphing model to be trained
-        :param validation_loader: Validation-specific dataset loader
-        :param criterion: Loss function
-        :return:
+
+        Parameters:
+        - model: Model to validate
+        - validation_loader: Dataloader for the validation data
+        - criterion: Loss Criterion
         '''
 
         # Initialize model for evaluation
@@ -210,19 +188,10 @@ class NetworkTrainer:
                 pose_inf_batch = batch['pose_inf'].float().cuda() # Get inferred data (HPE)
                 conf_inf_batch = batch['confidences_inf'].float().cuda() # Get HPE prediction confidence score
 
-                # Randomly select one camera view                                                                       ###  consistent evaluation, you might want to fix the camera or average over all cameras.
-                #num_cameras = pose_inf_batch.size(1)
-                #random_camera = random.randint(0, num_cameras - 1)
-                #pose_inf_batch = pose_inf_batch[:, random_camera, :, :]
-
-                # Identify the camera with the highest confidence for each sample, only if the highest confidence > 0.6
+                # Identify the camera with the highest confidence for each sample
                 best_camera = conf_inf_batch.mean(dim=2).argmax(dim=1)
                 batch_indices = torch.arange(pose_inf_batch.size(0), device=pose_inf_batch.device)
                 pose_inf_batch = pose_inf_batch[batch_indices, best_camera]
-
-                # Normalize input poses
-                # inp_poses, min_val, max_val = normalize_frames(pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2)))
-                # output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2))
 
                 inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2))
                 output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2))
@@ -234,7 +203,6 @@ class NetworkTrainer:
 
                 # Forward pass
                 pred_poses = model(inp_poses)
-                #pred_poses = descale_frames(pred_poses, min_val, max_val)
 
                 # Compute loss
                 loss = criterion(pred_poses, output_poses)
@@ -246,6 +214,14 @@ class NetworkTrainer:
 
     @staticmethod
     def test(model, test_loader, criterion):
+        '''
+        Testing the trained morphing model
+
+        Parameters:
+        - model: Model to train
+        - test_loader: Dataloader for the test data
+        - criterion: Loss Criterion
+        '''
         # Initialize model for testing
         model.eval()
 
@@ -265,19 +241,11 @@ class NetworkTrainer:
                 pose_inf_batch = batch['pose_inf'].float().cuda()
                 conf_inf_batch = batch['confidences_inf'].float().cuda() # Get HPE prediction confidence score
 
-                # Randomly select one camera view                                                                       ###  consistent evaluation, you might want to fix the camera or average over all cameras.
-                #num_cameras = pose_inf_batch.size(1)
-                #random_camera = random.randint(0, num_cameras - 1)
-                #pose_inf_batch = pose_inf_batch[:, random_camera, :, :]
-
-                # Identify the camera with the highest confidence for each sample, only if the highest confidence > 0.6
+                # Identify the camera with the highest confidence for each sample
                 best_camera = conf_inf_batch.mean(dim=2).argmax(dim=1)
                 batch_indices = torch.arange(pose_inf_batch.size(0), device=pose_inf_batch.device)
                 pose_inf_batch = pose_inf_batch[batch_indices, best_camera]
 
-                # Normalize input poses
-                # inp_poses, min_val, max_val = normalize_frames(pose_inf_batch.view(-1, pose_inf_batch.size(1) *  pose_inf_batch.size(2)))
-                # output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2))
                 inp_poses = pose_inf_batch.view(-1, pose_inf_batch.size(1) * pose_inf_batch.size(2))
                 output_poses = pose_gt_batch.view(-1, pose_gt_batch.size(1) * pose_gt_batch.size(2))
 
@@ -288,8 +256,6 @@ class NetworkTrainer:
 
                 # Forward pass
                 pred_poses = model(inp_poses)
-                #pred_poses = descale_frames(pred_poses, min_val, max_val)
-                #inp_poses = descale_frames(inp_poses, min_val, max_val)
 
                 # Calculate the difference-based loss
                 loss = criterion(pred_poses, output_poses)
@@ -331,14 +297,15 @@ class NetworkTrainer:
     @staticmethod
     def train_model(data_dict, test_dict, epochs=50, pars=None, pars_test=None, config=None):
         '''
-        Trains the model across k-folds and logs the results to wandb.
-        :param data_dict: Dictionary of training and evaluation data.
-        :param test_dict: Dictionary of test data.
-        :param epochs: Number of epochs per fold.
-        :param pars: List of participants for training and evaluation
-        :param pars_test: List of participants for testing
-        :param config: Configuration dictionary with training parameters.
-        :return: None
+        Trains and test the model across k-folds and logs the results to wandb.
+
+        Parameters:
+        - data_dict: Dictionary of training and evaluation data.
+        - test_dict: Dictionary of test data.
+        - epochs: Number of epochs per fold.
+        - pars: List of participants for training and evaluation
+        - pars_test: List of participants for testing
+        - config: Configuration dictionary with training parameters.
         '''
 
         # Splits participants into n-folds
@@ -389,7 +356,6 @@ class NetworkTrainer:
             model = modelSkeletonMorphing.Synthesizer(config.dropout_rate, config.layer_size).cuda()
             wandb.watch(model, log_freq=100)
             criterion = nn.MSELoss()
-            #criterion = PairwiseDistanceLoss()
             optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
             scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
             scaler = amp.GradScaler()
@@ -445,10 +411,13 @@ class NetworkTrainer:
 def load_dataset_par(data_folder: str, par: int):
     '''
     Loads and preprocesses the dataset for a specific participant.
-    :param data_folder:
-    :param par:
-    :param concat:
-    :return:
+
+    Parameters:
+    - data_folder: Path to the folder where the dataset is located.
+    - par: Participant number.
+
+    Returns:
+    - Torch dataset for training and evaluation.
     '''
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     par_path = f'{data_folder}/morph_dataset/par_{par}_mediapipe_dataset.pth'
@@ -487,6 +456,18 @@ def load_dataset_par(data_folder: str, par: int):
 
 # Load all training and test data for participants
 def load_train_test_all(data_folder: str, train_eval_pars, test_pars):
+    """
+    Load all training and test data for participants
+
+    Parameters:
+    - data_folder: Path to the folder where the dataset is located.
+    - train_eval_pars: List of participants for training and evaluation
+    - test_pars: List of participants for testing
+
+    Returns:
+    - train_eval_dict: Dictionary of training and evaluation data.
+    - test_dict: Dictionary of test data.
+    """
     train_eval_dict = {}
     for i in train_eval_pars:
         train_eval= load_dataset_par(data_folder, i)
@@ -506,10 +487,14 @@ def load_train_test_all(data_folder: str, train_eval_pars, test_pars):
 # Concatenate datasets, excluding a participant for testing
 def concat_dataset(dataset_dict: dict, pars=np.arange(4, 27)):
     '''
-    Concatenates datasets for specified participants
-    :param dataset_dict: Dictionary of datasets
-    :param pars: List of participant IDs
-    :return: Combined dataset
+    Concatenates datasets for specified participants, excluding a participant for testing.
+
+    Parameters:
+    - dataset_dict: Dictionary of training and evaluation data.
+    - pars: List of participants for training and evaluation
+
+    Returns:
+    - Combined dataset
     '''
     dataset = None
     for i in pars:
@@ -526,12 +511,16 @@ def concat_dataset(dataset_dict: dict, pars=np.arange(4, 27)):
 
 # Sweep function
 def sweep():
-    # Set up your default hyperparameters
+    """
+    Initialize the hyperparameter sweep. Here just on set of parameters is given, thus no real sweep is done, but data
+    is logged in Wandb.
+    """
+    # Get hyperparameters
     with open("skeletonMorphing/config.yaml") as file:
         config = yaml.load(file, Loader=yaml.FullLoader)
     run = wandb.init(config=config)
 
-    # Define the data
+    # Define the data path
     datapath = r"C:\Users\vizlab_stud\emanuel"
 
     # Load the data

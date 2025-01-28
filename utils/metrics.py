@@ -9,6 +9,7 @@ from sklearn.metrics import r2_score
 import wandb
 import pingouin as pg
 import pandas as pd
+from scipy.signal import savgol_filter
 
 
 def align_by_pelvis(joints):
@@ -32,10 +33,20 @@ def calculate_mpjpe(target, prediction, axis=1):
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
     mpjpe = np.linalg.norm(prediction - target, axis=axis)
-    mean = np.nanmean(mpjpe)
-    std = np.nanstd(mpjpe)
 
-    return mean, std
+    mpjpe = mpjpe[~np.isnan(mpjpe)]
+    mean = np.mean(mpjpe)
+    std = np.std(mpjpe)
+    Q1, median, Q3 = np.percentile(mpjpe, [25, 50, 75])
+    IQR = Q3 - Q1
+    loval = Q1 - 1.5 * IQR
+    hival = Q3 + 1.5 * IQR
+    wiskhi = np.compress(mpjpe <= hival, mpjpe)
+    wisklo = np.compress(mpjpe >= loval, mpjpe)
+    actual_hival = np.max(wiskhi)
+    actual_loval = np.min(wisklo)
+
+    return mean, std, [Q1, median, Q3, loval, hival, actual_loval, actual_hival]
 
 def align_procrustes(target, prediction):
     """
@@ -151,9 +162,9 @@ def calculate_pmpjpe(target, prediction, procrustes=True, axis=1):
         target, prediction, error_count = align_procrustes(target, prediction)
     else:
         error_count = 0
-    mean, std = calculate_mpjpe(target, prediction, axis=axis)
+    mean, std, Qs = calculate_mpjpe(target, prediction, axis=axis)
 
-    return mean, std, error_count
+    return mean, std, error_count, Qs
 
 
 def calculate_pck(target, prediction, threshold=100.0,
@@ -184,27 +195,40 @@ def calculate_pck(target, prediction, threshold=100.0,
     return pck
 
 
-def mean_velocity_error(prediction, target, sample_rate, procrustes=False, axis=2):
+def mean_velocity_error(target, prediction, sample_rate,
+                        procrustes=False,
+                        smooth=False, window_length=25, polyorder=3):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
-    :param prediction: Predicted 3D joint positions
-    :param target: Ground truth 3D joint positions
+    :param prediction: Predicted 3D joint positions in mm (shape: [frames, joints, 3])
+    :param target: Ground truth 3D joint positions in mm (shape: [frames, joints, 3])
     :param sample_rate: Sample rate in Hz
-    :param procrustes: Weather Procrustes alignment should be used
-    :param procrustes: Whether to use procrustes alignment
-    :return: Mean and standard deviation of the mean per-joint velocity error in mm/s
+    :param procrustes: Whether Procrustes alignment should be used
+    :param axis: Axis for the norm calculation (default: 2 -> across x,y,z)
+    :param smooth: Whether to apply Savitzky–Golay smoothing to raw positions
+    :param window_length: Window length for the Savitzky–Golay filter
+    :param polyorder: Polynomial order for the Savitzky–Golay filter
+    :return: (mean_error [m/s], std_error [m/s], [Q1, median, Q3, loval, hival, actual_loval, actual_hival])
     """
+    assert prediction.shape == target.shape, "Shape mismatch between prediction and target."
 
-    assert prediction.shape == target.shape, "The shape of prediction and target must match."
+    if smooth:
+        # Apply smoothing along the time dimension (axis=0)
+        prediction = savgol_filter(prediction, window_length=window_length,
+                                   polyorder=polyorder, axis=0)
+        #target = savgol_filter(target, window_length=window_length,
+        #                       polyorder=polyorder, axis=0)
 
-    velocity_predicted = np.diff(prediction, axis=0) * sample_rate
-    velocity_target = np.diff(target, axis=0) * sample_rate
+    #velocity_predicted = np.diff(prediction, axis=0) * sample_rate
+    #velocity_target = np.diff(target, axis=0) * sample_rate
+    velocity_predicted = (prediction[1:] - prediction[:-1]) / (1/sample_rate)
+    velocity_target = (target[1:] - target[:-1]) / (1/sample_rate)
 
-    # Ensure velocity arrays have the correct shape for norm computation
-    #velocity_predicted = velocity_predicted.reshape(-1, prediction.shape[1], 3)
-    #velocity_target = velocity_target.reshape(-1, target.shape[1], 3)
+    true_velocity = np.mean(np.mean(np.abs(velocity_target), axis=(1, 2)))
+    gt_velocity = np.mean(np.abs(velocity_target), axis=(1, 2))
+    predicted_velocity = np.mean(np.abs(velocity_predicted), axis=(1, 2))
 
-    # Create valid mask for velocities
+    # Create valid mask for NaNs
     valid_mask = ~np.isnan(velocity_predicted) & ~np.isnan(velocity_target)
 
     if procrustes:
@@ -212,13 +236,28 @@ def mean_velocity_error(prediction, target, sample_rate, procrustes=False, axis=
         velocity_predicted_filled = np.where(valid_mask, velocity_predicted, 0)
         velocity_target_filled = np.where(valid_mask, velocity_target, 0)
         mean, std, err = calculate_pmpjpe(velocity_target_filled, velocity_predicted_filled)
+        Q1 = Q3 = median = loval = hival = actual_loval = actual_hival = 0
     else:
-        # Compute MPJPE with NaN-aware functions
-        mpjpe = np.linalg.norm(velocity_predicted - velocity_target, axis=axis)  # Shape: [batch, joints]
-        mean = np.nanmean(mpjpe)
-        std = np.nanstd(mpjpe)
+        #mpjpe = np.linalg.norm(velocity_predicted - velocity_target, axis=axis)
+        mpjve = np.mean(np.abs(velocity_target - velocity_predicted), axis=(1, 2))
+        mpjve = mpjve[~np.isnan(mpjve)]
 
-    return mean/1000, std/1000
+        # Calculate statistics
+        mean = np.mean(mpjve)
+        std = np.std(mpjve)
+        Q1, median, Q3 = np.percentile(mpjve, [25, 50, 75])
+        IQR = Q3 - Q1
+        loval = (Q1 - 1.5 * IQR)
+        hival = (Q3 + 1.5 * IQR)
+
+        # Whiskers for outlier detection
+        wiskhi = np.compress(mpjve <= hival, mpjve)
+        wisklo = np.compress(mpjve >= loval, mpjve)
+        actual_hival = np.max(wiskhi)
+        actual_loval = np.min(wisklo)
+
+    # Return mean & std in m/s plus additional percentile info
+    return mean, std, [Q1, median, Q3, loval, hival, actual_loval, actual_hival]
 
 
 def mean_acceleration_error(prediction, target, sample_rate, procrustes=False):

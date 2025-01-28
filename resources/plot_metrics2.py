@@ -1,23 +1,25 @@
+import numpy as np
+from setuptools.command.rotate import rotate
 import pickle
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from setuptools.command.rotate import rotate
+
+# Define colors for each group using the colorblind palette
+palette = sns.color_palette("colorblind", 4)  # Generate 3 distinct colors
 
 # Load the necessary data (adjust the file paths as necessary)
-with open('multi/all_metrics_single.pkl', 'rb') as f:
+with open('../statistics/multi/all_metrics_single.pkl', 'rb') as f:
     all_metrics_single = pickle.load(f)
 
-with open('multi/keypoints_metrics.pkl', 'rb') as f:
+with open('../statistics/multi/keypoints_metrics.pkl', 'rb') as f:
     keypoints_metrics = pickle.load(f)
 
-with open('multi/p_values.pkl', 'rb') as f:
+with open('../statistics/multi/p_values.pkl', 'rb') as f:
     p_values = pickle.load(f)
 
-with open('multi/angle_errors_metrics.pkl', 'rb') as f:
+with open('../statistics/multi/angle_errors_metrics.pkl', 'rb') as f:
     angle_errors_metrics = pickle.load(f)
-
 
 # Preparing a dictionary to store data for each augmentation
 metrics_dict = {}
@@ -26,45 +28,83 @@ for condition, metrics in all_metrics_single.items():
     # Extract the augmentation name
     augmentation = condition  # This assumes `condition` is the augmentation name
 
-    if augmentation != 'cameras_5_1_2':
-        # Create a dictionary for this specific augmentation
-        augmentation_metrics = {}
+    # Create a dictionary for this specific augmentation
+    augmentation_metrics = {}
 
-        # Extract 'pmpjpe' (mean) values
-        augmentation_metrics['pmpjpe'] = [pmpjpe_value[0] for pmpjpe_value in metrics['pmpjpe']]
+    # Extract 'pmpjpe' (mean) values
+    augmentation_metrics['pmpjpe'] = [pmpjpe_value[0] for pmpjpe_value in metrics['pmpjpe']]
 
-        # Extract 'angular' (angle metrics)
-        augmentation_metrics['angular'] = [angular_value for angular_value in metrics['angle']]
+    # Extract 'angular' (angle metrics)
+    augmentation_metrics['angular'] = [angular_value for angular_value in metrics['angle']]
 
-        # Extract 'velocity' (mean) values
-        augmentation_metrics['velocity'] = [velocity_value[0] for velocity_value in metrics['velocity']]
+    # Extract 'velocity' (mean) values
+    augmentation_metrics['velocity'] = [velocity_value[0] for velocity_value in metrics['velocity']]
 
-        # Extract 'pcc' values
-        augmentation_metrics['pcc'] = [pcc_value for pcc_value in metrics['pcc']]
+    # Extract 'pcc' values
+    augmentation_metrics['pcc'] = [pcc_value for pcc_value in metrics['pcc']]
 
-        # Add this augmentation's metrics to the main dictionary
-        metrics_dict[augmentation] = augmentation_metrics
+    # Add this augmentation's metrics to the main dictionary
+    metrics_dict[augmentation] = augmentation_metrics
 
-import pickle
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+metric_titles = {
+    'pmpjpe': 'MPJPE',
+    'angular': 'MPJAE',
+    'velocity': 'MPJVE',
+    'pcc': 'PCC'}
 
 # Predefine custom y-axis labels for each metric
 y_labels = {
-    'pmpjpe': 'Overall PMPJE in [mm]',
-    'angular': 'Overall joint angle in [°]',
-    'velocity': 'Overall joint speed in [m/s]',
+    'pmpjpe': 'Overall MPJPE in [mm]',
+    'angular': 'Overall MPJAE [°]',
+    'velocity': 'Overall MPJVE [m/s]',
     'pcc': 'Overall PCC'
 }
 
 # Define the custom order for augmentations (using original names)
 augmentation_order = [
-   # 'background',
-    'defocus', 'occlusion', 'underexposure', 'desynchronize', 'decalibration',
+    'background', 'defocus', 'occlusion', 'underexposure', 'desynchronize', 'decalibration',
     'cameras_4_0', 'cameras_4_3', 'cameras_5_1', 'cameras_5_4_1', 'cameras_0_4_5', 'cameras_5_4_1_3',
     'upper', 'lower', 'complex', 'sitting'
 ]
+
+# Define a mapping from the original names to the display names
+augmentation_display_names = {
+    'background': 'Background',
+    'defocus': 'Defocus',
+    'occlusion': 'Occlusion',
+    'underexposure': 'Underexposure',
+    'desynchronize': 'Desynchronized',
+    'decalibration': 'Decalibrated',
+    'cameras_4_0': 'Cam fl-fr',
+    'cameras_4_3': 'Cam fl-bl',
+    'cameras_5_1': 'Cam fm-sl',
+    'cameras_5_4_1': 'Cam fl-fm-sl',
+    'cameras_0_4_5': 'Cam fl-fm-fr',
+    'cameras_5_4_1_3': 'Cam fl-fm-bl-sl',
+    'upper': 'Upper',
+    'lower': 'Lower',
+    'complex': 'Complex',
+    'sitting': 'Sitting'
+}
+
+box_colors = {
+    'Background': palette[0],
+    'Defocus': palette[0],
+    'Occlusion': palette[0],
+    'Underexposure': palette[0],
+    'Desynchronized': palette[0],
+    'Decalibrated': palette[0],
+    'Cam fl-fr': palette[1],
+    'Cam fl-bl': palette[1],
+    'Cam fm-sl': palette[1],
+    'Cam fl-fm-sl': palette[1],
+    'Cam fl-fm-fr': palette[1],
+    'Cam fl-fm-bl-sl': palette[1],
+    'Upper': palette[2],
+    'Lower': palette[2],
+    'Complex': palette[2],
+    'Sitting': palette[2],
+}
 
 # augmentation_order = [
 #     'background', 'defocus', 'occlusion', 'underexposure',
@@ -72,33 +112,11 @@ augmentation_order = [
 #     'upper', 'lower', 'complex', 'sitting'
 # ]
 
-# Define a mapping from the original names to the display names
-augmentation_display_names = {
-    #'background': 'Background',
-    'defocus': 'Defocus',
-    'occlusion': 'Occlusion',
-    'underexposure': 'Underexposure',
-    'desynchronize': 'Desynchronized',
-    'decalibration': 'Decalibrated',
-    'cameras_4_0': 'Cameras fl-fr',
-    'cameras_4_3': 'Cameras fl-bl',
-    'cameras_5_1': 'Cameras fm-sl',
-    'cameras_5_4_1': 'Cameras fl-fm-sl',
-    'cameras_0_4_5': 'Cameras fl-fm-fr',
-    'cameras_5_4_1_3': 'Cameras fl-fm-bl-sl',
-    'upper': 'Upper',
-    'lower': 'Lower',
-    'complex': 'Complex',
-    'sitting': 'Sitting'
-}
-
 # augmentation_display_names = {
 #     'background': 'Background',
 #     'defocus': 'Defocus',
 #     'occlusion': 'Occlusion',
 #     'underexposure': 'Underexposure',
-#     'desynchronize': 'Desynchronized',
-#     'decalibration': 'Decalibrated',
 #     'cameras_4': 'Camera fr',
 #     'cameras_5': 'Camera fm',
 #     'cameras_0': 'Camera fl',
@@ -110,6 +128,23 @@ augmentation_display_names = {
 #     'complex': 'Complex',
 #     'sitting': 'Sitting'
 # }
+
+#box_colors = {
+#    'background': 0,
+#    'defocus': 0,
+#    'occlusion': 0,
+#    'underexposure': 0,
+#    'cameras_4': 1,
+#    'cameras_5': 1,
+#    'cameras_0': 1,
+#    'cameras_1': 1,
+#    'cameras_2': 1,
+#    'cameras_3': 1,
+#    'upper': 2,
+#    'lower': 2,
+#    'complex': 2,
+#    'sitting': 2
+#}
 
 # Create a dictionary to store DataFrames for each metric
 metric_dfs = {}
@@ -135,7 +170,7 @@ for metric_name in ['pmpjpe', 'angular', 'velocity', 'pcc']:
     })
 
 # Define a color palette for the plots
-palette = sns.color_palette("Set2")
+#sns.set_style("whitegrid")
 
 # Plot separate boxplots for each metric with enhanced readability
 metrics_to_plot = ['pmpjpe', 'angular', 'velocity', 'pcc']
@@ -148,15 +183,16 @@ for i, metric in enumerate(metrics_to_plot):
             x='augmentation',
             y='value',
             data=metric_dfs[metric],
-            palette=palette,
+            hue='augmentation',
+            palette=box_colors,
             showfliers=False,
             order=[augmentation_display_names[aug] for aug in augmentation_order],
-            ax = axes[row, col]
+            ax = axes[row, col],
+            #color = box_colors[metric]
     )
 
-
     # Set the title and labels on the correct axis
-    axes[row, col].set_title(metric.capitalize(), fontsize=16)
+    axes[row, col].set_title(metric_titles[metric], fontsize=18)
     axes[row, col].set_ylabel(y_labels[metric], fontsize=14)  # Use predefined y-axis labels
     axes[row, col].set_xlabel('', fontsize=14)  # Use predefined y-axis labels
     # Set the x-ticks to the augmentation names explicitly
@@ -164,7 +200,14 @@ for i, metric in enumerate(metrics_to_plot):
 
     # Rotate x-tick labels for better readability
     axes[row, col].tick_params(axis='x', rotation=45, labelsize=12)
+    for tick_label in axes[row, col].get_xticklabels():
+        tick_label.set_ha('right')
 
+
+    sn.grid(True, axis='y')
+
+    if metric != 'velocity':
+        axes[row, col].set_ylim(bottom=0)
 
     # Tighten layout if needed
     plt.tight_layout()
@@ -261,9 +304,6 @@ ax.set_title(f"Mean (Std) Angular Errors for Condition: {condition}", fontsize=1
 # Show the plot
 plt.tight_layout()
 plt.show()
-
-
-
 
 #########################################################
 ## 2. Similarity of Joint Center Position Measurements ##

@@ -3,6 +3,7 @@ from utils import angle_metrics_tpose_utils as utils
 from scipy.signal import medfilt
 import gc
 import multiprocessing
+from scipy.signal import savgol_filter
 
 
 def convert_to_dictionary(keypoints):
@@ -229,10 +230,10 @@ def process_chunk(keypoints_chunk, num_keypoints):
 
     keypoints_dict = convert_to_dictionary(keypoints_chunk)
     add_hips_and_neck(keypoints_dict)
-    filtered_keypoints = median_filter(keypoints_dict)
-    get_bone_lengths(filtered_keypoints)
-    get_base_skeleton(filtered_keypoints)
-    angles_chunk = calculate_joint_angles(filtered_keypoints)
+    #keypoints_dict = median_filter(keypoints_dict)
+    get_bone_lengths(keypoints_dict)
+    get_base_skeleton(keypoints_dict)
+    angles_chunk = calculate_joint_angles(keypoints_dict)
 
     # Exclude unwanted joints from the angles dictionary
     exclude_joints_from_output = ['hips', 'neck', 'left_heel', 'right_heel', 'left_foot_index', 'right_foot_index']
@@ -240,6 +241,10 @@ def process_chunk(keypoints_chunk, num_keypoints):
     for joint in angles_chunk['joints']:
         if joint not in exclude_joints_from_output:
             angles_dict[joint + '_angles'] = angles_chunk[joint + '_angles']
+
+    # Memory management
+    del keypoints_dict, angles_chunk
+    gc.collect()
 
     return angles_dict
 
@@ -269,3 +274,81 @@ def calculate_angles_tpose(keypoints, chunk_size=2500):
                 combined_angles[key] = value
 
     return combined_angles
+
+
+def calculate_angular_speed_error(gt, pred, sample_rate, smoothing_window=51, polyorder=3, post_smoothing = False):
+    """
+    Calculate the angular speed for each joint over all frames.
+
+    :param keypoints: Dictionary containing joint angles as numpy arrays.
+    :param frame_time_interval: Time interval between consecutive frames (in seconds).
+    :return: Updated keypoints dictionary with angular speeds for each joint.
+    """
+    angular_speed_dict = {}
+    angular_speed = {}
+
+    for joint in gt:
+        # Retrieve ground truth and predicted angles
+        angles_gt = gt[joint]
+        angles_pred = pred[joint]
+
+        assert angles_gt.shape[1] == angles_pred.shape[1], "The number of frames must match."
+
+        # Initialize smoothed prediction array with the same shape
+        angles_pred_smoothed = np.zeros_like(angles_pred)
+        angles_gt_smoothed = np.zeros_like(angles_gt)
+
+        # Apply smoothing along each axis
+        for axis in range(angles_pred.shape[1]):
+            if angles_pred.shape[0] < smoothing_window:
+                angles_pred_smoothed[:, axis] = angles_pred[:, axis]
+                angles_gt_smoothed[:, axis] = angles_gt[:, axis]
+            else:
+                angles_pred_smoothed[:, axis] = savgol_filter(angles_pred[:, axis], smoothing_window, polyorder)
+                angles_gt_smoothed[:, axis] = savgol_filter(angles_gt[:, axis], smoothing_window, polyorder)
+
+        # Calculate angular velocities (central difference)
+        #CHECK AXIS!
+        velocity_predicted = np.gradient(angles_pred_smoothed, 1 / sample_rate, axis=0)
+        velocity_target = np.gradient(angles_gt_smoothed, 1 / sample_rate, axis=0)
+
+        # Smooth velocity profiles
+        if post_smoothing and velocity_predicted.shape[0] >= smoothing_window:
+            for axis in range(velocity_predicted.shape[1]):
+                velocity_predicted[:, axis] = savgol_filter(velocity_predicted[:, axis], smoothing_window, polyorder)
+                velocity_target[:, axis] = savgol_filter(velocity_target[:, axis], smoothing_window, polyorder)
+
+        # Compute MPJAVE
+        mpjave = np.degrees(np.abs(velocity_target - velocity_predicted))
+
+        angular_speed[joint] = {
+            "mpjave": mpjave  # Storing the full array for aggregation outside the loop
+        }
+
+    # Aggregate MPJAVE across all joints
+    all_mpjave = np.concatenate([angular_speed[joint]["mpjave"].flatten() for joint in angular_speed])
+
+    # Compute overall statistical summaries
+    overall_metrics = {
+        "mean": np.mean(all_mpjave),
+        "std": np.std(all_mpjave),
+        "median": np.percentile(all_mpjave, 50),
+        "Q1": np.percentile(all_mpjave, 25),
+        "Q3": np.percentile(all_mpjave, 75),
+        "IQR": np.percentile(all_mpjave, 75) - np.percentile(all_mpjave, 25),
+        "loval": np.percentile(all_mpjave, 25) - 1.5 * (
+                    np.percentile(all_mpjave, 75) - np.percentile(all_mpjave, 25)),
+        "hival": np.percentile(all_mpjave, 75) + 1.5 * (
+                    np.percentile(all_mpjave, 75) - np.percentile(all_mpjave, 25)),
+    }
+
+    # Compute whisker values for filtering outliers
+    wiskhi = all_mpjave[all_mpjave <= overall_metrics["hival"]]
+    wisklo = all_mpjave[all_mpjave >= overall_metrics["loval"]]
+    overall_metrics["actual_hival"] = np.max(wiskhi) if len(wiskhi) > 0 else np.nan
+    overall_metrics["actual_loval"] = np.min(wisklo) if len(wisklo) > 0 else np.nan
+
+    # Add overall metrics to the result
+    angular_speed_dict = overall_metrics
+
+    return angular_speed_dict
