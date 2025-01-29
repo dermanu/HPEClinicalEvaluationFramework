@@ -1,8 +1,10 @@
+#######################################################
+## Gap filling and smoothing as post-processing step ##
+##            NOT EXTENSIVELY TESTED YET             ##
+#######################################################
+
 import numpy as np
 import scipy
-from filterpy.kalman import KalmanFilter
-from filterpy.common import Q_discrete_white_noise
-
 
 def nan_helper(y):
     return np.isnan(y), lambda z: z.nonzero()[0]
@@ -18,6 +20,7 @@ def linear_interpolation(input):
         out[:] = 0
     return out
 
+
 def akima_interpolator(input):
     for i in range(input.shape[1]):
         for j in range(input.shape[2]):
@@ -28,30 +31,13 @@ def akima_interpolator(input):
             missing_indices = np.isnan(slice_n)
 
             # Create an Akima1DInterpolator object
-            akima_interpolator = Akima1DInterpolator(np.arange(len(slice_n))[~missing_indices], slice_n[~missing_indices])
+            akima_interpolator = scipy.interpolate.Akima1DInterpolator(np.arange(len(slice_n))[~missing_indices], slice_n[~missing_indices])
 
             # Interpolate missing values
             interpolated_values = akima_interpolator(np.arange(len(slice_n)))
 
             # Fill in missing values in the original array
             slice_n[missing_indices] = interpolated_values[missing_indices]
-
-
-def akima_interpolation(values):
-    xnew = np.arange(0, len(values) - 1, 1 / times)
-    xi = np.arange(0, len(values))
-    yi = np.array(values)
-    try:
-        P = scipy.interpolate.Akima1DInterpolator(xi, yi, axis=0)
-    except TypeError:
-        # Scipy earlier than 0.17.0 missing axis
-        P = scipy.interpolate.Akima1DInterpolator(xi, yi)
-    if der == 0:
-        return P(xnew)
-    elif scipy.interpolate._isscalar(der):
-        return P(xnew, der=der)
-    else:
-        return [P(xnew, nu) for nu in der]
 
 
 def median_smoothing(inputs, size=15):
@@ -84,16 +70,15 @@ def postprocess_points(p3ds, filter_type='median', interpolation_type='Akima'):
     """
 
     if interpolation_type == 'akima':
-        p3ds = np.apply_along_axis(akima_interpolation, 0, p3ds)
+        p3ds = np.apply_along_axis(akima_interpolator, 0, p3ds)
     else:
         p3ds = np.apply_along_axis(linear_interpolation, 0, p3ds)
 
-    if filter_type == 'spline':
+    if filter_type == 'butterworth':
         p3ds = np.apply_along_axis(butterworth_smoothing, 0, p3ds, k=3)
-    elif filter_type == 'kalman':
+    elif filter_type == 'spline':
         p3ds = np.apply_along_axis(spline_smoothing, 0, p3ds, size=7)
     else:
         p3ds = np.apply_along_axis(median_smoothing, 0, p3ds, size=7)
 
     return p3ds
-

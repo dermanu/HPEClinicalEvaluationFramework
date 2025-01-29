@@ -1,3 +1,7 @@
+"""
+Calculation of joint angles based on: https://github.com/TemugeB/joint_angles_calculate
+"""
+
 import numpy as np
 from utils import angle_metrics_tpose_utils as utils
 from scipy.signal import medfilt
@@ -7,7 +11,19 @@ from scipy.signal import savgol_filter
 
 
 def convert_to_dictionary(keypoints):
-    # Convert keypoints to float32 to save memory
+    """
+    Converts a NumPy array of keypoints into a dictionary with joint names as keys.
+
+    Parameters:
+    - keypoints (numpy.ndarray): A 3D NumPy array of shape (3, num_keypoints, num_frames), where:
+        - The first dimension represents coordinates (x, y, confidence).
+        - The second dimension represents keypoints (joints).
+        - The third dimension represents frames in a sequence.
+
+    Returns:
+    - dict: A dictionary mapping joint names to their corresponding (frames, 3) data. The dictionary also includes
+     a 'joints' key containing the joint names.
+    """
     keypoints = keypoints.astype(np.float32)
 
     #its easier to manipulate keypoints by joint name
@@ -280,9 +296,9 @@ def calculate_angular_speed_error(gt, pred, sample_rate, smoothing_window=51, po
     """
     Calculate the angular speed for each joint over all frames.
 
-    :param keypoints: Dictionary containing joint angles as numpy arrays.
-    :param frame_time_interval: Time interval between consecutive frames (in seconds).
-    :return: Updated keypoints dictionary with angular speeds for each joint.
+    - keypoints: Dictionary containing joint angles as numpy arrays.
+    - frame_time_interval: Time interval between consecutive frames (in seconds).
+    - Updated keypoints dictionary with angular speeds for each joint.
     """
     angular_speed_dict = {}
     angular_speed = {}

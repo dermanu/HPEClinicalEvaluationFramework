@@ -1,6 +1,9 @@
+"""
+Calculation of T-Pose for joint angle calculation based on: https://github.com/TemugeB/joint_angles_calculate
+"""
+
 import numpy as np
 
-#general rotation matrices
 def get_R_x(theta):
     R = np.array([[1, 0, 0],
                   [0, np.cos(theta), -np.sin(theta)],

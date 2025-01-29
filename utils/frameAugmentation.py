@@ -1,3 +1,7 @@
+"""
+Helper functions to augment frames durig evaluation.
+"""
+
 import cv2
 import numpy as np
 import imgaug as ia
@@ -9,6 +13,16 @@ ia.seed(1)
 
 
 def occlusion(frame):
+    """
+    Applies a random occlusion with Gaussian noise to the given image.
+
+    Parameters:
+    - frame (numpy.ndarray): The input image in the form of a NumPy array (height, width, channels).
+
+    Returns:
+    - frame (numpy.ndarray): The modified image with an occluded region filled with Gaussian noise.
+    """
+
     h, w = frame.shape[:2]
 
     # Define the size of the occlusion
@@ -33,19 +47,44 @@ def occlusion(frame):
 
 
 def motion_blur(frame):
-    # Add motion blur
+    """
+    Applies a mild motion blur effect to the given image.
+
+    Parameters:
+    - frame (numpy.ndarray): The input image as a NumPy array with shape (height, width, channels).
+
+    Returns:
+    - numpy.ndarray: The image with a motion blur effect applied.
+    """
     aug = iaa.imgcorruptlike.MotionBlur(severity=1)
     return aug(image=frame)
 
 
 def overexposure(frame):
+    """
+    Simulates overexposure by increasing brightness.
+
+    Parameters:
+    - frame (numpy.ndarray): The input image as a NumPy array with shape (height, width, channels).
+
+    Returns:
+    - numpy.ndarray: The image with increased brightness to simulate overexposure.
+   """
     # Add overexposure
     aug = iaa.color.MultiplyBrightness(0.2)
     return aug(image=frame)
 
 
 def underexposure(frame):
-    # Add underexposure
+    """
+    Simulates underexposure by darkening the image.
+
+    Parameters:
+    - frame (numpy.ndarray): The input image as a NumPy array with shape (height, width, channels).
+
+    Returns:
+    - numpy.ndarray: The image with reduced brightness to simulate underexposure.
+    """
     aug = iaa.BlendAlpha(
         (0.15),
         background=iaa.Multiply(0.2))
@@ -53,27 +92,54 @@ def underexposure(frame):
 
 
 def defocus(frame):
-    # Add blur to simulate out of focus
+    """
+    Simulates an out-of-focus effect using defocus blur.
+
+    Parameters:
+    - frame (numpy.ndarray): The input image as a NumPy array with shape (height, width, channels).
+
+    Returns:
+    - numpy.ndarray: The image with defocus blur applied.
+    """
     aug = iaa.imgcorruptlike.DefocusBlur(severity=3)
     return aug(image=frame)
 
 
 class FrameAugmentor:
+    """
+    A class for applying various augmentations to video frames before processing.
+
+    Attributes:
+    - change_bg (alter_bg): Background changer model for replacing backgrounds in frames.
+
+    Methods:
+    - augment_frames(frame, sweep_config): Applies augmentation to a frame based on the specified configuration.
+    """
     def __init__(self):
+        """
+        Initializes the FrameAugmentor class.
+
+        - Loads the background segmentation model using PixelLib.
+        - Requires a pre-trained model file: 'utils/xception_pascalvoc.pb'.
+        - The model file can be downloaded from:
+          https://github.com/ayoolaolafenwa/PixelLib/releases/download/1.1/xception_pascalvoc.pb
+        """
         # Initiate BackgroundChanger
         self.change_bg = alter_bg(model_type="pb")
-        # Load the model. Can be downloaded from
-        # https://github.com/ayoolaolafenwa/PixelLib/releases/download/1.1/xception_pascalvoc.pb
+        # Load the model
         self.change_bg.load_pascalvoc_model('utils/xception_pascalvoc.pb')
 
     def augment_frames(self, frame, sweep_config):
         """
-        Augment video frames before being processed by model, according to sweep settings.
-        :param sweep_config: Updated sweep config
-        :param frames: [frame 0, frame 1, ...]
-        :return: [augmented frame 0, augmented frame 1, ...]
-        """
+        Applies the specified augmentation to a single frame.
 
+        Parameters:
+        - frame (numpy.ndarray): The input image as a NumPy array with shape (height, width, channels).
+        - sweep_config (dict): A dictionary containing augmentation settings.
+
+        Returns:
+        - numpy.ndarray: The augmented frame.
+        """
         # Apply augmentation to each frame of input based on settings in sweep_config
         augmentation_type = sweep_config['augmentation']
         if augmentation_type == 'background':
@@ -90,13 +156,36 @@ class FrameAugmentor:
 
 
 class CameraDesynchronizer:
+    """
+    A class to simulate camera desynchronization by introducing random frame offsets.
+
+    Attributes:
+    - rng (numpy.random.Generator): Random number generator for selecting frame offsets.
+
+    Methods:
+    - desynchronize(caps): Applies random frame offsets to a list of video capture objects.
+    """
     def __init__(self):
+        """
+        Initializes the CameraDesynchronizer class.
+
+        - Uses a fixed random seed (42) for reproducibility.
+        - Generates random frame offsets to simulate desynchronization.
+        """
         self.rng = np.random.default_rng(42)
 
-    # Desynchronize frames for multiple cameras by starting at different frames. This should be sufficient to simulate
-    # different offset. However, not desynchronisation of long recordings due to clock drift.
     def desynchronize(self, caps):
-        # Open video file at different offset frames
+        """
+        Applies a small random frame offset to each camera feed.
+
+        Parameters:
+        - caps (list of tuples): A list of tuples (camera_id, cap), where:
+             - camera_id (int): The identifier for the camera.
+             - cap (cv2.VideoCapture): The OpenCV VideoCapture object.
+
+        Returns:
+        - list of tuples: A list of tuples (camera_id, cap) with the updated frame positions.
+        """
         caps_offset = []
 
         for cam_id, cap in caps:  # Unpack the tuple (camera_id, cap) from caps

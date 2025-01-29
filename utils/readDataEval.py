@@ -1,3 +1,12 @@
+"""
+Helper functions to read data for evaluation. Mapping of HPE keypoint names to ground-truth names has to be changed for
+each new model
+"""
+
+##############################################################################################################################
+## TO DO: Combine with skeletonMorphin/readDatasetMorph.py and use yaml where all HPE model specific parameters are stored. ##
+##############################################################################################################################
+
 import pandas as pd
 import numpy as np
 import os
@@ -9,9 +18,13 @@ cv2.setNumThreads(2)
 def align_keypoints(keypoints_org):
     """
     Aligns keypoints in a DataFrame based on different alignment identifiers.
-    :param keypoints_org (pd.DataFrame or None): Original DataFrame containing the keypoints.
-    :param model_type (str): String identifier for selecting the alignment array based on the respective model.
-    :return aligned_keypoints (dict): Dictionary containing aligned keypoints.
+
+    Parameters:
+    - keypoints_org (pd.DataFrame or None): Original DataFrame containing the keypoints.
+    - model_type (str): String identifier for selecting the alignment array based on the respective model.
+
+    Returns:
+    - aligned_keypoints (dict): Dictionary containing aligned keypoints.
     """
     # Only get relevant datapoints for analysis and give them better names for debugging
     mapping = {
@@ -53,9 +66,13 @@ def align_keypoints(keypoints_org):
 def load_csv(csv_file_path):
     """
     Load keypoints from a CSV file.
-    :param csv_file_path (str): Path to the CSV file.
-    :param model_type (str): String identifier for the model used.
-    :return keypoints (np.array): Array containing keypoints.
+
+    Parameters:
+    - csv_file_path (str): Path to the CSV file.
+    - model_type (str): String identifier for the model used.
+
+    Returns:
+    - keypoints (np.array): Array containing keypoints.
     """
     # Load the CSV file
     keypoints_org = pd.read_csv(csv_file_path)
@@ -70,13 +87,17 @@ def load_csv(csv_file_path):
 def load_data(path, par, mov, cams):
     """
     Load data for a participant.
-    :param path (str): Root directory containing participant data.
-    :param par (str): Participant identifier.
-    :param mov (str): Movement identifier.
-    :param cams (int or list): Camera(s) to load data from.
-    :param model_type (str): String identifier for the model used.
-    :return gt_keypoints (list): List of tuples containing camera number and keypoints.
-    :return video_caps (list): List of tuples containing camera number and video capture object.
+
+    Parameters:
+    - path (str): Root directory containing participant data.
+    - par (str): Participant identifier.
+    - mov (str): Movement identifier.
+    - cams (int or list): Camera(s) to load data from.
+    - model_type (str): String identifier for the model used.
+
+    Returns:
+    - gt_keypoints (list): List of tuples containing camera number and keypoints.
+    - video_caps (list): List of tuples containing camera number and video capture object.
     """
     participant_folder = os.path.join(path, par)
     gt_keypoints = []

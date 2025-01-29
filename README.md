@@ -38,7 +38,6 @@ The study introduces a comprehensive framework for evaluating the applicability 
 ## Installation
 
 1. Clone the repository and install dependencies:
-
 ```bash
 # Clone the repository
 git clone https://github.com/username/HPEClinicalEvaluationFramework.git
@@ -48,13 +47,16 @@ cd HPEClinicalEvaluationFramework
 pip install -r requirements.txt
 ```
 
-2. Login into your W&B account, following the instructions here: [https://docs.wandb.ai/quickstart/].
+2. Download [`xception_pascalvoc.pb`](https://github.com/ayoolaolafenwa/PixelLib/releases/download/1.1/xception_pascalvoc.pb) and `haarcascade_frontalface_alt.xml` and place into `/utils`. Those are used for 
+   changing the background and occluding faces for anonymisation.
 
-3. Add the model you want to evaluate to the folder `/models`. Use the existing models as template.
+3. Login into your W&B account, following the instructions here: [https://docs.wandb.ai/quickstart/].
 
-4. Make changes in named scripts to allow for the testing of other HPE models (or ground-truth datasets). Those adjustments, will be replaced by a global yaml file including all parameters in the future:
+4. Add the model you want to evaluate to the folder `/models`. Use the existing models as template.
+
+5. Make changes in named scripts to allow for the testing of other HPE models (or ground-truth datasets). Those adjustments, will be replaced by a global yaml file including all parameters in the future:
    1. `skeletonMorphing/loadMorphDataset.py`:  Adjust path to your dataset, used model and evtl. difference in dataset structure.
-   2. `skeletonMorphing/readDatasetMorph.py`: Add output structure of specific HPE models keypoints (marked).
+   2. `skeletonMorphing/readDatasetMorph.py` and `utils/readDatasetEval.py`: Add output structure of specific HPE models keypoints (marked).
    3. `skeletonMorphing/trainSkeletonMorphing.py`: Change data paths.
    4. `utils/readDataEval`: Adjust order of HPE models keypoint output order.
    5. `evaluation_pipeline`: Add other HPE models if needed.
@@ -62,7 +64,7 @@ pip install -r requirements.txt
 ### System Requirements
 - Python 3.8+
 - CUDA-enabled GPU (optional for acceleration)
-- Optional use of a High-Performance-Cluster to parallelize the evaluation.
+- Optional: High-Performance-Cluster (HPC) to parallelize the evaluation.
 
 ---
 
@@ -115,7 +117,6 @@ pip install -r requirements.txt
          python statistics/plot_metrics.py --data_type mono
 		 python statistics/plot_metrics.py --data_type multi
          ```
- 
 
 ---
 

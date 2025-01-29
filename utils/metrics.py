@@ -1,3 +1,7 @@
+"""
+Collection of evaluation metrics. Not all are tested.
+"""
+
 import numpy as np
 from scipy import signal
 from sklearn.metrics import auc
@@ -12,23 +16,16 @@ import pandas as pd
 from scipy.signal import savgol_filter
 
 
-def align_by_pelvis(joints):
-    """
-    Align the input joints by the pelvis joint
-    :param joints: 3D joint positions
-    :return: Aligned 3D joint positions
-    """
-    pelvis = joints[:, 0, :]
-    joints = joints - pelvis[:, np.newaxis, :]
-    return joints
-
-
 def calculate_mpjpe(target, prediction, axis=1):
     """
     Mean per-joint position error (MPJPE)
-    :param target: Ground truth 3D joint positions
-    :param prediction: Predicted 3D joint positions
-    :return: Mean and standard deviation of the MPJPE
+
+    Parameters:
+    - target: Ground truth 3D joint positions
+    - prediction: Predicted 3D joint positions
+
+    Returns:
+    - Mean and standard deviation of the MPJPE
     """
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
@@ -53,108 +50,33 @@ def align_procrustes(target, prediction):
     Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
     often referred to as "Protocol #2" in many papers.
     Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
-    :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
-    :return error_count: Error count of failed alignments
+
+    Parameters:
+    - target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    - prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+
+    Returns:
+    - gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
+    - pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
+    - error_count: Error count of failed alignments
     """
-    # Perform Procrustes analysis for 3D coordinates
     mtx1_3d, mtx2_3d, disparity_3d = procrustes(target, prediction)
 
     return mtx1_3d, mtx2_3d
 
 
-def align_procrustes_old(target, prediction):
-    """
-    Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
-    often referred to as "Protocol #2" in many papers.
-    Based on the implementation from https://github.com/miraymen/3dpw-eval/blob/master/evaluate.py
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :return gt_all: Ground truth 3D joint positions after alignment, shape [sample, joint, 3]
-    :return pred_all: Predicted 3D joint positions after alignment, shape [sample, joint, 3]
-    :return error_count: Error count of failed alignments
-    """
-
-    gt_all = []
-    pred_all = []
-    error_count = 0
-    joint_number = target.shape[1]
-
-    for (gt, pred) in (zip(target, prediction)):
-        gt_raw = gt
-        if not (np.sum(np.abs(pred)) == 0):
-            transposed = False
-            if pred.shape[0] != 3 and pred.shape[0] != 2:
-                pred = pred.T
-                gt = gt.T
-                transposed = True
-            assert (gt.shape[1] == pred.shape[1]), "The number of joints must match."
-
-            # 1. Remove mean.
-            muX = np.mean(pred, axis=1, keepdims=True)
-            muY = np.mean(gt, axis=1, keepdims=True)
-            X0 = pred - muX
-            Y0 = gt - muY
-
-            # 2. Compute variance of X1 used for scale.
-            var1 = np.sum(X0 ** 2)
-
-            # 3. The outer product of X1 and X2.
-            K = X0.dot(Y0.T)
-
-            # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are singular vectors of K.
-            try:
-                U, s, Vh = np.linalg.svd(K)
-            except np.linalg.LinAlgError:
-                # print("SVD did not converge")
-                error_count += 1
-                continue
-
-            V = Vh.T
-            # Construct Z that fixes the orientation of R to get det(R)=1.
-            Z = np.eye(U.shape[0])
-            Z[-1, -1] *= np.sign(np.linalg.det(U.dot(V.T)))
-            # Construct R.
-            R = V.dot(Z.dot(U.T))
-
-            # 5. Recover scale.
-            scale = np.trace(R.dot(K)) / var1
-
-            # 6. Recover translation.
-            t = muY - scale * (R.dot(muX))
-
-            # 7. Error:
-            pred_hat = scale * R.dot(pred) + t
-
-            if transposed:
-                pred_hat = pred_hat.T
-
-        else:
-            pred_hat = np.tile(np.mean(gt, axis=0), (joint_number, 1))
-            R = np.identity(3)
-
-        gt_all.append(gt_raw)
-        pred_all.append(pred_hat)
-
-    gt_all = np.array(gt_all)
-    pred_all = np.array(pred_all)
-
-    if error_count > 0:
-        print(f"Procrustes alignment failed {error_count} times")
-
-    return gt_all, pred_all, error_count
-
-
 def calculate_pmpjpe(target, prediction, procrustes=True, axis=1):
     """
     Procrustes MPJPE: MPJPE after rigid alignment (scale, rotation, and translation),
-    often referred to as "Protocol #2" in many papers..
-    :param target: Ground truth 3D joint positions
-    :param prediction: Predicted 3D joint positions
-    :return: Mean and standard deviation of the PMPJPE
-    :return: Error count of failed alignments
+    often referred to as "Protocol #2" in many papers.
+
+    Parameters:
+    - target: Ground truth 3D joint positions
+    - prediction: Predicted 3D joint positions
+
+    Returns:
+    - Mean and standard deviation of the PMPJPE
+    - Error count of failed alignments
     """
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
 
@@ -166,17 +88,23 @@ def calculate_pmpjpe(target, prediction, procrustes=True, axis=1):
 
     return mean, std, error_count, Qs
 
-
+################################
+## PCK not extensively tested ##
+################################
 def calculate_pck(target, prediction, threshold=100.0,
                   joints_to_use=None, procrustes=False):
     """
     Calculate percentage of correct keypoints (PCK) in [%] (https://arxiv.org/pdf/1611.09813.pdf)
-    :param target: Ground truth 3D joint positions
-    :param prediction: Predicted 3D joint positions
-    :param threshold: Threshold for correct keypoints
-    :param joints_to_use: List of joints to use for PCK calculation
-    :param procrustes: Whether to use procrustes alignment
-    :return: PCK in [%]
+
+    Parameters:
+    - target: Ground truth 3D joint positions
+    - prediction: Predicted 3D joint positions
+    - threshold: Threshold for correct keypoints
+    - joints_to_use: List of joints to use for PCK calculation
+    - procrustes: Whether to use procrustes alignment
+
+    Returns:
+    - PCK in [%]
     """
 
     if joints_to_use is None:
@@ -194,21 +122,27 @@ def calculate_pck(target, prediction, threshold=100.0,
 
     return pck
 
-
+#############################
+## Not really used anymore ##
+#############################
 def mean_velocity_error(target, prediction, sample_rate,
                         procrustes=False,
                         smooth=False, window_length=25, polyorder=3):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
-    :param prediction: Predicted 3D joint positions in mm (shape: [frames, joints, 3])
-    :param target: Ground truth 3D joint positions in mm (shape: [frames, joints, 3])
-    :param sample_rate: Sample rate in Hz
-    :param procrustes: Whether Procrustes alignment should be used
-    :param axis: Axis for the norm calculation (default: 2 -> across x,y,z)
-    :param smooth: Whether to apply Savitzky–Golay smoothing to raw positions
-    :param window_length: Window length for the Savitzky–Golay filter
-    :param polyorder: Polynomial order for the Savitzky–Golay filter
-    :return: (mean_error [m/s], std_error [m/s], [Q1, median, Q3, loval, hival, actual_loval, actual_hival])
+
+    Parameters:
+    - prediction: Predicted 3D joint positions in mm (shape: [frames, joints, 3])
+    - target: Ground truth 3D joint positions in mm (shape: [frames, joints, 3])
+    - sample_rate: Sample rate in Hz
+    - procrustes: Whether Procrustes alignment should be used
+    - axis: Axis for the norm calculation (default: 2 -> across x,y,z)
+    - smooth: Whether to apply Savitzky–Golay smoothing to raw positions
+    - window_length: Window length for the Savitzky–Golay filter
+    - polyorder: Polynomial order for the Savitzky–Golay filter
+
+    Returns:
+    - (mean_error [m/s], std_error [m/s], [Q1, median, Q3, loval, hival, actual_loval, actual_hival])
     """
     assert prediction.shape == target.shape, "Shape mismatch between prediction and target."
 
@@ -219,6 +153,7 @@ def mean_velocity_error(target, prediction, sample_rate,
         #target = savgol_filter(target, window_length=window_length,
         #                       polyorder=polyorder, axis=0)
 
+    # Needs to be changed to central difference
     #velocity_predicted = np.diff(prediction, axis=0) * sample_rate
     #velocity_target = np.diff(target, axis=0) * sample_rate
     velocity_predicted = (prediction[1:] - prediction[:-1]) / (1/sample_rate)
@@ -259,16 +194,21 @@ def mean_velocity_error(target, prediction, sample_rate,
     # Return mean & std in m/s plus additional percentile info
     return mean, std, [Q1, median, Q3, loval, hival, actual_loval, actual_hival]
 
-
+###############################################
+## Acceleration error not extensively tested ##
+###############################################
 def mean_acceleration_error(prediction, target, sample_rate, procrustes=False):
     """
     Mean per-joint velocity error (i.e. mean Euclidean distance of the 1st derivative)
-    :param prediction: Predicted 3D joint positions
-    :param target: Ground truth 3D joint positions
-    :param procrustes: Whether to use procrustes alignment
-    :param sample_rate: Sample rate in Hz
-    :param procrustes: Weather Procrustes alignment should be used
-    :return: Mean and standard deviation of the mean per-joint velocity error
+    Parameters:
+    - prediction: Predicted 3D joint positions
+    - target: Ground truth 3D joint positions
+    - procrustes: Whether to use procrustes alignment
+    - sample_rate: Sample rate in Hz
+    - procrustes: Weather Procrustes alignment should be used
+
+    Returns:
+    - Mean and standard deviation of the mean per-joint velocity error
     """
 
     assert prediction.shape == target.shape, "The shape of prediction and target must match."
@@ -276,6 +216,7 @@ def mean_acceleration_error(prediction, target, sample_rate, procrustes=False):
     if procrustes:
         target, prediction, err = align_procrustes(target, prediction)
 
+    # Use central difference and smoothing
     acceleration_predicted = np.diff(np.diff(prediction, axis=0), axis=0) * sample_rate
     acceleration_target = np.diff(np.diff(target, axis=0), axis=0) * sample_rate
 
@@ -286,12 +227,16 @@ def mean_acceleration_error(prediction, target, sample_rate, procrustes=False):
 
 def calculate_correlation(target, prediction, axes_to_use=None, procrustes=False):
     """
-    Calculate average Pearson correlation coefficient for all joints and axes to measure signal similarity.
-    :param target: Ground truth 3D joint positions, shape [sample, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, 3]
-    :param axes_to_use: List of axes to use for similarity calculation
-    :param procrustes: Whether to use procrustes alignment
-    :return: Mean correlation coefficient and mean p-value
+    Calculate average Pearson correlation coefficient (PCC) for all joints and axes to measure signal similarity.
+
+    Parameters:
+    - target: Ground truth 3D joint positions, shape [sample, 3]
+    - prediction: Predicted 3D joint positions, shape [sample, 3]
+    - axes_to_use: List of axes to use for similarity calculation
+    - procrustes: Whether to use procrustes alignment
+
+    Returns:
+    - Mean correlation coefficient and mean p-value
     """
 
     if axes_to_use is None:
@@ -334,14 +279,20 @@ def calculate_correlation(target, prediction, axes_to_use=None, procrustes=False
     return np.nanmean(correlations), np.nanmean(pvalues)
 
 
+####################################################
+## Number of correct poses not extensively tested ##
+####################################################
 def compute_CP(target, prediction, threshold=180, joints_to_use=None):
     """
     Compute the number of correct poses
-    :param target: Ground truth 3D joint positions
-    :param prediction: Predicted 3D joint positions
-    :param threshold: Threshold for correct poses
-    :param joints_to_use: List of joints to use for CP calculation
-    :return: Number of correct poses
+    Parameters:
+    - target: Ground truth 3D joint positions
+    - prediction: Predicted 3D joint positions
+    - threshold: Threshold for correct poses
+    - joints_to_use: List of joints to use for CP calculation
+
+    Returns:
+    - Number of correct poses
     """
     if joints_to_use is None:
         joints_to_use = list(range(target.shape[1]))
@@ -354,19 +305,108 @@ def compute_CP(target, prediction, threshold=180, joints_to_use=None):
     return np.sum(correct_poses)
 
 
+####################################################
+## Symmetry not extensively tested ##
+####################################################
+def calculate_symmetry_error(prediction, bones, bone_pairs):
+    """
+    Calculate the symmetry error for a given set of bones
+
+    Parameters:
+    - prediction: Predicted 3D joint positions
+    - bones: Definition of bones
+    - bone_pairs: Pairs of left and right bones
+
+    Returns:
+    - Overall mean and std, and single bone symmetry error
+    """
+    # Extract bones as delta positions and calculate length
+    bone_start = [segment_array[0] for segment_array in bones.values()]
+    bone_end = [segment_array[1] for segment_array in bones.values()]
+
+    bone_lengths = np.linalg.norm(prediction[:, bone_start, :] - prediction[:, bone_end, :], axis=2)
+
+    # Find matching bones in skeleton
+    idx_bone0 = [segment_array[0] for segment_array in bone_pairs.values()]
+    idx_bone1 = [segment_array[1] for segment_array in bone_pairs.values()]
+    bone0 = bone_lengths[:, idx_bone0]
+    bone1 = bone_lengths[:, idx_bone1]
+
+    # Calculate the absolute length difference between symmetries
+    absolute_error = np.abs(bone0 - bone1)
+
+    # Calculate the average error for all bones
+    single_bone_err = np.mean(absolute_error, axis=0)
+    mean = np.mean(single_bone_err)
+    std = np.std(single_bone_err)
+
+    return mean, std, single_bone_err
+
+
+def calculate_sem_mdc(sd, reliability, z_value=1.96):
+    """nd Minimal Detectable Change (MDC).
+
+    Calculate the Standard Error of Measurement (SEM) a
+    :param sd: Standard deviation of the measurements
+    :param reliability: Intraclass Correlation Coefficient (ICC) or other reliability metric
+    :param z_value: Z value for the desired confidence level (default 1.96 for 95% confidence)
+    :return: SEM and MDC
+    """
+    sem = sd * np.sqrt(1 - reliability)
+    mdc = sem * z_value * np.sqrt(2)
+    return sem, mdc
+
+
+def calculate_icc(gt_data, pred_data):
+    # Create a DataFrame for the ICC calculation
+    df = pd.DataFrame({
+        'subject': np.repeat(np.arange(len(gt_data)), 2),
+        'measurement': np.tile(['gt', 'pred'], len(gt_data)),
+        'score': np.concatenate([gt_data, pred_data])
+    })
+
+    # Calculate ICC
+    icc_results = pg.intraclass_corr(data=df, targets='subject', raters='measurement', ratings='score')
+
+    # Extract the ICC value, and the lower and upper bounds for ICC(A,1)
+    icc_a1 = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'ICC'].values[0]
+    icc_lb = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'CI95%'].values[0][0]
+    icc_up = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'CI95%'].values[0][1]
+
+    return icc_a1, icc_lb, icc_up
+
+
+def calculate_bias(gt_data, pred_data):
+    return np.mean(pred_data - gt_data, axis=0)
+
+
+def calculate_pearson_r(gt_data, pred_data):
+    r_values, p_values = [], []
+    r, p = pearsonr(gt_data, pred_data)
+    r_values.append(r)
+    p_values.append(p)
+    return np.array(r_values), np.array(p_values)
+
+################################################
+## Correct poses score not extensively tested ##
+################################################
 def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
                 joints_to_use=None, procrustes=False):
     """
     Compute the correct pose score (CPS) according to (https://arxiv.org/abs/2011.14679) for different thresholds
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :param min_th: Minimum threshold
-    :param max_th: Maximum threshold
-    :param step: Step size
-    :param joints_to_use: List of joints to use for CPS calculation
-    :param procrustes: Whether to use procrustes alignment
-    :return: CPS
-    :return: idx of best CPS
+
+    Parameters:
+    - target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    - prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    - min_th: Minimum threshold
+    - max_th: Maximum threshold
+    - step: Step size
+    - joints_to_use: List of joints to use for CPS calculation
+    - procrustes: Whether to use procrustes alignment
+
+    Returns:
+    - CPS
+    - idx of best CPS
     """
 
     if joints_to_use is None:
@@ -394,9 +434,52 @@ def compute_CPS(target, prediction, min_th=1, max_th=300, step=1,
 
     return cps_best, cps_idx
 
-####################################################################
-### Adjust according to https://www.mdpi.com/1424-8220/22/5/1729 ###
-####################################################################
+
+####################################################################################################################################
+## Old way of calculating the joint angles. Not correct. Should be replaced with angle_metrics_tpose.py in evaluation_pipeline.py ##
+####################################################################################################################################
+def calculate_angle_error(target, prediction, Y_target=np.array([0, 1, 0]), Y_prediction=np.array([0, 1, 0]),
+                          procrustes=False, calculate_r2=True, box=True):
+    """
+    Calculate the angle error between target and prediction joint positions.
+    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
+    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
+    :param Y_target: Reference vertical axis vector for target (default is the Y-axis)
+    :param Y_prediction: Reference vertical axis vector for prediction (default is the Y-axis)
+    :param procrustes: Whether to use Procrustes alignment
+    :param r2: Whether to calculate R² value
+    :param box: Whether to plot a box plot of the angle errors
+    :return: Mean error, standard deviation of error, and R² value (if calculated)
+    """
+    if procrustes:
+        target, prediction, error_count = align_procrustes(target, prediction)
+
+    target_angles = calculate_joint_angles(target, Y_target)
+    prediction_angles = calculate_joint_angles(prediction, Y_prediction)
+    angle_names = list(target_angles.keys())
+
+    target_angle_values = []
+    prediction_angle_values = []
+    for joint, angle in target_angles.items():
+        target_angle_values.append(angle)
+    for joint, angle in prediction_angles.items():
+        prediction_angle_values.append(angle)
+
+    angle_error = np.abs(np.array(target_angle_values) - np.array(prediction_angle_values))
+    mean_error = np.mean(angle_error, axis=1)
+    std_error = np.std(angle_error, axis=1)
+
+    mean_dict = {angle: (mean_error[i]) for i, angle in enumerate(angle_names)}
+    std_dict = {angle: (std_error[i]) for i, angle in enumerate(angle_names)}
+
+    r2 = None
+    if calculate_r2:
+        r2 = plot_calculate_r2(target_angles, prediction_angles)
+
+    if box:
+        angle_error = {angle: (angle_error[i]) for i, angle in enumerate(angle_names)}
+        plot_box(angle_error)
+    return mean_dict, std_dict, r2
 
 def calculate_angle_point(joint_a, joint_b, joint_c):
     """
@@ -518,50 +601,6 @@ def calculate_joint_angles(keypoints, Y_vector=np.array([0, 1, 0])):
     return angles
 
 
-def calculate_angle_error(target, prediction, Y_target=np.array([0, 1, 0]), Y_prediction=np.array([0, 1, 0]),
-                          procrustes=False, calculate_r2=True, box=True):
-    """
-    Calculate the angle error between target and prediction joint positions.
-    :param target: Ground truth 3D joint positions, shape [sample, joint, 3]
-    :param prediction: Predicted 3D joint positions, shape [sample, joint, 3]
-    :param Y_target: Reference vertical axis vector for target (default is the Y-axis)
-    :param Y_prediction: Reference vertical axis vector for prediction (default is the Y-axis)
-    :param procrustes: Whether to use Procrustes alignment
-    :param r2: Whether to calculate R² value
-    :param box: Whether to plot a box plot of the angle errors
-    :return: Mean error, standard deviation of error, and R² value (if calculated)
-    """
-    if procrustes:
-        target, prediction, error_count = align_procrustes(target, prediction)
-
-    target_angles = calculate_joint_angles(target, Y_target)
-    prediction_angles = calculate_joint_angles(prediction, Y_prediction)
-    angle_names = list(target_angles.keys())
-
-    target_angle_values = []
-    prediction_angle_values = []
-    for joint, angle in target_angles.items():
-        target_angle_values.append(angle)
-    for joint, angle in prediction_angles.items():
-        prediction_angle_values.append(angle)
-
-    angle_error = np.abs(np.array(target_angle_values) - np.array(prediction_angle_values))
-    mean_error = np.mean(angle_error, axis=1)
-    std_error = np.std(angle_error, axis=1)
-
-    mean_dict = {angle: (mean_error[i]) for i, angle in enumerate(angle_names)}
-    std_dict = {angle: (std_error[i]) for i, angle in enumerate(angle_names)}
-
-    r2 = None
-    if calculate_r2:
-        r2 = plot_calculate_r2(target_angles, prediction_angles)
-
-    if box:
-        angle_error = {angle: (angle_error[i]) for i, angle in enumerate(angle_names)}
-        plot_box(angle_error)
-    return mean_dict, std_dict, r2
-
-
 def plot_calculate_r2(target_angles_dict, prediction_angles_dict):
     """
     Plot R² values for the linear regression fit of target vs prediction angles for each metric and calculate R² value.
@@ -638,173 +677,3 @@ def plot_box(angle_error):
     wandb.log({"Angular error box": fig})
 
 
-def calculate_mpsae_old(target, prediction, joint_segments):
-    """
-    Calculate the mean per segment angle error. Target and prediction are dictionaries with the same keys segments is a list of lists of segment names.
-    :param target: [frames, joint, 3]
-    :param prediction: [frames, joint, 3]
-    :param segments: list of segment names and their indexes
-    :return: mean, std, segment_errors_mean, segment_errors_std
-    """
-
-    assert len(prediction.shape) == len(target.shape)
-
-    angle_errors = []
-    segment_errors_mean = {}
-    segment_errors_std = {}
-    for segment_name, segment_array in joint_segments.items():
-        angle_target = calculate_angle_point(target[:, segment_array[0]], target[:, segment_array[1]],
-                                   target[:, segment_array[2]])  # batch, 1
-        angle_prediction = calculate_angle_point(prediction[:, segment_array[0]], prediction[:, segment_array[1]],
-                                       prediction[:, segment_array[2]])
-        angle_err = np.abs(np.array(angle_target) - np.array(angle_prediction))
-        angle_err = np.round(angle_err, 2)
-        angle_errors.append(angle_err)  # segments, batch, 1
-        segment_errors_mean[segment_name] = np.mean(angle_err)
-        segment_errors_std[segment_name] = np.std(angle_err)
-    single_segment_err = np.mean(np.array(angle_errors), axis=1)
-
-    return np.mean(single_segment_err), np.std(single_segment_err), segment_errors_mean, segment_errors_std
-
-
-def calculate_symmetry_error(prediction, bones, bone_pairs):
-    """
-    Calculate the symmetry error for a given set of bones
-    :param prediction: Predicted 3D joint positions
-    :param bones: Definition of bones
-    :param bone_pairs: Pairs of left and right bones
-    :return:
-    """
-    # Extract bones as delta positions and calculate length
-    bone_start = [segment_array[0] for segment_array in bones.values()]
-    bone_end = [segment_array[1] for segment_array in bones.values()]
-
-    bone_lengths = np.linalg.norm(prediction[:, bone_start, :] - prediction[:, bone_end, :], axis=2)
-
-    # Find matching bones in skeleton
-    idx_bone0 = [segment_array[0] for segment_array in bone_pairs.values()]
-    idx_bone1 = [segment_array[1] for segment_array in bone_pairs.values()]
-    bone0 = bone_lengths[:, idx_bone0]
-    bone1 = bone_lengths[:, idx_bone1]
-
-    # Calculate the absolute length difference between symmetries
-    absolute_error = np.abs(bone0 - bone1)
-
-    # Calculate the average error for all bones
-    single_bone_err = np.mean(absolute_error, axis=0)
-    mean = np.mean(single_bone_err)
-    std = np.std(single_bone_err)
-
-    return mean, std, single_bone_err
-
-
-def wrap_to_pi(x):
-    xwrap = np.remainder(x, 2 * np.pi)
-    mask = np.abs(xwrap) > np.pi
-    xwrap[mask] -= 2 * np.pi * np.sign(xwrap[mask])
-    mask1 = x < 0
-    mask2 = np.remainder(x, np.pi) == 0
-    mask3 = np.remainder(x, 2 * np.pi) != 0
-    xwrap[mask1 & mask2 & mask3] -= 2 * np.pi
-    return xwrap
-
-
-def calculate_mpjphe(target, prediction):
-    # calculate the mean per joint phase error
-    # target and prediction are dictionaries with the same keys [batch, joint, 3]
-
-    assert len(prediction.shape) == len(target.shape)
-
-    # padding to remove edge effects (DOI: 10.1123/jab.2018-0396)
-    pad_width = np.sqrt(target.shape[0]).astype(int) + 1
-    pad_width = ((pad_width ** 2 - target.shape[0]) / 2).astype(int)
-    target = np.pad(target, ((pad_width, pad_width), (0, 0), (0, 0)), 'constant', constant_values=0)
-    prediction = np.pad(prediction, ((pad_width, pad_width), (0, 0), (0, 0)), 'constant', constant_values=0)
-
-    # calculate Hilbert transform
-    h_target = signal.hilbert(target, axis=0)
-    h_prediction = signal.hilbert(prediction, axis=0)
-
-    # calculate phase
-    phase_target = np.unwrap(np.angle(h_target))
-    phase_prediction = np.unwrap(np.angle(h_prediction))
-
-    # calculate phase difference
-    phase_diff = wrap_to_pi(phase_target - phase_prediction)
-
-    # remove padding
-    phase_diff = phase_diff[pad_width:-pad_width]
-
-    return np.median(phase_diff), np.std(phase_diff), phase_target, phase_prediction, phase_diff
-
-
-def calculate_sem_mdc(sd, reliability, z_value=1.96):
-    """nd Minimal Detectable Change (MDC).
-
-    Calculate the Standard Error of Measurement (SEM) a
-    :param sd: Standard deviation of the measurements
-    :param reliability: Intraclass Correlation Coefficient (ICC) or other reliability metric
-    :param z_value: Z value for the desired confidence level (default 1.96 for 95% confidence)
-    :return: SEM and MDC
-    """
-    sem = sd * np.sqrt(1 - reliability)
-    mdc = sem * z_value * np.sqrt(2)
-    return sem, mdc
-
-
-def calculate_icc(gt_data, pred_data):
-    # Create a DataFrame for the ICC calculation
-    df = pd.DataFrame({
-        'subject': np.repeat(np.arange(len(gt_data)), 2),
-        'measurement': np.tile(['gt', 'pred'], len(gt_data)),
-        'score': np.concatenate([gt_data, pred_data])
-    })
-
-    # Calculate ICC
-    icc_results = pg.intraclass_corr(data=df, targets='subject', raters='measurement', ratings='score')
-
-    # Extract the ICC value, and the lower and upper bounds for ICC(A,1)
-    icc_a1 = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'ICC'].values[0]
-    icc_lb = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'CI95%'].values[0][0]
-    icc_up = icc_results.loc[(icc_results['Type'] == 'ICC3'), 'CI95%'].values[0][1]
-
-    return icc_a1, icc_lb, icc_up
-
-
-def calculate_ccc(data1, data2):
-    dct = {
-        'y_true': data1,
-        'y_pred': data2
-    }
-    df = pd.DataFrame(dct)
-    # Remove NaNs
-    df = df.dropna()
-    # Pearson product-moment correlation coefficients
-    y_true = df['y_true']
-    y_pred = df['y_pred']
-    cor = np.corrcoef(y_true, y_pred)[0][1]
-    # Means
-    mean_true = np.mean(y_true)
-    mean_pred = np.mean(y_pred)
-    # Population variances
-    var_true = np.var(y_true)
-    var_pred = np.var(y_pred)
-    # Population standard deviations
-    sd_true = np.std(y_true)
-    sd_pred = np.std(y_pred)
-    # Calculate CCC
-    numerator = 2 * cor * sd_true * sd_pred
-    denominator = var_true + var_pred + (mean_true - mean_pred) ** 2
-    ccc = numerator / denominator
-    return ccc
-
-def calculate_bias(gt_data, pred_data):
-    return np.mean(pred_data - gt_data, axis=0)
-
-
-def calculate_pearson_r(gt_data, pred_data):
-    r_values, p_values = [], []
-    r, p = pearsonr(gt_data, pred_data)
-    r_values.append(r)
-    p_values.append(p)
-    return np.array(r_values), np.array(p_values)
