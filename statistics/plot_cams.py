@@ -45,7 +45,9 @@ ax.grid(True, linestyle='--', alpha=0.6, zorder=0)
 
 # Plot room boundary
 ax.set_xlim(0, room_width)
+plt.xticks(fontsize=16)
 ax.set_ylim(0, room_height)
+plt.yticks(fontsize=16)
 ax.set_aspect('equal', adjustable='box')
 ax.plot([0, room_width, room_width, 0, 0],
         [0, 0, room_height, room_height, 0],
@@ -72,16 +74,14 @@ for cam_name, cam_data in cameras.items():
     # Calculate angle towards the center
     angle = np.arctan2(middle_of_room[1] - y, middle_of_room[0] - x) + np.pi / 2
     # Rotate triangle so a flat side faces the center
-    camera_icon = patches.RegularPolygon((x, y), numVertices=3, radius=0.15,
+    camera_icon = patches.RegularPolygon((x, y), numVertices=3, radius=0.2,
                                          orientation=angle, color='black', zorder=3)
     ax.add_patch(camera_icon)
-    ax.text(x + 0.03, y - 0.4, f"{cam_name}", fontsize=14, weight='bold', color='black', ha='center', zorder=3)
-
-
+    ax.text(x + 0.03, y - 0.4, f"{cam_name}", fontsize=18, weight='bold', color='black', ha='center', zorder=3)
 
 # Add labels and title
-ax.set_xlabel("Width (m)", zorder=4)
-ax.set_ylabel("Height (m)", zorder=4)
+ax.set_xlabel("Anteroposterior Length (m)", zorder=4, fontsize=16)
+ax.set_ylabel("Mediolateral Length (m)", zorder=4, fontsize=16)
 
 # Show plot
 plt.show()

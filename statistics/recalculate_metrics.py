@@ -1,6 +1,8 @@
 import os
 import sys
 import pickle
+
+from keras.src.utils.module_utils import scipy
 from scipy import stats
 import multiprocessing
 from statsmodels.stats.multitest import multipletests
@@ -13,13 +15,17 @@ import pingouin as pg
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import numpy as np
 import argparse
+import matplotlib.pyplot as plt
+from scipy.stats import wilcoxon, rankdata
+import scikit_posthocs as sp
+
 
 sys.path.append('./')
 from utils import angle_metrics_tpose
 from utils import metrics
 
 
-def is_data_normal(data, alpha=0.05):
+def is_data_normal(data, alpha=0.05, plot=True, filename='example.png'):
     """ Test if the data follows a normal distribution using the Shapiro-Wilk or
     Kolmogorov-Smirnov test."""
     if len(data) > 5000:
@@ -27,8 +33,18 @@ def is_data_normal(data, alpha=0.05):
     else:
         stat, p_value = stats.shapiro(data)
 
-    # Large datasets allow Central Limit Theorem (CLT) to apply
-    normal = p_value > alpha or len(data) > 5000
+    # Large samples often considered normal by CLT
+    normal = (p_value > alpha)
+
+    if plot:
+        ax = pg.qqplot(data, dist='norm')
+        plt.title("Q–Q Plot")
+        if filename:
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.show()
+
+        normal = False # Just for now
+
     return normal
 
 def count_nan_frames(pred_frames):
@@ -90,7 +106,8 @@ def effect_size_interpreter(effect_size, effect_size_type):
         'Cohen_d': [(0.2, 'small'), (0.5, 'medium'), (0.8, 'large')],
         'RBC': [(0.1, 'small'), (0.3, 'medium'), (0.5, 'large')],
         'Rosenthal': [(0.1, 'small'), (0.3, 'medium'), (0.5, 'large')],
-        'Cliff': [(0.147, 'small'), (0.33, 'medium'), (0.474, 'large')]
+        'Cliff': [(0.147, 'small'), (0.33, 'medium'), (0.474, 'large')],
+        'epsilon_squared': [(0.01, 'small'), (0.06, 'medium'), (0.14, 'large')]
     }
 
     for threshold, label in thresholds.get(effect_size_type, []):
@@ -218,8 +235,13 @@ def worker_mpjpe(inputs):
     Returns:
     - MPJPE for each frame/sample
     """
+
     aligned_gt_sample, aligned_pred_sample = inputs
-    return metrics.calculate_mpjpe(aligned_gt_sample[np.newaxis, :, :], aligned_pred_sample[np.newaxis, :, :])
+
+    # Compute MPJPE (calculate_mpjpe expects shape [num_keypoints, 3] with axis=1)
+    mean, _, _ = metrics.calculate_mpjpe(aligned_gt_sample, aligned_pred_sample, axis=0)
+    return mean
+
 
 def worker_velocity_and_corr(inputs):
     """
@@ -252,7 +274,7 @@ def calculate_metrics_for_sample(aligned_gt, aligned_pred, sample_rate, window_s
     - step_size: Step size between windows
 
     Returns:
-    - pmpjpe: PMJPE for each frame/sample
+    - pmpjpe: PMPJPE for each frame/sample
     - velocity: Velocity for each window
     - pcc: PCC for each window
     """
@@ -283,6 +305,53 @@ def calculate_metrics_for_sample(aligned_gt, aligned_pred, sample_rate, window_s
 
     return pmpjpe, velocity, pcc
 
+def hodges_lehmann_estimator_and_ci(diff, base_reference=None, alpha=0.05, n_samples=10**5):
+    """
+    Approximate the Hodges–Lehmann estimator and its confidence interval using Monte Carlo sampling,
+    and compute the bias as a percentage relative to a baseline reference.
+
+    Parameters:
+      - diff: array of paired differences (e.g. base_data - aug_data).
+      - base_reference: baseline value (e.g., median of base_data) to express bias as percentage.
+                        If None, percentage bias is not computed.
+      - alpha: significance level (default=0.05).
+      - n_samples: Number of random Walsh averages to compute.
+
+    Returns:
+      - hl_est: the HL estimator (median of all Walsh averages).
+      - (ci_lower, ci_upper): confidence interval for the HL estimator (percentile-based).
+      - (hl_est_percent, ci_lower_percent, ci_upper_percent): percentage bias estimates, or None if base_reference is None.
+    """
+    diff = np.asarray(diff)
+    n = len(diff)
+    total_pairs = n * (n + 1) // 2
+
+    # If total pairs are fewer than n_samples, compute exactly.
+    if total_pairs <= n_samples:
+        walsh = []
+        for i in range(n):
+            for j in range(i, n):
+                walsh.append((diff[i] + diff[j]) / 2.0)
+        walsh = np.array(walsh)
+    else:
+        # Monte Carlo approximation of Walsh averages.
+        walsh = np.empty(n_samples)
+        for k in range(n_samples):
+            i = np.random.randint(0, n)
+            j = np.random.randint(i, n)
+            walsh[k] = (diff[i] + diff[j]) / 2.0
+
+    hl_est = np.median(walsh)
+    ci_lower = np.percentile(walsh, 100 * (alpha / 2))
+    ci_upper = np.percentile(walsh, 100 * (1 - alpha / 2))
+
+    if base_reference is not None and base_reference != 0:
+        hl_est_percent = (hl_est / base_reference) * 100
+    else:
+        hl_est_percent = None
+
+    return hl_est, (ci_lower, ci_upper), hl_est_percent
+
 def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
     """
     Compare different data augmentation methods to the original data,
@@ -311,15 +380,16 @@ def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
         p_values = []
         test_results = []
         base_data = np.array(baseline[metric]).flatten()
+
         # Check for normal distribution
-        normal_base = is_data_normal(base_data)
+        normal_base = is_data_normal(base_data, plot=True, filename='baseline_'+metric+'.png')
 
         # Run statistical analysis for every augmentation/camera placement
         for condition_name, condition_data in other_conditions.items():
             aug_data = np.array(condition_data[metric]).flatten()
 
             # Check for normal distribution
-            normal_aug = is_data_normal(aug_data)
+            normal_aug = is_data_normal(aug_data, plot=True, filename=condition_name+'_'+metric+'.png')
 
             # Calculate means
             base_mean = np.nanmean(base_data)
@@ -353,10 +423,16 @@ def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
                     test_used = 'Independent Samples t-test'
                 else:
                     # Two-sided Mann-Whitney-U test (p-value, RBC)
-                    mwu_result = pg.mwu(base_data, aug_data, alternative='two-sided')
-                    p_value = mwu_result['p-val'].iloc[0]
-                    effect_size = mwu_result['RBC'].iloc[0]
+                    U, p_value = stats.mannwhitneyu(base_data, aug_data, alternative='two-sided', method='asymptotic')
+                    n1 = len(base_data)
+                    n2 = len(aug_data)
+                    # Compute Rank Biserial Correlation (RBC) as effect size
+                    effect_size = 1 - (2 * U) / (n1 * n2)
                     ci_lower, ci_upper = None, None
+                    # mwu_result = pg.mwu(base_data, aug_data, alternative='two-sided')
+                    # p_value = mwu_result['p-val'].iloc[0]
+                    # effect_size = mwu_result['RBC'].iloc[0]
+                    # ci_lower, ci_upper = None, None
                     # Interpret effect size
                     effect_interpret = effect_size_interpreter(effect_size,
                                                                'RBC')
@@ -373,7 +449,6 @@ def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
                     'p_value': p_value,
                     'confidence_interval': conf_int,
                     'effect_size': effect_size,
-                    'effect_size_ci': (ci_lower, ci_upper),
                     'effect_interpretation': effect_interpret,
                     'bias_percent': diff_percent,
                     'bias': diff_total,
@@ -395,7 +470,7 @@ def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
                     continue
 
                 # Check if data is normal distributed:
-                if normal_base and normal_aug and is_data_normal(base_data - aug_data):
+                if normal_base and normal_aug:
                     # Run paired two-sided t-test (p-value, cohen's d, lower and upper ci bounds)
                     t_result = pg.ttest(base_data, aug_data, paired=True, alternative='two-sided', correction='auto',
                                         r=0.5, confidence=0.95)
@@ -411,12 +486,30 @@ def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
                     test_used = 'Paired t-test'
                 else:
                     # Run Wilcoxon-test (p-value, RBC)
-                    t_result = pg.wilcoxon(base_data, aug_data, alternative='two-sided')
-                    p_value = t_result['p-val']
-                    effect_size = t_result['RBC']
-                    ci_lower, ci_upper = None, None
+                    d = base_data - aug_data
+                    stat, p_value = wilcoxon(d, alternative='two-sided', method='approx') # Can't be calculated exactly. To large dataset.
+                    # Compute Rank Biserial Correlation (RBC)
+                    nonzero = d != 0
+                    d_nz = d[nonzero]
+                    abs_d = abs(d_nz)
+                    # Assign ranks to the absolute differences
+                    ranks = rankdata(abs_d)
+                    # Sum ranks corresponding to positive differences
+                    W = ranks[d_nz > 0].sum()
+                    # Total rank sum for nonzero differences; for n observations, T = n(n+1)/2
+                    T = ranks.sum()
+                    effect_size = (2 * W - T) / T
+                    # diff_total, (ci_lower, ci_upper), diff_percent = hodges_lehmann_estimator_and_ci(d, base_median,  alpha=alpha)
                     test_used = 'Wilcoxon signed-rank test'
+                    effect_interpret = effect_size_interpreter(effect_size, 'RBC')
 
+                    # t_result = pg.wilcoxon(base_data, aug_data, alternative='two-sided')
+                    # p_value = t_result['p-val'].iloc[0]
+                    # effect_size = t_result['RBC'].iloc[0]
+                    # hl_est, (ci_lower, ci_upper) = hodges_lehmann_estimator_and_ci(base_data-aug_data, alpha=alpha)
+                    #
+                    # test_used = 'Wilcoxon signed-rank test'
+                    # effect_interpret = effect_size_interpreter(effect_size, 'RBC')
                 p_values.append(p_value)
 
                 # Additional paired metrics (ICC, SEM, MED, Pearson R). Not used yet.
@@ -432,7 +525,6 @@ def compare_metrics_with_none_group(data, default_camera='none', alpha=0.05):
                     'p_value': p_value,
                     'confidence_interval': conf_int,
                     'effect_size': effect_size,
-                    'effect_size_ci': (ci_lower, ci_upper),
                     'effect_interpretation': effect_interpret,
                     'bias_percent': diff_percent,
                     'bias': diff_total,
@@ -487,8 +579,7 @@ def calculate_joint_correlations(target_array, pred_array):
 
     joint_correlations = []
     joint_pvalues = []
-
-    num_keypoints = target_array.shape[2]  # Assuming (samples, XYZ, keypoints)
+    num_keypoints = target_array.shape[2]
 
     # Calculate correlation and p-value for each joint
     for joint in range(num_keypoints):
@@ -646,9 +737,9 @@ def process_and_calculate_metrics_for_groups(grouped_files, directory):
 
         # Store the metrics for each single sample
         all_metrics_single[suffix] = {
-            'pmpjpe': list(map(lambda x: x[0], velocity)),
+            'pmpjpe': pmpjpe,
             'angle': stat_angle_error,
-            'velocity': list(map(lambda x: x[0], velocity)),
+            'velocity': list(map(lambda x: x[0], velocity)), # NOT ANGLE VELOCITY ERROR YET!
             'pcc': pcc_single,
         }
 
@@ -692,7 +783,7 @@ def interpret_eta_squared(eta_squared):
     return interpretation
 
 
-def perform_statistical_analysis(all_metrics_single, metric_name='angle'):
+def perform_statistical_analysis(all_metrics_single, metric_name='angle', directory="./"):
     """
     Perform statistical analysis for the given metric across different movement types.
 
@@ -717,74 +808,96 @@ def perform_statistical_analysis(all_metrics_single, metric_name='angle'):
         else:
             print(f"Warning: Movement type '{movement_type}' not found in all_metrics_single.")
 
-    # Create a DataFrame for statistical analysis
+    # Create a DataFrame for statistical analysis and save it
     df = pd.DataFrame(metrics_list)
+    df.to_csv(os.path.join(directory, f'{metric_name}_movement_type_metrics.csv'), index=False)
 
-    # Save the DataFrame for reporting
-    df.to_csv(f'{metric_name}_movement_type_metrics.csv', index=False)
+    if False: # Should test for normal distribution in the future
+        # Perform the Kruskal–Wallis test
+        kruskal_results = pg.kruskal(data=df, dv='metric_value', between='movement_type')
+        # Extract the test statistic and uncorrected p-value
+        H = kruskal_results['H'][0]
+        p_kw = kruskal_results['p-unc'][0]
 
-    # Test for homogeneity of variances using Levene's test
-    grouped_data = [group['metric_value'].values for _, group in df.groupby('movement_type')]
-    stat, p = levene(*grouped_data)
-    print(f"Levene's test p-value: {p}")
+        # Save Kruskal-Wallis results
+        kw_results_df = pd.DataFrame({'H_statistic': [H], 'p_value': [p_kw]})
+        kw_results_df.to_csv(os.path.join(directory, f'{metric_name}_kruskal_results.csv'), index=False)
 
-    # Save Levene's test results
-    levene_results_df = pd.DataFrame({
-        'statistic': [stat],
-        'p_value': [p]
-    })
-    levene_results_df.to_csv(f'{metric_name}_levene_test_results.csv', index=False)
-
-    # Determine the appropriate ANOVA test based on the homogeneity of variances
-    if p < 0.05:
-        print("Variances are unequal across groups. Proceeding with Welch's ANOVA.")
-        # Perform Welch's ANOVA
-        welch_anova_results = pg.welch_anova(dv='metric_value', between='movement_type', data=df)
-        print(welch_anova_results)
-        # Save Welch's ANOVA results
-        welch_anova_results.to_csv(f'{metric_name}_anova_results.csv', index=False)
-        # Extract Partial Eta Squared and interpret its value
-        eta_squared = welch_anova_results['np2'][0]
-        print(f"Partial Eta Squared: {eta_squared:.5f}")
-        interpretation = interpret_eta_squared(eta_squared)
-        # Save effect size and its interpretation
+        # Compute epsilon-squared effect size: (H - (k-1))/(N - k)
+        N = len(df)
+        k = df['movement_type'].nunique()
+        epsilon_squared = (H - (k - 1)) / (N - k) if (N - k) != 0 else np.nan
+        print(f"Epsilon Squared: {epsilon_squared:.5f}")
+        interpretation = interpret_eta_squared(epsilon_squared)  # Adjust thresholds if needed.
         effect_size_df = pd.DataFrame({
-            'Effect_Size_Type': ['Partial Eta Squared'],
-            'Effect_Size_Value': [eta_squared],
+            'Effect_Size_Type': ['Epsilon Squared'],
+            'Effect_Size_Value': [epsilon_squared],
             'Interpretation': [interpretation]
         })
-        effect_size_df.to_csv(f'{metric_name}_effect_size.csv', index=False)
-        # Conduct Games-Howell post-hoc test
-        posthoc_results = pg.pairwise_gameshowell(dv='metric_value', between='movement_type', data=df)
+        effect_size_df.to_csv(os.path.join(directory, f'{metric_name}_effect_size.csv'), index=False)
+
+        # Conduct pairwise post-hoc comparisons using Dunn's test
+        posthoc_results = sp.posthoc_dunn(df, val_col='metric_value', group_col='movement_type', p_adjust='fdr_bh')
         print(posthoc_results)
-        # Save post-hoc test results
-        posthoc_results.to_csv(f'{metric_name}_posthoc_results.csv', index=False)
+        posthoc_results.to_csv(os.path.join(directory, f'{metric_name}_posthoc_results.csv'))
     else:
-        print("Variances are equal across groups. Proceeding with One-Way ANOVA.")
-        # Fit the One-Way ANOVA model
-        model = ols('metric_value ~ C(movement_type)', data=df).fit()
-        anova_table = sm.stats.anova_lm(model, typ=2)
-        print(anova_table)
-        # Save ANOVA results
-        anova_table.to_csv(f'{metric_name}_anova_results.csv', index=True)
-        # Calculate Eta Squared and interpret its value
-        eta_squared = anova_table['sum_sq']['C(movement_type)'] / anova_table['sum_sq'].sum()
-        print(f"Eta Squared: {eta_squared:.5f}")
-        interpretation = interpret_eta_squared(eta_squared)
-        # Save effect size and its interpretation
-        effect_size_df = pd.DataFrame({
-            'Effect_Size_Type': ['Eta Squared'],
-            'Effect_Size_Value': [eta_squared],
-            'Interpretation': [interpretation]
-        })
-        effect_size_df.to_csv(f'{metric_name}_effect_size.csv', index=False)
-        # Conduct Tukey's HSD post-hoc test
-        tukey = pairwise_tukeyhsd(endog=df['metric_value'], groups=df['movement_type'], alpha=0.05)
-        print(tukey)
-        # Save Tukey's HSD results
-        tukey_df = pd.DataFrame(data=tukey._results_table.data[1:], columns=tukey._results_table.data[0])
-        print(tukey_df)
-        tukey_df.to_csv(f'{metric_name}_posthoc_results.csv', index=False)
+        # Test for homogeneity of variances using Levene's test
+        grouped_data = [group['metric_value'].values for _, group in df.groupby('movement_type')]
+        stat_levene, p_levene = levene(*grouped_data)
+        print(f"Levene's test p-value: {p_levene}")
+        levene_results_df = pd.DataFrame({'statistic': [stat_levene], 'p_value': [p_levene]})
+        levene_results_df.to_csv(os.path.join(directory, f'{metric_name}_levene_test_results.csv'), index=False)
+
+        # Determine the appropriate ANOVA test based on the homogeneity of variances
+        if p_levene < 0.05:
+            print("Variances are unequal across groups. Proceeding with Welch's ANOVA.")
+            # Perform Welch's ANOVA
+            welch_anova_results = pg.welch_anova(dv='metric_value', between='movement_type', data=df)
+            print(welch_anova_results)
+            # Save Welch's ANOVA results
+            welch_anova_results.to_csv(os.path.join(directory, f'{metric_name}_anova_results.csv'), index=False)
+            # Extract Partial Eta Squared and interpret its value
+            eta_squared = welch_anova_results['np2'][0]
+            print(f"Partial Eta Squared: {eta_squared:.5f}")
+            interpretation = interpret_eta_squared(eta_squared)
+            # Save effect size and its interpretation
+            effect_size_df = pd.DataFrame({
+                'Effect_Size_Type': ['Partial Eta Squared'],
+                'Effect_Size_Value': [eta_squared],
+                'Interpretation': [interpretation]
+            })
+            effect_size_df.to_csv(os.path.join(directory, f'{metric_name}_effect_size.csv'), index=False)
+            # Conduct Games-Howell post-hoc test
+            posthoc_results = pg.pairwise_gameshowell(dv='metric_value', between='movement_type', data=df)
+            print(posthoc_results)
+            # Save post-hoc test results
+            posthoc_results.to_csv(os.path.join(directory, f'{metric_name}_posthoc_results.csv'), index=False)
+        else:
+            print("Variances are equal across groups. Proceeding with One-Way ANOVA.")
+            # Fit the One-Way ANOVA model
+            model = ols('metric_value ~ C(movement_type)', data=df).fit()
+            anova_table = sm.stats.anova_lm(model, typ=2)
+            print(anova_table)
+            # Save ANOVA results
+            anova_table.to_csv(os.path.join(directory, f'{metric_name}_anova_results.csv'), index=True)
+            # Calculate Eta Squared and interpret its value
+            eta_squared = anova_table['sum_sq']['C(movement_type)'] / anova_table['sum_sq'].sum()
+            print(f"Eta Squared: {eta_squared:.5f}")
+            interpretation = interpret_eta_squared(eta_squared)
+            # Save effect size and its interpretation
+            effect_size_df = pd.DataFrame({
+                'Effect_Size_Type': ['Eta Squared'],
+                'Effect_Size_Value': [eta_squared],
+                'Interpretation': [interpretation]
+            })
+            effect_size_df.to_csv(os.path.join(directory, f'{metric_name}_effect_size.csv'), index=False)
+            # Conduct Tukey's HSD post-hoc test
+            tukey = pairwise_tukeyhsd(endog=df['metric_value'], groups=df['movement_type'], alpha=0.05)
+            print(tukey)
+            # Save Tukey's HSD results
+            tukey_df = pd.DataFrame(data=tukey._results_table.data[1:], columns=tukey._results_table.data[0])
+            print(tukey_df)
+            tukey_df.to_csv(os.path.join(directory, f'{metric_name}_posthoc_results.csv'), index=False)
 
 
 def main():
@@ -796,19 +909,46 @@ def main():
     parser.add_argument("output", type=str, help="Directory to save output results.")
     args = parser.parse_args()
 
+    np.random.seed(42)
+
     # List all files in the specified directory
     all_files = os.listdir(args.directory)
 
     # Group files by their suffix
     grouped_files = group_files_by_suffix(all_files)
 
-    # Process each group and calculate metrics
-    results = process_and_calculate_metrics_for_groups(grouped_files, args.directory)
+    # # Process each group and calculate metrics
+    # all_metrics, keypoints_metrics, all_metrics_single, keypoints_metrics_single, angle_errors_metrics\
+    #     = process_and_calculate_metrics_for_groups(grouped_files, args.directory)
+    #
+    # # Save results to the output directory
+    # os.makedirs(args.output, exist_ok=True)
+    # with open(os.path.join(args.output,'angle_errors_metrics.pkl'), 'wb') as f:
+    #     pickle.dump(angle_errors_metrics, f)
+    #
+    # with open(os.path.join(args.output,'all_metrics.pkl'), 'wb') as f:
+    #     pickle.dump(all_metrics, f)
+    #
+    # with open(os.path.join(args.output,'keypoints_metrics.pkl'), 'wb') as f:
+    #     pickle.dump(keypoints_metrics, f)
+    #
+    # with open(os.path.join(args.output, 'all_metrics_single.pkl'), 'wb') as f:
+    #     pickle.dump(all_metrics_single, f)
 
-    # Save results to the output directory
-    os.makedirs(args.output, exist_ok=True)
-    with open(os.path.join(args.output, 'results.pkl'), 'wb') as f:
-        pickle.dump(results, f)
+    with open(os.path.join(args.output,'all_metrics_single.pkl'), 'rb') as f:
+        all_metrics_single = pickle.load(f)
+
+    # Compare metrics of each group with baseline group
+    print("Statistics on movement categories")
+    perform_statistical_analysis(all_metrics_single)
+
+    print("Statistics on augmentation and camera placement")
+    p_values = compare_metrics_with_none_group(all_metrics_single, default_camera='none')
+
+    p_values_df = pd.DataFrame.from_dict({(i, j): p_values[i][j]
+                                          for i in p_values.keys()
+                                          for j in range(len(p_values[i]))}, orient='index')
+    p_values_df.to_csv(os.path.join(args.output, 'p_values.csv'), index=True)
 
     print(f"Analysis complete. Results saved to {args.output}")
 
@@ -816,4 +956,4 @@ if __name__ == "__main__":
     main()
 
 # Example command
-# python statistics/recalculate_metrics.py /home/emanu/Desktop/multi/combined /statistics/multi_new
+# python statistics/recalculate_metrics.py /home/user/Desktop/multi/combined /statistics/multi_new

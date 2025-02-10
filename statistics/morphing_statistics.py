@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import ttest_ind, levene
+from scipy.stats import levene, wilcoxon
 from statsmodels.stats.multitest import multipletests
 import scipy.stats as stats
 import argparse
@@ -14,13 +14,43 @@ def calculate_pa_mpjpe(ground_truths, predictions):
     joint_errors = np.linalg.norm(ground_truths - predictions, axis=2)
     return joint_errors.mean(axis=1), joint_errors.std(axis=1), joint_errors
 
-def calculate_cohens_d(group1, group2):
-    """Calculate Cohen's d effect size."""
-    n1, n2 = len(group1), len(group2)
-    mean1, mean2 = group1.mean(), group2.mean()
-    std1, std2 = group1.std(ddof=1), group2.std(ddof=1)
-    pooled_std = np.sqrt(((n1 - 1) * std1**2 + (n2 - 1) * std2**2) / (n1 + n2 - 2))
-    return (mean1 - mean2) / pooled_std
+def calculate_rbc(differences):
+    """
+    Calculate the rank-biserial correlation (RBC) for paired differences.
+    Differences with a value of 0 are excluded.
+    """
+    valid = differences[differences != 0]
+    n_pos = np.sum(valid > 0)
+    n_neg = np.sum(valid < 0)
+    if (n_pos + n_neg) == 0:
+        return np.nan
+    return (n_pos - n_neg) / (n_pos + n_neg)
+
+
+def bootstrap_rbc(differences, n_bootstrap=1000, ci=95):
+    """
+    Compute a bootstrap confidence interval for the RBC.
+
+    Parameters:
+      differences : array of paired differences (excluding zeros)
+      n_bootstrap : number of bootstrap iterations (default 1000)
+      ci          : desired confidence level (default 95)
+
+    Returns:
+      lower, upper : the lower and upper bounds of the confidence interval.
+    """
+    valid = differences[differences != 0]
+    n = len(valid)
+    bootstrap_samples = []
+    for _ in range(n_bootstrap):
+        sample = np.random.choice(valid, size=n, replace=True)
+        n_pos = np.sum(sample > 0)
+        n_neg = np.sum(sample < 0)
+        if (n_pos + n_neg) > 0:
+            bootstrap_samples.append((n_pos - n_neg) / (n_pos + n_neg))
+    lower = np.percentile(bootstrap_samples, (100 - ci) / 2)
+    upper = np.percentile(bootstrap_samples, 100 - (100 - ci) / 2)
+    return lower, upper
 
 def load_data(ground_truth_path, hpe_path, prediction_path):
     """Load ground truths, HPE estimations, and predictions."""
@@ -62,16 +92,43 @@ def analyze_results(ground_truths, hpe_estimations, predictions, joint_names):
     print(f"Morphed Std PA-MPJPE: {morph_std.mean():.2f} mm")
     print(f"Improvement in Std PA-MPJPE: {std_improvement:.2f}%")
 
-    # Effect sizes (Cohen's d)
-    joint_effect_sizes = []
-    for i, joint_name in enumerate(joint_names):
-        orig_errors = orig_joint_errors[:, i]
-        morph_errors = morph_joint_errors[:, i]
-        d = calculate_cohens_d(orig_errors, morph_errors)
-        joint_effect_sizes.append({"Joint": joint_name, "Cohen's d": d})
+    # # Effect sizes (Cohen's d)
+    # joint_effect_sizes = []
+    # for i, joint_name in enumerate(joint_names):
+    #     orig_errors = orig_joint_errors[:, i]
+    #     morph_errors = morph_joint_errors[:, i]
+    #     d = calculate_cohens_d(orig_errors, morph_errors)
+    #     joint_effect_sizes.append({"Joint": joint_name, "Cohen's d": d})
+    # effect_size_df = pd.DataFrame(joint_effect_sizes)
+    # print("\nEffect Sizes (Cohen's d) for Joints:")
+    # print(effect_size_df)
 
-    effect_size_df = pd.DataFrame(joint_effect_sizes)
-    print("\nEffect Sizes (Cohen's d) for Joints:")
+    # Compute overall differences and rank-biserial correlation (RBC)
+    differences_overall = orig_mean - morph_mean
+    rbc_overall = calculate_rbc(differences_overall)
+    ci_lower_overall, ci_upper_overall = bootstrap_rbc(differences_overall, n_bootstrap=1000, ci=95)
+    print(f"\nOverall Rank-Biserial Correlation (RBC): {rbc_overall:.3f}")
+    print(f"95% Confidence Interval for RBC: ({ci_lower_overall:.3f}, {ci_upper_overall:.3f})")
+
+    # Wilcoxon Signed-Rank Test for Paired Data
+    stat, p_value = wilcoxon(orig_mean, morph_mean)
+    print(f"\nWilcoxon Signed-Rank Test for Mean PA-MPJPE Reduction:")
+    print(f"Statistic = {stat:.2f}, P-Value = {p_value:.3f}")
+
+    # Compute joint-wise RBC effect sizes and bootstrap confidence intervals
+    joint_effects = []
+    for i, joint_name in enumerate(joint_names):
+        differences_joint = orig_joint_errors[:, i] - morph_joint_errors[:, i]
+        rbc_joint = calculate_rbc(differences_joint)
+        ci_lower_joint, ci_upper_joint = bootstrap_rbc(differences_joint, n_bootstrap=1000, ci=95)
+        joint_effects.append({
+            "Joint": joint_name,
+            "RBC": rbc_joint,
+            "CI Lower": ci_lower_joint,
+            "CI Upper": ci_upper_joint
+        })
+    effect_size_df = pd.DataFrame(joint_effects)
+    print("\nJoint-wise Rank-Biserial Correlation (RBC) Effect Sizes and Confidence Intervals:")
     print(effect_size_df)
 
     # Levene's Test for Equality of Variances
@@ -79,11 +136,6 @@ def analyze_results(ground_truths, hpe_estimations, predictions, joint_names):
     equal_var = levene_p > 0.05
     print(f"\nLevene's Test: Statistic = {levene_stat:.2f}, p = {levene_p:.3f}")
     print("Variances are equal." if equal_var else "Variances are unequal.")
-
-    # Independent Samples t-test
-    t_stat, p_value = ttest_ind(orig_mean, morph_mean, equal_var=equal_var)
-    print(f"\nT-Test for Mean PA-MPJPE Reduction:")
-    print(f"T-Statistic = {t_stat:.2f}, P-Value = {p_value:.3f}")
 
     # Confidence Interval for Difference in Means
     se = np.sqrt(((orig_std.mean()**2) / sample_size) + ((morph_std.mean()**2) / sample_size))
@@ -98,8 +150,8 @@ def analyze_results(ground_truths, hpe_estimations, predictions, joint_names):
     joint_significance = []
     p_values = []
     for i, joint_name in enumerate(joint_names):
-        t_stat_joint, p_val_joint = ttest_ind(orig_joint_errors[:, i], morph_joint_errors[:, i], equal_var=False)
-        joint_significance.append({"Joint": joint_name, "T-Statistic": t_stat_joint, "P-Value": p_val_joint})
+        stat_joint, p_val_joint = wilcoxon(orig_joint_errors[:, i], morph_joint_errors[:, i])
+        joint_significance.append({"Joint": joint_name, "Statistic": stat_joint, "P-Value": p_val_joint})
         p_values.append(p_val_joint)
 
     # Apply Bonferroni correction
