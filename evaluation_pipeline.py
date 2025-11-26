@@ -428,7 +428,7 @@ class Framework:
                     gt_keypoints, pred_keypoints, error_count = align_procrustes_old(gt_keypoints_np, pred_keypoints)
                     error_count_all += error_count
 
-                    # Morph ground truth to format of predicted keypoints
+                    # Harmonize the predicted surface keypoints to match the anatomical joint center definitions of the ground truth.
                     pred_keypoints = self.apply_morphing(pred_keypoints)
 
                     # Add joint names
@@ -527,3 +527,4 @@ def sweep(model_type):
 
 if __name__ == "__main__":
     sweep(sys.argv[1])
+
