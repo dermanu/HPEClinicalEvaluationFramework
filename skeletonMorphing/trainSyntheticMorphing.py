@@ -224,9 +224,10 @@ def main():
                 Xtr.append(s["noisy"]); Ytr.append(G)
             Xtr = np.concatenate(Xtr); Ytr = np.concatenate(Ytr)
             morph = trainer(Xtr, Ytr, cfg)
+            lin_morph = train_affine(Xtr, Ytr)          # per-joint linear baseline (Rapczynski-style)
 
             # --- score each held-out participant ---
-            nr, rec, mi, mo = [], [], [], []
+            nr, rec, rec_lin, mi, mo = [], [], [], [], []
             for p in holdout:
                 base = parts[p][base_key]; G = parts[p]["G"]
                 s = build_streams(base, regime, args.lin_mm, args.nonlin_mm, args.sigma_mm,
@@ -237,6 +238,11 @@ def main():
                 mi.append(res["mpjpe_in"]); mo.append(res["mpjpe_out"])
                 if variant == "pure":
                     rec.append(res["recovery"].mean())
+                    # linear-baseline recovery on the SAME known offset (clean stream)
+                    sb = per_frame_offset_mag(s["clean"] - G)
+                    sa = per_frame_offset_mag(lin_morph(s["clean"]) - G)
+                    rl = 1 - np.divide(sa, sb, out=np.zeros_like(sa), where=sb > 1e-9)
+                    rec_lin.append(rl.mean())
                 # export for morphing_statistics.py (first held-out only)
                 if p == holdout[0]:
                     tag = f"{variant}_{regime}"
@@ -247,10 +253,14 @@ def main():
             row = dict(variant=variant, regime=regime,
                        noise_ratio=float(np.mean(nr)),
                        recovery=(float(np.mean(rec)) if rec else None),
+                       recovery_lin=(float(np.mean(rec_lin)) if rec_lin else None),
                        mpjpe_in=float(np.mean(mi)), mpjpe_out=float(np.mean(mo)))
             summary.append(row)
-            rec_str = f"{row['recovery']*100:5.1f}%" if row["recovery"] is not None else "  n/a "
-            print(f"{variant:<10} {regime:<10} | recovery {rec_str} | "
+            if row["recovery"] is not None:
+                rec_str = f"net {row['recovery']*100:5.1f}% vs lin {row['recovery_lin']*100:5.1f}%"
+            else:
+                rec_str = "recovery n/a (realistic)"
+            print(f"{variant:<10} {regime:<10} | {rec_str} | "
                   f"noise-ratio {row['noise_ratio']:.3f} | "
                   f"MPJPE {row['mpjpe_in']:.1f} -> {row['mpjpe_out']:.1f} mm")
 

@@ -154,10 +154,19 @@ def make_systematic(G, lin_mm, nonlin_mm, seed=0, model="anatomical", ref_pose=N
         dirs = _radial_dirs(ref)                        # (16,3) shared frozen directions
         linear = np.broadcast_to(dirs * (lin_mm * DISTALITY)[:, None], (N, N_JOINTS, 3))
 
-        flex = _flexion(G)                              # (N,16)
-        flex = flex - flex.mean(axis=0, keepdims=True)  # de-mean -> purely pose-varying
+        # nonlinear: radial offset whose MAGNITUDE follows joint flexion. Flexion is a
+        # nonlinear function of the parent/child joints, so a per-joint affine in the
+        # joint's OWN coordinates cannot reproduce it -> only a context-aware morpher can.
+        # De-meaned so it is PURELY pose-varying (a linear map's best constant fit gains
+        # nothing -> the baseline genuinely fails here), then normalised to ~unit std so
+        # nonlin_mm sets the ACTUAL amplitude. (Raw de-meaned flexion has std ~0.1, which
+        # silently shrank the offset ~10x and pushed it into the noise floor.)
+        flex = _flexion(G)                              # (N,16) in [0,1]
+        flex = flex - flex.mean(axis=0, keepdims=True)  # purely pose-varying
+        flex = flex / (flex.std(axis=0, keepdims=True) + 1e-6)   # unit std
+        flex = np.clip(flex, -3.0, 3.0)                 # tame rare outliers
         nonlinear = (dirs[None] * (nonlin_mm * DISTALITY)[None, :, None]
-                     * flex[:, :, None])                # (N,16,3)
+                     * flex[:, :, None])                # (N,16,3), substantial + pose-varying
         return linear + nonlinear
 
     elif model == "generic":
