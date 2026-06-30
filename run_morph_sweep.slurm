@@ -11,8 +11,8 @@
 export PYTHONNOUSERSITE=1
 module purge
 module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
-source ~/morphenv/bin/activate
-cd ~/HPEClinicalEvaluationFramework
+source /cluster/home/emanueal/morphenv/bin/activate
+cd /cluster/home/emanueal/Documents/HPEClinicalEvaluationFramework/HPEClinicalEvaluationFramework
 
 python -c "import torch; print('[device check] cuda available:', torch.cuda.is_available())"
 
